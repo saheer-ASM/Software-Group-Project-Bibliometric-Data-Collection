@@ -2,6 +2,8 @@
 
 📚 Bibliometric Data Collection Project
 
+<!-- hi this is shaith -->
+
 Welcome to the team! Follow this guide to set up the project on your computer and start contributing.
 
 
