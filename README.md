@@ -52,7 +52,7 @@ As you write code, save your progress locally:
 # git add .
 # git commit -m "Brief description of what you changed"
 
-
+#git commit -m dashboard 
 ================================================================================================
 
 
