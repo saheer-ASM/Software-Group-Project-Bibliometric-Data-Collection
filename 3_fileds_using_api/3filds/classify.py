@@ -927,4 +927,4 @@ def classify_csv(input_csv, output_csv):
         print("Processing complete. Output saved to", output_csv)
 
 if __name__ == "__main__":
-    classify_csv('input.csv', 'output.csv')
+    classify_csv('input0.csv', 'output0.csv')
