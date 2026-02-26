@@ -52,7 +52,7 @@ As you write code, save your progress locally:
 # git add .
 # git commit -m "Brief description of what you changed"
 
-
+#git commit -m dashboard 
 ================================================================================================
 
 
@@ -82,4 +82,3 @@ When your task is finished and tested:
 * 🔑 **Do not push** `.env` files (API keys).
 * ✅ **Always pull** before you start a new branch.
 
-**This was addded to check**
