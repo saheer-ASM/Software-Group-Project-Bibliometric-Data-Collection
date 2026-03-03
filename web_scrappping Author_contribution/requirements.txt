@@ -1,0 +1,16 @@
+# Core dependencies for Citation Analysis System
+playwright>=1.40.0
+pandas>=2.0.0
+openpyxl>=3.1.0
+python-dotenv>=1.0.0
+
+# Required for author_order_classifier.py (Crossref API + Excel output)
+requests>=2.31.0
+# Note: 'math' and 're' are Python built-in modules — no install needed
+
+# Optional dependencies
+matplotlib>=3.7.0
+
+# For development
+pytest>=7.4.0
+black>=23.0.0
