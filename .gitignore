@@ -91,5 +91,4 @@ logs/
 # *.json
 # *.xlsx
 
-
-research_classifier_output/
+vresearch_classifier_output/
