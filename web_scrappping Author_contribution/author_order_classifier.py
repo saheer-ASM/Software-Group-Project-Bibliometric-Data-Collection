@@ -1,35 +1,4 @@
-"""
-Author Order Classifier
-=======================
-Determines whether a journal uses ALPHABETICAL or CONTRIBUTION-BASED author ordering
-by analyzing a large sample of papers from that journal via the Crossref API.
 
-Pipeline:
-  Step 1 — Fetch paper metadata from Crossref API (by ISSN or journal name)
-  Step 2 — Normalize author family names (lowercase, remove punctuation)
-  Step 3 — For each paper, check if authors are in alphabetical order
-  Step 4 — Filter: only papers with >= 4 authors (reduces false positives)
-  Step 5 — Compute AlphabeticalRate = alphabetical_papers / eligible_papers
-  Step 6 — Classify journal using threshold rules
-  Step 7 — Export per-paper results + summary to a styled Excel file
-
-Classification Rules:
-  AlphabeticalRate >= 0.75  →  Alphabetical-dominant
-  AlphabeticalRate <= 0.25  →  Contribution-based
-  Otherwise                 →  Mixed / Unclear
-
-False Positive Probability (random ordering appearing alphabetical):
-  n=2  →  1/2  = 50.0%   (exclude)
-  n=3  →  1/6  ≈ 16.7%   (marginal)
-  n=4  →  1/24 ≈  4.2%   (include)
-  n=5  →  1/120 ≈ 0.8%   (strong evidence)
-  n=6+ →  <0.1%           (very strong evidence)
-
-Usage:
-  python author_order_classifier.py --issn 1234-5678 --max 500
-  python author_order_classifier.py --journal "Nature Communications" --max 300
-  python author_order_classifier.py   # interactive prompt
-"""
 
 import re
 import math
@@ -77,7 +46,7 @@ def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
         "filter": filter_str,
         "rows": rows_per_page,
         "select": "title,author,published-print,published-online,DOI,container-title",
-        "mailto": CONTACT_EMAIL,  # Crossref polite pool — faster responses
+        "mailto": CONTACT_EMAIL,  
     }
     if journal_name and not issn:
         base_params["query.container-title"] = journal_name
@@ -95,7 +64,7 @@ def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
             data = resp.json()
             items = data.get("message", {}).get("items", [])
             if not items:
-                print("  ℹ️  No more items returned.")
+                print("No more items returned.")
                 break
 
             for item in items:
@@ -124,7 +93,7 @@ def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
             print(f"  Fetched {len(papers)} papers so far...")
 
             if len(items) < rows_per_page:
-                break  # Last page — no more data
+                break  
 
         except requests.exceptions.Timeout:
             print("  ⚠️  Request timed out. Stopping fetch.")
@@ -137,7 +106,7 @@ def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
     return papers[:max_papers]
 
 
-# ── Step 2 & 3: Name normalisation & alphabetical check ─────────────────────
+
 
 def normalize_family_name(name: str) -> str:
     """
@@ -162,7 +131,7 @@ def is_alphabetical(authors: list) -> bool:
     for author in authors:
         family = author.get("family", "").strip()
         if not family:
-            return False  # Cannot determine ordering without family name
+            return False  
         family_names.append(normalize_family_name(family))
 
     return family_names == sorted(family_names)
@@ -178,7 +147,7 @@ def chance_probability(n: int) -> float:
     return 1.0 / math.factorial(n)
 
 
-# ── Step 4, 5 & 6: Journal-level aggregation & classification ───────────────
+
 
 def analyze_papers(papers: list, min_authors: int = 4):
     """
@@ -203,7 +172,7 @@ def analyze_papers(papers: list, min_authors: int = 4):
         authors = paper["authors"]
         n = len(authors)
 
-        # Filter: too few authors → high false-positive risk, skip
+        
         if n < min_authors:
             continue
 
@@ -212,8 +181,6 @@ def analyze_papers(papers: list, min_authors: int = 4):
         if alpha:
             alpha_count += 1
 
-        # Extra signal: check if "Author Contributions" keywords appear in title
-        # (Full-text would require separate scraping; this is a lightweight proxy)
         title_lower = paper["title"].lower()
         contrib_keywords = ["conceptualization", "methodology", "supervision",
                             "writing", "original draft", "review & editing"]
@@ -232,10 +199,10 @@ def analyze_papers(papers: list, min_authors: int = 4):
             "chance_prob":     round(chance_probability(n), 8),
         })
 
-    # Compute AlphabeticalRate
+   
     alpha_rate = alpha_count / total_eligible if total_eligible > 0 else 0.0
 
-    # Classification (Table 2 thresholds)
+
     if total_eligible < 20:
         conclusion = "Insufficient data"
         confidence = "Low"
@@ -263,7 +230,7 @@ def analyze_papers(papers: list, min_authors: int = 4):
     return paper_results, summary
 
 
-# ── Step 7: Export to Excel ──────────────────────────────────────────────────
+
 
 def save_to_excel(paper_results: list, summary: dict, journal_label: str):
     """
@@ -273,7 +240,7 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
     """
     wb = Workbook()
 
-    # ── Colour palette ──
+    
     dark_blue  = "1F4E79"
     mid_blue   = "366092"
     green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
@@ -290,9 +257,7 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
             cell.font = font
             cell.alignment = center_align
 
-    # ────────────────────────────────────────────────────────────────────────
-    # Sheet 1: Journal Summary
-    # ────────────────────────────────────────────────────────────────────────
+
     ws1 = wb.active
     ws1.title = "Journal Summary"
 
@@ -332,8 +297,8 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
     ws1.column_dimensions["A"].width = 38
     ws1.column_dimensions["B"].width = 35
 
-    # ── Classification legend table ──
-    ws1.append([])  # blank row
+  
+    ws1.append([]) 
     ws1.append(["AlphabeticalRate", "Classification", "Confidence Level"])
     make_header_style(ws1, ws1.max_row, mid_blue)
 
@@ -348,9 +313,7 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
         for col in range(1, 4):
             ws1.cell(row_idx, col).alignment = center_align
 
-    # ────────────────────────────────────────────────────────────────────────
-    # Sheet 2: Per-Paper Results
-    # ────────────────────────────────────────────────────────────────────────
+
     ws2 = wb.create_sheet("Per-Paper Results")
 
     paper_headers = [
@@ -382,7 +345,7 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
         ws2.append(row_data)
         row_idx = ws2.max_row
 
-        # Colour-code the "Is Alphabetical?" cell
+        
         cell = ws2.cell(row_idx, 8)
         cell.fill = green_fill if p["is_alphabetical"] else red_fill
         cell.font = Font(bold=True)
@@ -391,15 +354,17 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
         for col in range(1, len(paper_headers) + 1):
             ws2.cell(row_idx, col).alignment = top_align
 
-    # Column widths for Sheet 2
+  
     col_widths = [5, 30, 60, 30, 8, 10, 65, 16, 18]
     for col_idx, width in enumerate(col_widths, 1):
         letter = ws2.cell(1, col_idx).column_letter
         ws2.column_dimensions[letter].width = width
 
-    # ── Save ──
+   
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_label = re.sub(r"[^\w]", "_", journal_label)
+    
+    safe_label = safe_label[:80]
     filename = f"author_order_{safe_label}_{timestamp}.xlsx"
     wb.save(filename)
 
@@ -407,7 +372,7 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
     return filename
 
 
-# ── Main entry point ─────────────────────────────────────────────────────────
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -458,7 +423,7 @@ def main():
     print(f"  Min authors    : {args.min_authors}+")
     print(f"{'='*60}")
 
-    # Step 1 — Fetch
+    
     papers = fetch_papers_crossref(
         issn=args.issn,
         journal_name=args.journal,
@@ -469,10 +434,10 @@ def main():
         print("❌ No papers found. Check the ISSN or journal name.")
         return
 
-    # Steps 2–6 — Analyse
+   
     paper_results, summary = analyze_papers(papers, min_authors=args.min_authors)
 
-    # Print summary to console
+   
     print(f"\n{'='*60}")
     print(f"  RESULTS")
     print(f"{'='*60}")
@@ -485,9 +450,9 @@ def main():
     print(f"  Confidence                  : {summary['confidence']}")
     print(f"{'='*60}")
 
-    # Step 7 — Export
+   
     save_to_excel(paper_results, summary, journal_label)
 
 
 if __name__ == "__main__":
-    main()
+qqq    main()
