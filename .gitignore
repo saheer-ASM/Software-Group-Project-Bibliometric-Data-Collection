@@ -92,6 +92,3 @@ logs/
 # *.xlsx
 
 vresearch_classifier_output/
-*.pt
-*.safetensors
-checkpoint-*/
