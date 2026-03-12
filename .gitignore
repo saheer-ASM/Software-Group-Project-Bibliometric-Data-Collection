@@ -91,7 +91,5 @@ logs/
 # *.json
 # *.xlsx
 
-vresearch_classifier_output/
-*.pt
-*.safetensors
-checkpoint-*/
+
+research_classifier_output/
