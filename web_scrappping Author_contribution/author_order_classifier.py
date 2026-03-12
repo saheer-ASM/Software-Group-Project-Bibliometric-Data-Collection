@@ -1,22 +1,32 @@
 """
 Author Order Classifier
 =======================
-Determines whether a journal uses ALPHABETICAL or CONTRIBUTION-BASED author ordering
-by analyzing a large sample of papers from that journal via the Crossref API.
+Determines whether a journal uses ALPHABETICAL, CONTRIBUTION-BASED, or RANDOM author ordering
+by analyzing a large sample of papers from that journal via Crossref, Semantic Scholar, and/or Google Scholar.
 
 Pipeline:
-  Step 1 — Fetch paper metadata from Crossref API (by ISSN or journal name)
+  Step 0 — Field culture prior: map journal name keywords → expected ordering type
+  Step 1 — Fetch paper metadata from:
+           - Crossref API (by ISSN or journal name)
+           - Semantic Scholar API (optional supplement)
+           - Google Scholar (optional supplement)
   Step 2 — Normalize author family names (lowercase, remove punctuation)
-  Step 3 — For each paper, check if authors are in alphabetical order
+  Step 3 — For each paper, check if authors are in alphabetical order & classify
   Step 4 — Filter: only papers with >= 4 authors (reduces false positives)
   Step 5 — Compute AlphabeticalRate = alphabetical_papers / eligible_papers
-  Step 6 — Classify journal using threshold rules
+  Step 6 — Classify journal using threshold rules & categorize per-paper ordering
+  Step 6b — Optional full-text CRediT check: scrape paper HTML for Author Contributions keywords
   Step 7 — Export per-paper results + summary to a styled Excel file
 
-Classification Rules:
-  AlphabeticalRate >= 0.75  →  Alphabetical-dominant
-  AlphabeticalRate <= 0.25  →  Contribution-based
-  Otherwise                 →  Mixed / Unclear
+Author Order Classification (per-paper level):
+  - Alphabetical       : Authors sorted A→Z by family name
+  - Contribution-based : Authors NOT alphabetical (contribution order)
+  - Random             : Insufficient data or unclear pattern
+
+Journal-level Classification Rules (based on AlphabeticalRate):
+  AlphabeticalRate >= 0.75  →  ALPHABETICAL-DOMINANT (🔤)
+  AlphabeticalRate <= 0.25  →  CONTRIBUTION-BASED (👥)
+  Otherwise (26-74%)        →  RANDOM / MIXED order (🎲)
 
 False Positive Probability (random ordering appearing alphabetical):
   n=2  →  1/2  = 50.0%   (exclude)
@@ -26,8 +36,10 @@ False Positive Probability (random ordering appearing alphabetical):
   n=6+ →  <0.1%           (very strong evidence)
 
 Usage:
-  python author_order_classifier.py --issn 1234-5678 --max 500
-  python author_order_classifier.py --journal "Nature Communications" --max 300
+  python author_order_classifier.py --issn 1558-2566 --max 500
+  python author_order_classifier.py --journal "Nature Communications" --max 300 --check-fulltext
+  python author_order_classifier.py --journal "IEEE Transactions" --source all --max 200
+  python author_order_classifier.py --journal "Mathematics Review" --source google --max 100
   python author_order_classifier.py   # interactive prompt
 """
 
@@ -35,6 +47,8 @@ import re
 import math
 import argparse
 import os
+import time
+import random
 from datetime import datetime
 
 import requests
@@ -42,13 +56,223 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 from dotenv import load_dotenv
 
+# Try to import scholarly for Google Scholar support
+try:
+    from scholarly import scholarly
+    SCHOLARLY_AVAILABLE = True
+except ImportError:
+    SCHOLARLY_AVAILABLE = False
+    print("⚠️  scholarly library not installed. Google Scholar support disabled.")
+    print("   Install with: pip install scholarly")
+
 load_dotenv()
 
-CROSSREF_BASE = "https://api.crossref.org/works"
-CONTACT_EMAIL = os.getenv("contact_email", "researcher@example.com")
+CROSSREF_BASE          = "https://api.crossref.org/works"
+SEMANTIC_SCHOLAR_BASE  = "https://api.semanticscholar.org/graph/v1"
+CONTACT_EMAIL          = os.getenv("contact_email", "researcher@example.com")
 
 
-# ── Step 1: Fetch metadata from Crossref ────────────────────────────────────
+# ── Step 0a: Field Culture Map ───────────────────────────────────────────────
+# Keyword → expected author ordering convention (based on established academic norms)
+
+FIELD_CULTURE_MAP = {
+    "alphabetical": [
+        # Mathematics & Statistics
+        "mathematics", "mathematical", "math",
+        "annals of mathematics", "statistics", "statistical",
+        "probability", "stochastic",
+        # Economics & Finance
+        "economics", "econometrics", "econometric",
+        "finance", "financial", "journal of political economy",
+        "american economic review",
+        # Pure / Theoretical CS
+        "theoretical computer science", "theory of computing",
+        "combinatorics", "discrete mathematics",
+        # Logic & Pure Math
+        "logic", "algebra", "topology", "geometry", "analysis",
+        "operations research",
+    ],
+    "contribution": [
+        # Engineering & Networks
+        "engineering", "networking", "network", "networks",
+        "ieee transactions", "communications", "signal processing",
+        "wireless", "antenna", "radar", "sensors",
+        # Computer Science (applied)
+        "computer science", "software", "systems", "computing",
+        "security", "cybersecurity", "cyber", "information security",
+        "cryptography", "data mining", "database",
+        "machine learning", "deep learning", "artificial intelligence",
+        "computer vision", "natural language processing",
+        "robotics", "control systems", "automation",
+        # Electrical & Mechanical
+        "electrical", "mechanical", "civil", "chemical engineering",
+        "materials", "nanotechnology",
+        # Life Sciences & Medicine
+        "medicine", "medical", "biology", "clinical", "health",
+        "neuroscience", "bioinformatics", "genomics", "proteomics",
+        "oncology", "cardiology", "pharmacology",
+        # Physical Sciences
+        "physics", "chemistry", "astrophysics", "geophysics",
+    ],
+}
+
+
+# ── Step 0b: CRediT Author Contributions Keywords ────────────────────────────
+# Standardised CRediT taxonomy – if these appear in paper HTML → contribution-based culture
+
+CREDIT_KEYWORDS = [
+    "conceptualization",
+    "methodology",
+    "writing – original draft",
+    "writing - original draft",
+    "writing – review",
+    "writing - review",
+    "review & editing",
+    "review and editing",
+    "supervision",
+    "data curation",
+    "formal analysis",
+    "funding acquisition",
+    "investigation",
+    "project administration",
+    "resources",
+    "validation",
+    "visualization",
+    "author contributions",
+    "authors' contributions",
+    "contributions of authors",
+]
+
+
+# ── Step 0c: Field Culture Detection ────────────────────────────────────────
+
+def detect_field_culture(journal_name: str) -> dict:
+    """
+    Infer the expected author ordering convention from journal/field name keywords.
+
+    Returns a dict with:
+      field_type       : "Likely Contribution-based" | "Likely Alphabetical" | "Unknown"
+      matched_keyword  : the keyword that triggered the match (or None)
+      prior_confidence : "Medium" (keyword match) | "Low" (no match found)
+    """
+    name_lower = journal_name.lower()
+
+    for keyword in FIELD_CULTURE_MAP["contribution"]:
+        if keyword in name_lower:
+            return {
+                "field_type": "Likely Contribution-based",
+                "matched_keyword": keyword,
+                "prior_confidence": "Medium",
+            }
+
+    for keyword in FIELD_CULTURE_MAP["alphabetical"]:
+        if keyword in name_lower:
+            return {
+                "field_type": "Likely Alphabetical",
+                "matched_keyword": keyword,
+                "prior_confidence": "Medium",
+            }
+
+    return {
+        "field_type": "Unknown",
+        "matched_keyword": None,
+        "prior_confidence": "Low",
+    }
+
+
+# ── Step 1a: Fetch metadata from Google Scholar ──────────────────────────────
+
+def fetch_papers_google_scholar(journal_name: str, max_papers: int = 100) -> list:
+    """
+    Fetch paper metadata from Google Scholar using the scholarly library.
+    
+    This is a lightweight scraping-based approach that doesn't require an API key.
+    Note: Google Scholar may rate-limit or block requests. Use responsibly.
+
+    Parameters
+    ----------
+    journal_name : str — Journal name to search for
+    max_papers   : int — Maximum papers to fetch (default: 100)
+
+    Returns
+    -------
+    list of dicts with keys: doi, title, authors, year, journal, source
+    """
+    if not SCHOLARLY_AVAILABLE:
+        print("⚠️  scholarly library not available. Skipping Google Scholar fetch.")
+        return []
+
+    papers = []
+    
+    print(f"\n📡 [Google Scholar] Searching for papers (target: {max_papers} papers)...")
+    
+    try:
+        # Search for papers by journal name
+        search_query = scholarly.search_pubs(f'"{journal_name}"')
+        
+        for pub in search_query:
+            if len(papers) >= max_papers:
+                break
+            
+            try:
+                # Try to get full publication details
+                pub_details = pub
+                
+                # Extract authors with family names
+                authors = []
+                raw_authors = pub_details.get("author", [])
+                if isinstance(raw_authors, str):
+                    # Sometimes authors come as a comma-separated string
+                    author_names = raw_authors.split(" and ")
+                    for name in author_names:
+                        name = name.strip()
+                        if name:
+                            name_parts = name.split()
+                            if name_parts:
+                                family = name_parts[-1]
+                                given = " ".join(name_parts[:-1]) if len(name_parts) > 1 else ""
+                                authors.append({"family": family, "given": given})
+                elif isinstance(raw_authors, list):
+                    for author in raw_authors:
+                        if isinstance(author, str):
+                            name_parts = author.strip().split()
+                            if name_parts:
+                                family = name_parts[-1]
+                                given = " ".join(name_parts[:-1]) if len(name_parts) > 1 else ""
+                                authors.append({"family": family, "given": given})
+                
+                if not authors:
+                    continue  # Skip papers without author info
+                
+                paper_dict = {
+                    "doi":     pub_details.get("eprint", "N/A") or "N/A",
+                    "title":   pub_details.get("title", "N/A") or "N/A",
+                    "authors": authors,
+                    "year":    pub_details.get("pub_year"),
+                    "journal": pub_details.get("journal", "N/A") or "N/A",
+                    "source":  "GoogleScholar",
+                }
+                
+                papers.append(paper_dict)
+                print(f"  Fetched {len(papers)} papers so far...")
+                
+                # Polite delay to avoid rate-limiting
+                time.sleep(random.uniform(2, 5))
+                
+            except Exception as e:
+                # Skip papers that fail to parse
+                continue
+    
+    except Exception as e:
+        print(f"  ⚠️  Google Scholar error: {e}")
+        print("  This is normal if Google Scholar is blocking requests.")
+        return []
+    
+    print(f"✅ Google Scholar: {len(papers)} papers fetched.")
+    return papers[:max_papers]
+
+
+# ── Step 1b: Fetch metadata from Crossref ────────────────────────────────────
 
 def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
     """
@@ -56,13 +280,13 @@ def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
 
     Parameters
     ----------
-    issn        : str  — Journal ISSN (e.g. "1476-4687")
+    issn        : str  — Journal ISSN (e.g. "1558-2566" for IEEE Trans. Networking)
     journal_name: str  — Journal name keyword (used if no ISSN provided)
     max_papers  : int  — Maximum number of papers to fetch
 
     Returns
     -------
-    list of dicts with keys: doi, title, authors, year
+    list of dicts with keys: doi, title, authors, year, journal, source
     """
     papers = []
     rows_per_page = 100
@@ -82,20 +306,20 @@ def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
     if journal_name and not issn:
         base_params["query.container-title"] = journal_name
 
-    print(f"\n📡 Fetching papers from Crossref (target: {max_papers} papers)...")
+    print(f"\n📡 [Crossref] Fetching papers (target: {max_papers} papers)...")
 
     while len(papers) < max_papers:
         params = {**base_params, "offset": offset}
         try:
             resp = requests.get(CROSSREF_BASE, params=params, timeout=20)
             if resp.status_code != 200:
-                print(f"  ⚠️  Crossref returned HTTP {resp.status_code}, stopping.")
+                print(f"    Crossref returned HTTP {resp.status_code}, stopping.")
                 break
 
             data = resp.json()
             items = data.get("message", {}).get("items", [])
             if not items:
-                print("  ℹ️  No more items returned.")
+                print("  No more items returned.")
                 break
 
             for item in items:
@@ -103,12 +327,10 @@ def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
                 if not authors:
                     continue
 
-                # Get publication year
                 pub_date = item.get("published-print") or item.get("published-online") or {}
                 year_parts = pub_date.get("date-parts", [[None]])
                 year = year_parts[0][0] if year_parts and year_parts[0] else None
 
-                # Get journal name
                 container = item.get("container-title", [])
                 journal = container[0] if container else "N/A"
 
@@ -118,6 +340,7 @@ def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
                     "authors": authors,
                     "year":    year,
                     "journal": journal,
+                    "source":  "Crossref",
                 })
 
             offset += rows_per_page
@@ -133,11 +356,147 @@ def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
             print(f"  ⚠️  Error: {e}")
             break
 
-    print(f"✅ Total papers fetched: {len(papers)}")
+    print(f"✅ Crossref: {len(papers)} papers fetched.")
     return papers[:max_papers]
 
 
-# ── Step 2 & 3: Name normalisation & alphabetical check ─────────────────────
+# ── Step 1c: Fetch metadata from Semantic Scholar ────────────────────────────
+
+def fetch_papers_semantic_scholar(journal_name: str, max_papers: int = 200) -> list:
+    """
+    Fetch paper metadata from the Semantic Scholar API as a supplement to Crossref.
+
+    Uses the /paper/search endpoint with a journal name query.
+    Fields: title, authors, year, externalIds (for DOI), venue
+
+    Parameters
+    ----------
+    journal_name : str — Journal name to query
+    max_papers   : int — Maximum papers to fetch
+
+    Returns
+    -------
+    list of dicts with keys: doi, title, authors, year, journal, source
+    """
+    papers = []
+    fields = "title,authors,year,externalIds,venue"
+    limit = min(100, max_papers)
+    offset = 0
+
+    print(f"\n📡 [Semantic Scholar] Fetching papers (target: {max_papers} papers)...")
+
+    while len(papers) < max_papers:
+        try:
+            params = {
+                "query": journal_name,
+                "fields": fields,
+                "limit": limit,
+                "offset": offset,
+            }
+            resp = requests.get(
+                f"{SEMANTIC_SCHOLAR_BASE}/paper/search",
+                params=params,
+                timeout=20,
+                headers={"User-Agent": f"AuthorOrderClassifier/1.0 (mailto:{CONTACT_EMAIL})"},
+            )
+
+            if resp.status_code == 429:
+                wait = int(resp.headers.get("Retry-After", 15))
+                print(f"  Rate-limited. Waiting {wait}s...")
+                time.sleep(wait)
+                continue
+
+            if resp.status_code != 200:
+                print(f"    Semantic Scholar returned HTTP {resp.status_code}, stopping.")
+                break
+
+            data = resp.json()
+            items = data.get("data", [])
+            if not items:
+                print("  No more items from Semantic Scholar.")
+                break
+
+            for item in items:
+                raw_authors = item.get("authors", [])
+                if not raw_authors:
+                    continue
+
+                # Semantic Scholar gives {"authorId": ..., "name": "First Last"}
+                # Convert to Crossref-style {"family": ..., "given": ...}
+                authors = []
+                for a in raw_authors:
+                    name_parts = a.get("name", "").strip().split()
+                    if name_parts:
+                        family = name_parts[-1]
+                        given = " ".join(name_parts[:-1]) if len(name_parts) > 1 else ""
+                        authors.append({"family": family, "given": given})
+
+                external_ids = item.get("externalIds") or {}
+                doi = external_ids.get("DOI", "N/A")
+
+                papers.append({
+                    "doi":     doi,
+                    "title":   item.get("title", "N/A") or "N/A",
+                    "authors": authors,
+                    "year":    item.get("year"),
+                    "journal": item.get("venue", "N/A") or "N/A",
+                    "source":  "SemanticScholar",
+                })
+
+            offset += len(items)
+            print(f"  Fetched {len(papers)} papers so far...")
+
+            if len(items) < limit:
+                break
+
+            time.sleep(1)  # polite delay — Semantic Scholar has rate limits
+
+        except requests.exceptions.Timeout:
+            print("    Semantic Scholar request timed out.")
+            break
+        except Exception as e:
+            print(f"    Semantic Scholar error: {e}")
+            break
+
+    print(f" Semantic Scholar: {len(papers)} papers fetched.")
+    return papers[:max_papers]
+
+
+# ── Step 1d: Author Contributions full-text detection ────────────────────────
+
+def check_author_contributions_html(doi: str) -> bool:
+    """
+    Fetch the paper's landing page via DOI and search for CRediT taxonomy keywords.
+
+    Returns True  if ≥ 2 CRediT keywords found (strong signal of contribution-based culture).
+    Returns False if insufficient keywords or the fetch fails.
+    """
+    if not doi or doi == "N/A":
+        return False
+
+    try:
+        url = f"https://doi.org/{doi}"
+        headers = {
+            "User-Agent": (
+                f"AuthorOrderClassifier/1.0 "
+                f"(mailto:{CONTACT_EMAIL}; academic research bot)"
+            ),
+            "Accept": "text/html,application/xhtml+xml",
+        }
+        resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+
+        if resp.status_code != 200:
+            return False
+
+        html_lower = resp.text.lower()
+        matched = [kw for kw in CREDIT_KEYWORDS if kw.lower() in html_lower]
+        return len(matched) >= 2  # ≥ 2 keywords = confident CRediT section present
+
+    except Exception:
+        return False
+
+
+# ── Step 2 & 3: Name normalisation & alphabetical check ──────────────────────
 
 def normalize_family_name(name: str) -> str:
     """
@@ -175,19 +534,79 @@ def chance_probability(n: int) -> float:
 
     This quantifies the false-positive risk per paper.
     """
-    return 1.0 / math.factorial(n)
+    # For large n, factorial becomes huge and overflows float conversion
+    # For n >= 20, probability is effectively 0 (< 2.4e-19)
+    if n > 20:
+        return 1e-20  # Essentially zero probability
+    try:
+        return 1.0 / math.factorial(n)
+    except (OverflowError, ValueError):
+        return 1e-20  # Fallback for edge cases
 
 
-# ── Step 4, 5 & 6: Journal-level aggregation & classification ───────────────
+# ── Step 3a: Classify individual paper author ordering ─────────────────────
 
-def analyze_papers(papers: list, min_authors: int = 4):
+def classify_paper_author_order(authors: list) -> dict:
+    """
+    Classify a single paper's author ordering as:
+    - "Alphabetical"       : Authors are sorted A→Z by family name
+    - "Contribution-based" : Authors are NOT alphabetically sorted (contribution order)
+    - "Random"             : Unable to determine order confidently
+
+    Returns a dict with:
+      classification    : one of above three categories
+      is_alphabetical   : boolean (True if A→Z sorted)
+      confidence_score  : float between 0 and 1
+      interpretation    : human-readable explanation
+    """
+    n = len(authors)
+    
+    if n < 4:
+        return {
+            "classification": "Random",
+            "is_alphabetical": False,
+            "confidence_score": 0.0,
+            "interpretation": "Insufficient authors (< 4) to classify reliably"
+        }
+    
+    # Check if alphabetical
+    is_alpha = is_alphabetical(authors)
+    
+    # Calculate confidence based on probability
+    false_positive_prob = chance_probability(n)
+    
+    if is_alpha:
+        # If alphabetical, confidence increases with author count (lower false-positive risk)
+        confidence = 1.0 - false_positive_prob
+        interpretation = "Authors are in alphabetical order → Likely ALPHABETICAL-culture journal"
+    else:
+        # Not alphabetical → likely contribution-based
+        confidence = 0.85 if n >= 6 else 0.70
+        interpretation = "Authors are NOT alphabetically ordered → Likely CONTRIBUTION-based culture journal"
+    
+    classification = "Alphabetical" if is_alpha else "Contribution-based"
+    
+    return {
+        "classification": classification,
+        "is_alphabetical": is_alpha,
+        "confidence_score": round(confidence, 3),
+        "interpretation": interpretation
+    }
+
+
+# ── Steps 4, 5 & 6: Journal-level aggregation & classification ───────────────
+
+def analyze_papers(papers: list, min_authors: int = 4,
+                   check_fulltext: bool = False, fulltext_sample: int = 30):
     """
     Compute per-paper alphabetical flags and aggregate journal-level statistics.
 
     Parameters
     ----------
-    papers      : list — output of fetch_papers_crossref()
-    min_authors : int  — minimum author count to include a paper (default: 4)
+    papers          : list — output of fetch_papers_*()
+    min_authors     : int  — minimum author count to include a paper (default: 4)
+    check_fulltext  : bool — if True, sample papers and check HTML for CRediT keywords
+    fulltext_sample : int  — number of papers to sample for full-text check
 
     Returns
     -------
@@ -197,7 +616,19 @@ def analyze_papers(papers: list, min_authors: int = 4):
     paper_results = []
     alpha_count = 0
     total_eligible = 0
-    author_contributions_hints = 0
+    credit_section_hits = 0
+    credit_checked = 0
+
+    # Decide which DOIs to check for full-text CRediT
+    dois_to_check = set()
+    if check_fulltext:
+        eligible_dois = [
+            p["doi"] for p in papers
+            if len(p["authors"]) >= min_authors and p["doi"] != "N/A"
+        ]
+        sample_size = min(fulltext_sample, len(eligible_dois))
+        dois_to_check = set(random.sample(eligible_dois, sample_size))
+        print(f"\n🔍 Full-text CRediT check: sampling {len(dois_to_check)} papers...")
 
     for paper in papers:
         authors = paper["authors"]
@@ -212,30 +643,45 @@ def analyze_papers(papers: list, min_authors: int = 4):
         if alpha:
             alpha_count += 1
 
-        # Extra signal: check if "Author Contributions" keywords appear in title
-        # (Full-text would require separate scraping; this is a lightweight proxy)
-        title_lower = paper["title"].lower()
-        contrib_keywords = ["conceptualization", "methodology", "supervision",
-                            "writing", "original draft", "review & editing"]
-        has_contrib_hint = any(kw in title_lower for kw in contrib_keywords)
-        if has_contrib_hint:
-            author_contributions_hints += 1
+        # Get detailed paper classification
+        paper_classification = classify_paper_author_order(authors)
+
+        # Full-text CRediT check (only for sampled DOIs)
+        has_credit = None
+        if check_fulltext and paper["doi"] in dois_to_check:
+            credit_checked += 1
+            has_credit = check_author_contributions_html(paper["doi"])
+            if has_credit:
+                credit_section_hits += 1
+            print(
+                f"  [{credit_checked}/{len(dois_to_check)}] "
+                f"{paper['doi'][:35]}... → "
+                f"{' CRediT found' if has_credit else ' No CRediT'}"
+            )
+            time.sleep(random.uniform(1.5, 3.0))  # polite delay
 
         paper_results.append({
-            "doi":             paper["doi"],
-            "title":           paper["title"],
-            "journal":         paper["journal"],
-            "year":            paper["year"],
-            "num_authors":     n,
-            "author_names":    " | ".join(a.get("family", "?") for a in authors),
-            "is_alphabetical": alpha,
-            "chance_prob":     round(chance_probability(n), 8),
+            "doi":                     paper["doi"],
+            "title":                   paper["title"],
+            "journal":                 paper["journal"],
+            "year":                    paper["year"],
+            "num_authors":             n,
+            "author_names":            " | ".join(a.get("family", "?") for a in authors),
+            "is_alphabetical":         alpha,
+            "author_order_classification": paper_classification["classification"],
+            "author_order_confidence":    paper_classification["confidence_score"],
+            "chance_prob":             round(chance_probability(n), 8),
+            "source":                  paper.get("source", "N/A"),
+            "has_credit_section":      has_credit,  # True / False / None (not checked)
         })
 
     # Compute AlphabeticalRate
     alpha_rate = alpha_count / total_eligible if total_eligible > 0 else 0.0
 
-    # Classification (Table 2 thresholds)
+    # CRediT section rate
+    credit_rate = credit_section_hits / credit_checked if credit_checked > 0 else None
+
+    # Classification (threshold rules)
     if total_eligible < 20:
         conclusion = "Insufficient data"
         confidence = "Low"
@@ -258,17 +704,21 @@ def analyze_papers(papers: list, min_authors: int = 4):
         "conclusion":                conclusion,
         "confidence":                confidence,
         "min_authors_filter":        min_authors,
+        "credit_checked":            credit_checked,
+        "credit_section_hits":       credit_section_hits,
+        "credit_rate":               round(credit_rate, 4) if credit_rate is not None else None,
     }
 
     return paper_results, summary
 
 
-# ── Step 7: Export to Excel ──────────────────────────────────────────────────
+# ── Step 7: Export to Excel ───────────────────────────────────────────────────
 
-def save_to_excel(paper_results: list, summary: dict, journal_label: str):
+def save_to_excel(paper_results: list, summary: dict, journal_label: str,
+                  field_culture: dict = None):
     """
     Save analysis results to a styled Excel file with two sheets:
-      Sheet 1 — Journal Summary (classification result)
+      Sheet 1 — Journal Summary  (statistical result + field culture prior + CRediT signal)
       Sheet 2 — Per-Paper Results (one row per paper)
     """
     wb = Workbook()
@@ -276,9 +726,10 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
     # ── Colour palette ──
     dark_blue  = "1F4E79"
     mid_blue   = "366092"
-    green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    red_fill   = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    green_fill  = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    red_fill    = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
     yellow_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+    blue_fill   = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
     center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
     top_align    = Alignment(vertical="top", wrap_text=True)
 
@@ -290,9 +741,9 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
             cell.font = font
             cell.alignment = center_align
 
-    # ────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     # Sheet 1: Journal Summary
-    # ────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     ws1 = wb.active
     ws1.title = "Journal Summary"
 
@@ -303,7 +754,7 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
     if conclusion == "Contribution-based":
         result_fill = green_fill
     elif conclusion == "Alphabetical-dominant":
-        result_fill = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
+        result_fill = blue_fill
     else:
         result_fill = yellow_fill
 
@@ -315,32 +766,98 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
         ("Alphabetical Papers",               summary["alphabetical_papers"]),
         ("Contribution-based Papers",         summary["contribution_based_papers"]),
         ("AlphabeticalRate",                  f"{summary['alphabetical_rate']:.2%}"),
-        ("Conclusion",                        conclusion),
+        ("Conclusion (Statistical)",          conclusion),
         ("Confidence",                        summary["confidence"]),
     ]
 
     for metric, value in summary_rows:
         ws1.append([metric, value])
         row_idx = ws1.max_row
-        if metric in ("Conclusion", "Confidence", "AlphabeticalRate"):
+        if metric in ("Conclusion (Statistical)", "Confidence", "AlphabeticalRate"):
             for col in [1, 2]:
                 ws1.cell(row_idx, col).fill = result_fill
                 ws1.cell(row_idx, col).font = Font(bold=True, size=11)
         for col in [1, 2]:
             ws1.cell(row_idx, col).alignment = center_align
 
-    ws1.column_dimensions["A"].width = 38
-    ws1.column_dimensions["B"].width = 35
+    # ── Section 2: Field Culture Prior Signal ──
+    ws1.append([])
+    ws1.append(["── Field Culture Prior Signal ──", ""])
+    make_header_style(ws1, ws1.max_row, "5B9BD5")
 
-    # ── Classification legend table ──
-    ws1.append([])  # blank row
+    if field_culture:
+        ft = field_culture["field_type"]
+        fc_fill = (
+            green_fill if "Contribution" in ft
+            else blue_fill if "Alphabetical" in ft
+            else yellow_fill
+        )
+        field_rows = [
+            ("Field Culture (Prior)",    ft),
+            ("Matched Keyword",          field_culture.get("matched_keyword") or "None"),
+            ("Prior Confidence",         field_culture["prior_confidence"]),
+            ("Interpretation",           (
+                "1st author = main contributor; last author may be PI/supervisor"
+                if "Contribution" in ft
+                else "Author list likely sorted A→Z by family name"
+                if "Alphabetical" in ft
+                else "No strong prior — rely on statistical analysis"
+            )),
+        ]
+        for metric, value in field_rows:
+            ws1.append([metric, value])
+            row_idx = ws1.max_row
+            if metric == "Field Culture (Prior)":
+                for col in [1, 2]:
+                    ws1.cell(row_idx, col).fill = fc_fill
+                    ws1.cell(row_idx, col).font = Font(bold=True, size=11)
+            for col in [1, 2]:
+                ws1.cell(row_idx, col).alignment = center_align
+
+    # ── Section 3: Author Contributions (CRediT) Signal ──
+    ws1.append([])
+    ws1.append(["── Author Contributions (CRediT) Signal ──", ""])
+    make_header_style(ws1, ws1.max_row, "70AD47")
+
+    credit_rate = summary.get("credit_rate")  # float or None
+    if credit_rate is not None:
+        credit_rate_display = f"{credit_rate:.2%}"
+        credit_signal = (
+            "Contribution-based (CRediT section present)"
+            if credit_rate >= 0.5
+            else "Likely NOT CRediT culture (low CRediT rate)"
+        )
+        credit_signal_fill = green_fill if credit_rate >= 0.5 else red_fill
+    else:
+        credit_rate_display = "Not checked"
+        credit_signal = "Run with --check-fulltext to enable"
+        credit_signal_fill = yellow_fill
+
+    credit_rows = [
+        ("Papers Sampled for Full-text Check",  summary.get("credit_checked", 0)),
+        ("Papers with CRediT Section Found",    summary.get("credit_section_hits", 0)),
+        ("CRediT Section Rate",                 credit_rate_display),
+        ("CRediT Signal",                       credit_signal),
+    ]
+    for metric, value in credit_rows:
+        ws1.append([metric, value])
+        row_idx = ws1.max_row
+        if metric == "CRediT Signal":
+            for col in [1, 2]:
+                ws1.cell(row_idx, col).fill = credit_signal_fill
+                ws1.cell(row_idx, col).font = Font(bold=True, size=11)
+        for col in [1, 2]:
+            ws1.cell(row_idx, col).alignment = center_align
+
+    # ── Classification legend ──
+    ws1.append([])
     ws1.append(["AlphabeticalRate", "Classification", "Confidence Level"])
     make_header_style(ws1, ws1.max_row, mid_blue)
 
     legend = [
-        ("≥ 75%",       "Alphabetical-dominant", "High (if ≥ 100 papers)"),
-        ("26% – 74%",   "Mixed / Unclear",        "Low"),
-        ("≤ 25%",       "Contribution-based",     "High (if ≥ 100 papers)"),
+        ("≥ 75%",       "ALPHABETICAL-dominant", "High (if ≥ 100 papers)"),
+        ("26% – 74%",   "RANDOM / MIXED order",   "Low (inconclusive)"),
+        ("≤ 25%",       "CONTRIBUTION-based",     "High (if ≥ 100 papers)"),
     ]
     for row_data in legend:
         ws1.append(list(row_data))
@@ -348,9 +865,13 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
         for col in range(1, 4):
             ws1.cell(row_idx, col).alignment = center_align
 
-    # ────────────────────────────────────────────────────────────────────────
+    ws1.column_dimensions["A"].width = 42
+    ws1.column_dimensions["B"].width = 40
+    ws1.column_dimensions["C"].width = 25
+
+    # ─────────────────────────────────────────────────────────────────────────
     # Sheet 2: Per-Paper Results
-    # ────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     ws2 = wb.create_sheet("Per-Paper Results")
 
     paper_headers = [
@@ -362,12 +883,24 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
         "# Authors",
         "Author Family Names (in order)",
         "Is Alphabetical?",
+        "Classification",
+        "Confidence Score",
         "Chance Prob (1/n!)",
+        "Data Source",
+        "CRediT Section?",
     ]
     ws2.append(paper_headers)
     make_header_style(ws2, 1, mid_blue)
 
     for i, p in enumerate(paper_results, 1):
+        credit_val = p.get("has_credit_section")
+        if credit_val is True:
+            credit_display = "Yes"
+        elif credit_val is False:
+            credit_display = "No"
+        else:
+            credit_display = "Not checked"
+
         row_data = [
             i,
             p["doi"],
@@ -377,22 +910,47 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
             p["num_authors"],
             p["author_names"],
             "Yes" if p["is_alphabetical"] else "No",
+            p.get("author_order_classification", "Random"),
+            p.get("author_order_confidence", 0.0),
             p["chance_prob"],
+            p.get("source", "N/A"),
+            credit_display,
         ]
         ws2.append(row_data)
         row_idx = ws2.max_row
 
-        # Colour-code the "Is Alphabetical?" cell
+        # Colour-code "Is Alphabetical?" column
         cell = ws2.cell(row_idx, 8)
         cell.fill = green_fill if p["is_alphabetical"] else red_fill
         cell.font = Font(bold=True)
         cell.alignment = center_align
 
+        # Colour-code "Classification" column
+        classification = p.get("author_order_classification", "Random")
+        class_cell = ws2.cell(row_idx, 9)
+        if classification == "Alphabetical":
+            class_cell.fill = blue_fill
+            class_cell.font = Font(bold=True, color="FFFFFF")
+        elif classification == "Contribution-based":
+            class_cell.fill = green_fill
+            class_cell.font = Font(bold=True, color="FFFFFF")
+        else:
+            class_cell.fill = yellow_fill
+            class_cell.font = Font(bold=True)
+        class_cell.alignment = center_align
+
+        # Colour-code CRediT column
+        credit_cell = ws2.cell(row_idx, 13)
+        if credit_display == "Yes":
+            credit_cell.fill = green_fill
+            credit_cell.font = Font(bold=True)
+        elif credit_display == "No":
+            credit_cell.fill = red_fill
+
         for col in range(1, len(paper_headers) + 1):
             ws2.cell(row_idx, col).alignment = top_align
 
-    # Column widths for Sheet 2
-    col_widths = [5, 30, 60, 30, 8, 10, 65, 16, 18]
+    col_widths = [5, 30, 60, 30, 8, 10, 65, 16, 20, 15, 18, 15, 14]
     for col_idx, width in enumerate(col_widths, 1):
         letter = ws2.cell(1, col_idx).column_letter
         ws2.column_dimensions[letter].width = width
@@ -407,19 +965,19 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str):
     return filename
 
 
-# ── Main entry point ─────────────────────────────────────────────────────────
+# ── Main entry point ──────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Classify journal author ordering (alphabetical vs contribution-based) "
-            "by analysing papers via the Crossref API."
+            "Classify journal author ordering (Alphabetical vs Contribution-based vs Random) "
+            "by analysing papers via Crossref, Semantic Scholar, and/or Google Scholar APIs."
         )
     )
     parser.add_argument(
         "--issn",
         type=str,
-        help="Journal ISSN (e.g., 1476-4687 for Nature)"
+        help="Journal ISSN (e.g., 1558-2566 for IEEE Trans. on Networking)"
     )
     parser.add_argument(
         "--journal",
@@ -438,6 +996,23 @@ def main():
         default=4,
         help="Minimum authors per paper to include (default: 4)"
     )
+    parser.add_argument(
+        "--source",
+        choices=["crossref", "semantic", "google", "both", "all"],
+        default="crossref",
+        help="Data source: crossref (default) | semantic | google | both (crossref+semantic) | all (all three)"
+    )
+    parser.add_argument(
+        "--check-fulltext",
+        action="store_true",
+        help="Sample paper HTML pages and check for CRediT Author Contributions keywords"
+    )
+    parser.add_argument(
+        "--fulltext-sample",
+        type=int,
+        default=30,
+        help="Number of papers to sample for full-text CRediT check (default: 30)"
+    )
     args = parser.parse_args()
 
     if not args.issn and not args.journal:
@@ -453,40 +1028,104 @@ def main():
 
     print(f"\n{'='*60}")
     print(f"  Author Order Classifier")
-    print(f"  Journal  : {journal_label}")
+    print(f"  Journal        : {journal_label}")
     print(f"  Max papers     : {args.max}")
     print(f"  Min authors    : {args.min_authors}+")
+    print(f"  Source         : {args.source}")
+    print(f"  Full-text check: {'Yes' if args.check_fulltext else 'No'}")
     print(f"{'='*60}")
 
-    # Step 1 — Fetch
-    papers = fetch_papers_crossref(
-        issn=args.issn,
-        journal_name=args.journal,
-        max_papers=args.max,
-    )
+    # ── Step 0: Field Culture Prior ──
+    field_culture = detect_field_culture(journal_label)
+    print(f"\n Field Culture Prior  : {field_culture['field_type']}")
+    if field_culture["matched_keyword"]:
+        print(f"   Matched keyword    : '{field_culture['matched_keyword']}'")
+    print(f"   Prior confidence   : {field_culture['prior_confidence']}")
+
+    # ── Step 1: Fetch papers ──
+    papers = []
+
+    if args.source in ("crossref", "both", "all"):
+        crossref_papers = fetch_papers_crossref(
+            issn=args.issn,
+            journal_name=args.journal,
+            max_papers=args.max,
+        )
+        papers.extend(crossref_papers)
+
+    if args.source in ("semantic", "both", "all"):
+        sem_max = args.max if args.source == "semantic" else max(100, args.max // 3)
+        sem_papers = fetch_papers_semantic_scholar(
+            journal_name=journal_label,
+            max_papers=sem_max,
+        )
+        # Deduplicate by DOI before merging
+        existing_dois = {p["doi"] for p in papers if p["doi"] != "N/A"}
+        new_papers = [p for p in sem_papers if p["doi"] not in existing_dois]
+        papers.extend(new_papers)
+        print(f"  Added {len(new_papers)} unique papers from Semantic Scholar.")
+
+    if args.source in ("google", "all"):
+        google_max = args.max if args.source == "google" else max(50, args.max // 5)
+        google_papers = fetch_papers_google_scholar(
+            journal_name=journal_label,
+            max_papers=google_max,
+        )
+        # Deduplicate by DOI before merging
+        existing_dois = {p["doi"] for p in papers if p["doi"] != "N/A"}
+        new_papers = [p for p in google_papers if p["doi"] not in existing_dois]
+        papers.extend(new_papers)
+        print(f"  Added {len(new_papers)} unique papers from Google Scholar.")
 
     if not papers:
-        print("❌ No papers found. Check the ISSN or journal name.")
+        print(" No papers found. Check the ISSN or journal name.")
         return
 
-    # Steps 2–6 — Analyse
-    paper_results, summary = analyze_papers(papers, min_authors=args.min_authors)
+    # ── Steps 2–6: Analyse ──
+    paper_results, summary = analyze_papers(
+        papers,
+        min_authors=args.min_authors,
+        check_fulltext=args.check_fulltext,
+        fulltext_sample=args.fulltext_sample,
+    )
 
-    # Print summary to console
+    # ── Print summary to console ──
+    credit_rate = summary.get("credit_rate")
+    
+    # Determine order classification
+    alpha_rate = summary["alphabetical_rate"]
+    if alpha_rate >= 0.75:
+        order_type = "ALPHABETICAL-DOMINANT"
+        order_emoji = "🔤"
+    elif alpha_rate <= 0.25:
+        order_type = "CONTRIBUTION-BASED"
+        order_emoji = "👥"
+    else:
+        order_type = "RANDOM / MIXED"
+        order_emoji = "🎲"
+    
     print(f"\n{'='*60}")
-    print(f"  RESULTS")
+    print(f"  RESULTS: AUTHOR ORDERING CLASSIFICATION")
     print(f"{'='*60}")
-    print(f"  Total papers fetched        : {summary['total_papers_fetched']}")
-    print(f"  Eligible papers (≥{args.min_authors} authors) : {summary['eligible_papers']}")
-    print(f"  Alphabetical papers         : {summary['alphabetical_papers']}")
-    print(f"  Contribution-based papers   : {summary['contribution_based_papers']}")
-    print(f"  AlphabeticalRate            : {summary['alphabetical_rate']:.2%}")
-    print(f"  Conclusion                  : {summary['conclusion']}")
-    print(f"  Confidence                  : {summary['confidence']}")
+    print(f"  Total papers fetched          : {summary['total_papers_fetched']}")
+    print(f"  Eligible papers (≥{args.min_authors} authors)  : {summary['eligible_papers']}")
+    print(f"  Alphabetical papers           : {summary['alphabetical_papers']}")
+    print(f"  Contribution-based papers     : {summary['contribution_based_papers']}")
+    print(f"  AlphabeticalRate              : {summary['alphabetical_rate']:.2%}")
+    print(f"  ─────────────────────────────────────────────────")
+    print(f"  {order_emoji} CLASSIFICATION         : {order_type}")
+    print(f"  Confidence                    : {summary['confidence']}")
+    print(f"  ─────────────────────────────────────────────────")
+    print(f"  Field Culture Prior           : {field_culture['field_type']}")
+    print(f"  Prior Confidence              : {field_culture['prior_confidence']}")
+    if args.check_fulltext:
+        print(f"  CRediT Section Rate           : "
+              f"{credit_rate:.2%}" if isinstance(credit_rate, float)
+              else f"  CRediT Section Rate           : N/A")
     print(f"{'='*60}")
 
-    # Step 7 — Export
-    save_to_excel(paper_results, summary, journal_label)
+    # ── Step 7: Export ──
+    save_to_excel(paper_results, summary, journal_label, field_culture=field_culture)
 
 
 if __name__ == "__main__":

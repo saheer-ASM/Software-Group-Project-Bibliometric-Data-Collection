@@ -8,9 +8,6 @@ python-dotenv>=1.0.0
 requests>=2.31.0
 # Note: 'math' and 're' are Python built-in modules — no install needed
 
-# Optional dependencies
-matplotlib>=3.7.0
+# Optional dependencies for Google Scholar support
+scholarly>=1.7.11
 
-# For development
-pytest>=7.4.0
-black>=23.0.0
