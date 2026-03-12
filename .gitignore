@@ -90,3 +90,8 @@ logs/
 # *.csv
 # *.json
 # *.xlsx
+
+vresearch_classifier_output/
+*.pt
+*.safetensors
+checkpoint-*/
