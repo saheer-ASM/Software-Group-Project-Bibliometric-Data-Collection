@@ -117,7 +117,7 @@ for keyword in KEYWORDS:
             if not abstract:  # skip papers without abstract
                 continue
             all_papers.append({
-                "Field": keywords,
+                "Field": keyword,
                 "Title": clean_text(paper.get("title", "")),
                 "Abstract": clean_text(abstract)
             })
