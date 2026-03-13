@@ -858,6 +858,67 @@ def analyze_papers(papers: list, min_authors: int = 4, sample: int = 50):
 
 # ── Export to Excel ───────────────────────────────────────────────────────────
 
+def save_fetched_data(papers: list, journal_label: str):
+    """Save all fetched paper metadata before filtering/classification."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Fetched Papers"
+
+    dark_blue = "1F4E79"
+    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    top_align = Alignment(vertical="top", wrap_text=True)
+
+    headers = [
+        "No.",
+        "DOI",
+        "Title",
+        "Journal",
+        "Year",
+        "# Authors",
+        "Author Names (Family, Given)",
+        "Source",
+    ]
+    ws.append(headers)
+
+    header_fill = PatternFill(start_color=dark_blue, end_color=dark_blue, fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=12)
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center_align
+
+    for index, paper in enumerate(papers, 1):
+        authors = paper.get("authors", [])
+        author_str = " | ".join(
+            f"{author.get('family', '?')}, {author.get('given', '?')}"
+            for author in authors
+        )
+        ws.append([
+            index,
+            paper.get("doi", "N/A"),
+            paper.get("title", "N/A"),
+            paper.get("journal", "N/A"),
+            paper.get("year"),
+            len(authors),
+            author_str,
+            paper.get("source", "N/A"),
+        ])
+        for col in range(1, len(headers) + 1):
+            ws.cell(ws.max_row, col).alignment = top_align
+
+    col_widths = [6, 35, 65, 35, 8, 10, 80, 18]
+    for col_idx, width in enumerate(col_widths, 1):
+        letter = ws.cell(1, col_idx).column_letter
+        ws.column_dimensions[letter].width = width
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_label = re.sub(r"[^\w]", "_", journal_label)[:80]
+    filename = f"fetched_papers_{safe_label}_{timestamp}.xlsx"
+    wb.save(filename)
+    print(f"📁 Fetched paper data saved to: {filename}")
+    return filename
+
+
 def save_to_excel(paper_results: list, summary: dict, journal_label: str):
     """
     Save results to a styled Excel workbook with two sheets:
@@ -1126,7 +1187,7 @@ def main():
     )
     parser.add_argument("--issn",    type=str, help="Journal ISSN (e.g. 1932-6203 for PLOS ONE)")
     parser.add_argument("--journal", type=str, help="Journal name keyword")
-    parser.add_argument("--max",     type=int, default=500, help="Max papers to fetch (default: 500)")
+    parser.add_argument("--max",     type=int, default=1000, help="Max papers to fetch (default: 1000)")
     parser.add_argument("--min-authors", type=int, default=4,
                         help="Min authors per paper to include (default: 4)")
     parser.add_argument("--source",  choices=["crossref", "semantic", "google", "both", "all"],
@@ -1184,6 +1245,8 @@ def main():
     if not papers:
         print("⚠️  No papers found. Check the ISSN or journal name.")
         return
+
+    save_fetched_data(papers, journal_label)
 
     # ── Steps 2–6: Classify ──
     paper_results, summary = analyze_papers(
