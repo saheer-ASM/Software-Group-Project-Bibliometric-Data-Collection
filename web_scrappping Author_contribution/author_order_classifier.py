@@ -1,5 +1,3 @@
-
-
 import re
 import math
 import argparse
@@ -19,7 +17,7 @@ CONTACT_EMAIL = os.getenv("contact_email", "researcher@example.com")
 
 # ── Step 1: Fetch metadata from Crossref ────────────────────────────────────
 
-def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
+def fetch_papers_crossref(issn=None, journal_name=None, max_papers=1000):
     """
     Fetch paper metadata from the Crossref API.
 
@@ -232,6 +230,64 @@ def analyze_papers(papers: list, min_authors: int = 4):
 
 
 
+def save_fetched_data(papers: list, journal_label: str):
+    """
+    Save ALL fetched paper data (including papers with < min authors)
+    to a styled Excel file — one row per paper.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Fetched Papers"
+
+    dark_blue = "1F4E79"
+    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    top_align = Alignment(vertical="top", wrap_text=True)
+
+    headers = [
+        "No.", "DOI", "Title", "Journal", "Year",
+        "# Authors", "Author Names (Family, Given)"
+    ]
+    ws.append(headers)
+
+    # Style header row
+    header_fill = PatternFill(start_color=dark_blue, end_color=dark_blue, fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=12)
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center_align
+
+    for i, paper in enumerate(papers, 1):
+        authors = paper["authors"]
+        author_str = " | ".join(
+            f"{a.get('family', '?')}, {a.get('given', '?')}" for a in authors
+        )
+        ws.append([
+            i,
+            paper["doi"],
+            paper["title"],
+            paper["journal"],
+            paper["year"],
+            len(authors),
+            author_str,
+        ])
+        for col in range(1, len(headers) + 1):
+            ws.cell(ws.max_row, col).alignment = top_align
+
+    # Column widths
+    col_widths = [6, 35, 65, 35, 8, 10, 80]
+    for col_idx, width in enumerate(col_widths, 1):
+        letter = ws.cell(1, col_idx).column_letter
+        ws.column_dimensions[letter].width = width
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_label = re.sub(r"[^\w]", "_", journal_label)[:80]
+    filename = f"fetched_papers_{safe_label}_{timestamp}.xlsx"
+    wb.save(filename)
+    print(f"📁 Fetched paper data saved to: {filename}")
+    return filename
+
+
 def save_to_excel(paper_results: list, summary: dict, journal_label: str):
     """
     Save analysis results to a styled Excel file with two sheets:
@@ -394,8 +450,8 @@ def main():
     parser.add_argument(
         "--max",
         type=int,
-        default=500,
-        help="Maximum papers to fetch (default: 500)"
+           default=1000,
+           help="Maximum papers to fetch (default: 1000)"
     )
     parser.add_argument(
         "--min-authors",
@@ -434,6 +490,9 @@ def main():
         print("❌ No papers found. Check the ISSN or journal name.")
         return
 
+    # Save raw fetched data to Excel
+    save_fetched_data(papers, journal_label)
+
    
     paper_results, summary = analyze_papers(papers, min_authors=args.min_authors)
 
@@ -455,4 +514,4 @@ def main():
 
 
 if __name__ == "__main__":
-qqq    main()
+    main()
