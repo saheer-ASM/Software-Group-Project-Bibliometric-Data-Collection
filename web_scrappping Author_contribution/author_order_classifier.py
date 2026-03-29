@@ -1,32 +1,31 @@
 """
 Author Order Classifier
 =======================
-Determines whether a journal uses ALPHABETICAL, CONTRIBUTION-BASED, or RANDOM author ordering
-by analyzing a large sample of papers from that journal via Crossref, Semantic Scholar, and/or Google Scholar.
+Determines whether a journal uses ALPHABETICAL/RANDOM (A/R), RELATIVE CONTRIBUTION (RC),
+or EXPLICIT CONTRIBUTION (EC) author ordering by analysing a large sample of papers from
+that journal via Crossref, Semantic Scholar, and/or Google Scholar.
 
-Pipeline:
-  Step 0 — Field culture prior: map journal name keywords → expected ordering type
-  Step 1 — Fetch paper metadata from:
-           - Crossref API (by ISSN or journal name)
-           - Semantic Scholar API (optional supplement)
-           - Google Scholar (optional supplement)
-  Step 2 — Normalize author family names (lowercase, remove punctuation)
-  Step 3 — For each paper, check if authors are in alphabetical order & classify
-  Step 4 — Filter: only papers with >= 4 authors (reduces false positives)
-  Step 5 — Compute AlphabeticalRate = alphabetical_papers / eligible_papers
-  Step 6 — Classify journal using threshold rules & categorize per-paper ordering
-  Step 6b — Optional full-text CRediT check: scrape paper HTML for Author Contributions keywords
-  Step 7 — Export per-paper results + summary to a styled Excel file
+3-Tier Classification Framework (per paper — highest priority first):
+  Tier 1 — EC  (Explicit Contribution) : CRediT / ACI Author Contributions section found
+  Tier 2 — A/R (Alphabetical / Random) : authors sorted A→Z by family name (no EC signal)
+  Tier 3 — RC  (Relative Contribution) : default when NOT EC and NOT alphabetical
+                                          (1st author = main contributor, harmonic position model)
 
-Author Order Classification (per-paper level):
-  - Alphabetical       : Authors sorted A→Z by family name
-  - Contribution-based : Authors NOT alphabetical (contribution order)
-  - Random             : Insufficient data or unclear pattern
+Per-paper Contribution Strength Scores (α, β, γ):
+  α = 1.0 if classified A/R  (uniform weights, Eq. 1 of Nm-index framework)
+  β = 1.0 if classified RC   (harmonic positional weights, Eqs. 2–3)
+  γ = 1.0 if classified EC   (CRediT/ACI weights, Eqs. 4–5)
 
-Journal-level Classification Rules (based on AlphabeticalRate):
-  AlphabeticalRate >= 0.75  →  ALPHABETICAL-DOMINANT (🔤)
-  AlphabeticalRate <= 0.25  →  CONTRIBUTION-BASED (👥)
-  Otherwise (26-74%)        →  RANDOM / MIXED order (🎲)
+Journal-level 3-Layer Decision (as described in Nm-index framework):
+  EC_rate  >= 0.30  →  Explicit Contribution (EC)          [γ dominant]
+  A/R_rate >= 0.75  →  Alphabetical / Random  (A/R)        [α dominant]
+  A/R_rate <= 0.25  →  Relative Contribution  (RC)         [β dominant]
+  Otherwise         →  Mixed / Hybrid
+
+Co-authorship Patterns (detected per paper):
+  - Co-first authors  : multiple authors flagged as "first" in Crossref sequence field
+                        OR equal-contribution markers in full text
+  - Co-last  authors  : last two authors share equal weighting signal
 
 False Positive Probability (random ordering appearing alphabetical):
   n=2  →  1/2  = 50.0%   (exclude)
@@ -34,6 +33,16 @@ False Positive Probability (random ordering appearing alphabetical):
   n=4  →  1/24 ≈  4.2%   (include)
   n=5  →  1/120 ≈ 0.8%   (strong evidence)
   n=6+ →  <0.1%           (very strong evidence)
+
+Pipeline:
+  Step 0  — Field culture prior: map journal name keywords → expected ordering type
+  Step 1  — Fetch paper metadata (Crossref / Semantic Scholar / Google Scholar)
+  Step 2  — Normalize author family names
+  Step 3  — Per-paper: 3-tier EC → A/R → RC classification + α/β/γ + co-authorship
+  Step 4  — Filter: only papers with >= 4 authors (reduces false positives)
+  Step 5  — Compute rates: EC_rate, A/R_rate, RC_rate
+  Step 6  — Journal-level classification via 3-layer decision + optional CRediT full-text
+  Step 7  — Export per-paper results + summary to a styled Excel file
 
 Usage:
   python author_order_classifier.py --issn 1558-2566 --max 500
@@ -136,6 +145,7 @@ CREDIT_KEYWORDS = [
     "investigation",
     "project administration",
     "resources",
+    "software",
     "validation",
     "visualization",
     "author contributions",
@@ -143,8 +153,51 @@ CREDIT_KEYWORDS = [
     "contributions of authors",
 ]
 
+# ── Step 0c: ACI (Author Contribution Index) Detection Patterns ─────────────
+# ACI signals: percentage-based explicit contribution declarations per author.
+# Detect any of these → EC-ACI classification.
 
-# ── Step 0c: Field Culture Detection ────────────────────────────────────────
+ACI_SECTION_HEADERS = [
+    "author contribution index",
+    "percentage contribution",
+    "percentage of contribution",
+    "authors' percentage",
+    "author percentage",
+]
+
+# Regex patterns for percentage-based contribution statements
+# e.g. "50%", "contributed 40% to this work", "Author A: 30%, Author B: 70%"
+ACI_PERCENT_PATTERNS = [
+    r"\d{1,3}\s*%\s*(of|to)\s*(this|the)\s*(work|study|paper|manuscript|research)",
+    r"(contributed?|contribution)\s*:?\s*\d{1,3}\s*%",
+    r"\d{1,3}\s*%\s*(contribution|contributed)",
+    r"(equal\s+contribution\s+of\s+\d{1,3}\s*%)",
+    r"(authors?\s+\w[\w\s]*:\s*\d{1,3}\s*%)",   # "Author A: 50%"
+]
+
+
+def check_aci_markers(html_lower: str) -> bool:
+    """
+    Return True if ACI (Author Contribution Index) markers are detected in the
+    paper's HTML text (already lowercased).
+
+    ACI signals (any one is sufficient):
+      1. ACI section header keyword match
+      2. Percentage-based contribution pattern match (regex)
+    """
+    # Check ACI section headers
+    if any(hdr in html_lower for hdr in ACI_SECTION_HEADERS):
+        return True
+
+    # Check percentage patterns
+    for pat in ACI_PERCENT_PATTERNS:
+        if re.search(pat, html_lower):
+            return True
+
+    return False
+
+
+# ── Step 0d: Field Culture Detection ────────────────────────────────────────
 
 def detect_field_culture(journal_name: str) -> dict:
     """
@@ -464,15 +517,24 @@ def fetch_papers_semantic_scholar(journal_name: str, max_papers: int = 200) -> l
 
 # ── Step 1d: Author Contributions full-text detection ────────────────────────
 
-def check_author_contributions_html(doi: str) -> bool:
+def check_author_contributions_html(doi: str) -> dict:
     """
-    Fetch the paper's landing page via DOI and search for CRediT taxonomy keywords.
+    Fetch the paper's landing page via DOI and search for both CRediT taxonomy
+    keywords (Step 2) and ACI markers (Step 3) per the classification method.
 
-    Returns True  if ≥ 2 CRediT keywords found (strong signal of contribution-based culture).
-    Returns False if insufficient keywords or the fetch fails.
+    Returns a dict:
+      {
+        "credit" : bool  — True if ≥ 2 CRediT keywords found (EC-CRediT signal)
+        "aci"    : bool  — True if ACI percentage/section markers found (EC-ACI signal)
+        "credit_count": int — number of CRediT keywords matched
+      }
+
+    Returns {"credit": False, "aci": False, "credit_count": 0} on fetch failure.
     """
+    _empty = {"credit": False, "aci": False, "credit_count": 0}
+
     if not doi or doi == "N/A":
-        return False
+        return _empty
 
     try:
         url = f"https://doi.org/{doi}"
@@ -486,14 +548,27 @@ def check_author_contributions_html(doi: str) -> bool:
         resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
 
         if resp.status_code != 200:
-            return False
+            return _empty
 
         html_lower = resp.text.lower()
-        matched = [kw for kw in CREDIT_KEYWORDS if kw.lower() in html_lower]
-        return len(matched) >= 2  # ≥ 2 keywords = confident CRediT section present
+
+        # Step 2: CRediT keyword scan — need ≥ 2 keywords for confident detection
+        matched_credit = [kw for kw in CREDIT_KEYWORDS if kw.lower() in html_lower]
+        has_credit = len(matched_credit) >= 2
+
+        # Step 3: ACI marker scan (only checked if CRediT not found, per method)
+        has_aci = False
+        if not has_credit:
+            has_aci = check_aci_markers(html_lower)
+
+        return {
+            "credit": has_credit,
+            "aci": has_aci,
+            "credit_count": len(matched_credit),
+        }
 
     except Exception:
-        return False
+        return _empty
 
 
 # ── Step 2 & 3: Name normalisation & alphabetical check ──────────────────────
@@ -544,62 +619,223 @@ def chance_probability(n: int) -> float:
         return 1e-20  # Fallback for edge cases
 
 
-# ── Step 3a: Classify individual paper author ordering ─────────────────────
+# ── Step 3a: Co-authorship pattern detection ─────────────────────────────────
 
-def classify_paper_author_order(authors: list) -> dict:
-    """
-    Classify a single paper's author ordering as:
-    - "Alphabetical"       : Authors are sorted A→Z by family name
-    - "Contribution-based" : Authors are NOT alphabetically sorted (contribution order)
-    - "Random"             : Unable to determine order confidently
+# Keywords that signal equal/shared first or last authorship in full text or metadata
+CO_FIRST_KEYWORDS = [
+    "contributed equally", "equal contribution", "co-first author",
+    "co first author", "joint first", "shared first", "these authors contributed equally",
+    "both authors contributed equally",
+]
+CO_LAST_KEYWORDS = [
+    "co-last author", "co last author", "joint senior", "joint corresponding",
+    "co-senior author", "co senior author", "shared senior",
+]
 
-    Returns a dict with:
-      classification    : one of above three categories
-      is_alphabetical   : boolean (True if A→Z sorted)
-      confidence_score  : float between 0 and 1
-      interpretation    : human-readable explanation
+
+def detect_co_authorship_pattern(authors: list, raw_text: str = "") -> dict:
     """
-    n = len(authors)
-    
-    if n < 4:
-        return {
-            "classification": "Random",
-            "is_alphabetical": False,
-            "confidence_score": 0.0,
-            "interpretation": "Insufficient authors (< 4) to classify reliably"
-        }
-    
-    # Check if alphabetical
-    is_alpha = is_alphabetical(authors)
-    
-    # Calculate confidence based on probability
-    false_positive_prob = chance_probability(n)
-    
-    if is_alpha:
-        # If alphabetical, confidence increases with author count (lower false-positive risk)
-        confidence = 1.0 - false_positive_prob
-        interpretation = "Authors are in alphabetical order → Likely ALPHABETICAL-culture journal"
+    Detect co-first / co-last author patterns from two signals:
+
+    Signal A — Crossref sequence field:
+      Crossref marks the first author with sequence="first"; all others get "additional".
+      If more than one author has sequence="first" → co-first authors detected.
+
+    Signal B — Full-text / abstract keyword scan:
+      Search raw_text (paper HTML or abstract) for equal-contribution phrases.
+
+    Returns
+    -------
+    dict with:
+      has_co_first     : bool
+      num_co_first     : int  (number of first-sequence authors)
+      has_co_last      : bool
+      co_first_signal  : "sequence" | "text" | "both" | None
+      co_last_signal   : "text" | None
+      rc_variant       : "RC-MultiFA" | "RC-MultiLA" | "RC-MultiFA-MultiLA" | "RC" | None
+    """
+    text_lower = raw_text.lower()
+
+    # Signal A: Crossref sequence field
+    first_seq_authors = [a for a in authors if a.get("sequence", "").lower() == "first"]
+    has_co_first_seq = len(first_seq_authors) > 1
+    num_co_first_seq = len(first_seq_authors)
+
+    # Signal B: keyword scan
+    has_co_first_text = any(kw in text_lower for kw in CO_FIRST_KEYWORDS)
+    has_co_last_text  = any(kw in text_lower for kw in CO_LAST_KEYWORDS)
+
+    has_co_first = has_co_first_seq or has_co_first_text
+    has_co_last  = has_co_last_text  # Crossref doesn't mark last authors specially
+
+    # Determine which signals fired
+    if has_co_first_seq and has_co_first_text:
+        co_first_signal = "both"
+    elif has_co_first_seq:
+        co_first_signal = "sequence"
+    elif has_co_first_text:
+        co_first_signal = "text"
     else:
-        # Not alphabetical → likely contribution-based
-        confidence = 0.85 if n >= 6 else 0.70
-        interpretation = "Authors are NOT alphabetically ordered → Likely CONTRIBUTION-based culture journal"
-    
-    classification = "Alphabetical" if is_alpha else "Contribution-based"
-    
+        co_first_signal = None
+
+    co_last_signal = "text" if has_co_last_text else None
+
+    # Map to RC variant label (from Nm-index framework)
+    if has_co_first and has_co_last:
+        rc_variant = "RC-MultiFA-MultiLA"
+    elif has_co_first:
+        rc_variant = "RC-MultiFA"
+    elif has_co_last:
+        rc_variant = "RC-MultiLA"
+    else:
+        rc_variant = None  # determined by caller based on classification
+
     return {
-        "classification": classification,
-        "is_alphabetical": is_alpha,
-        "confidence_score": round(confidence, 3),
-        "interpretation": interpretation
+        "has_co_first":    has_co_first,
+        "num_co_first":    num_co_first_seq if has_co_first_seq else (1 if has_co_first_text else 0),
+        "has_co_last":     has_co_last,
+        "co_first_signal": co_first_signal,
+        "co_last_signal":  co_last_signal,
+        "rc_variant":      rc_variant,
     }
 
 
-# ── Steps 4, 5 & 6: Journal-level aggregation & classification ───────────────
+# ── Step 3b: 3-tier per-paper classification (EC → A/R → RC) ─────────────────
+
+def classify_paper_author_order(authors: list, has_credit: bool = None,
+                                raw_text: str = "") -> dict:
+    """
+    3-tier author ordering classification per the Nm-index framework:
+
+      Tier 1 — EC  (Explicit Contribution):
+        CRediT / Author Contributions section detected in paper full text.
+        Contribution weight γ = 1.0  (Eqs. 4–5 of Nm-index).
+
+      Tier 2 — A/R (Alphabetical / Random):
+        Authors sorted A→Z by family name; no EC signal present.
+        Contribution weight α = 1.0  (Eq. 1 of Nm-index).
+
+      Tier 3 — RC  (Relative Contribution) — default:
+        Authors NOT alphabetical and no CRediT detected.
+        Contribution weight β = 1.0  (Eqs. 2–3 of Nm-index, harmonic model).
+
+    Parameters
+    ----------
+    authors    : list of author dicts (Crossref format with "family", "given", "sequence")
+    has_credit : bool | None  — True if CRediT section was detected in full text
+    raw_text   : str          — raw paper text / abstract for co-authorship keyword scan
+
+    Returns
+    -------
+    dict with:
+      classification     : "EC" | "A/R" | "RC" | "Random"
+      ordering_type      : human-readable label
+      is_alphabetical    : bool
+      confidence_score   : float [0, 1]
+      alpha              : float  A/R weight (1.0 if A/R, else 0.0)
+      beta               : float  RC weight  (1.0 if RC, else 0.0)
+      gamma              : float  EC weight  (1.0 if EC, else 0.0)
+      co_authorship      : dict from detect_co_authorship_pattern()
+      rc_variant         : str | None  e.g. "RC-MultiFA", "RC-MultiFA-MultiLA"
+      interpretation     : human-readable explanation
+    """
+    n = len(authors)
+    co = detect_co_authorship_pattern(authors, raw_text)
+
+    # ── Insufficient authors — cannot classify ────────────────────────────────
+    if n < 4:
+        return {
+            "classification":  "Random",
+            "ordering_type":   "Random / Insufficient data",
+            "is_alphabetical": False,
+            "confidence_score": 0.0,
+            "alpha": 0.0, "beta": 0.0, "gamma": 0.0,
+            "co_authorship":   co,
+            "rc_variant":      None,
+            "interpretation":  f"Only {n} author(s) — need ≥ 4 to classify reliably",
+        }
+
+    # ── Tier 1: EC (Explicit Contribution) ───────────────────────────────────
+    # CRediT section detected → highest confidence, overrides positional analysis
+    if has_credit is True:
+        rc_variant = co["rc_variant"]  # EC can also have multi-FA/LA
+        return {
+            "classification":  "EC",
+            "ordering_type":   "Explicit Contribution (EC)",
+            "is_alphabetical": is_alphabetical(authors),  # informational only
+            "confidence_score": 0.95,
+            "alpha": 0.0, "beta": 0.0, "gamma": 1.0,
+            "co_authorship":   co,
+            "rc_variant":      rc_variant,
+            "interpretation": (
+                "CRediT / Author Contributions section found → "
+                "Explicit Contribution (EC). "
+                "Weights computed via CRediT taxonomy or ACI (Eqs. 4–5)."
+            ),
+        }
+
+    # ── Tier 2: A/R (Alphabetical / Random) ──────────────────────────────────
+    is_alpha = is_alphabetical(authors)
+    false_positive_prob = chance_probability(n)
+
+    if is_alpha:
+        confidence = round(1.0 - false_positive_prob, 4)
+        confidence = min(confidence, 0.999)
+        return {
+            "classification":  "A/R",
+            "ordering_type":   "Alphabetical / Random (A/R)",
+            "is_alphabetical": True,
+            "confidence_score": confidence,
+            "alpha": 1.0, "beta": 0.0, "gamma": 0.0,
+            "co_authorship":   co,
+            "rc_variant":      None,
+            "interpretation": (
+                f"Authors sorted A→Z (false-positive prob = 1/{n}! = {false_positive_prob:.2e}). "
+                "Uniform weights applied (Eq. 1): each author gets 1/N credit."
+            ),
+        }
+
+    # ── Tier 3: RC (Relative Contribution) — default ─────────────────────────
+    confidence = 0.90 if n >= 6 else 0.75
+    rc_variant = co["rc_variant"] if co["rc_variant"] else "RC"
+
+    # Build RC interpretation
+    if co["has_co_first"] and co["has_co_last"]:
+        rc_detail = "Multiple first AND last authors detected → RC-MultiFA-MultiLA variant."
+    elif co["has_co_first"]:
+        rc_detail = f"Co-first authors detected ({co['co_first_signal']} signal) → RC-MultiFA variant."
+    elif co["has_co_last"]:
+        rc_detail = "Co-last authors detected → RC-MultiLA variant."
+    else:
+        rc_detail = "Single first and last author → standard RC."
+
+    return {
+        "classification":  "RC",
+        "ordering_type":   f"Relative Contribution ({rc_variant})",
+        "is_alphabetical": False,
+        "confidence_score": confidence,
+        "alpha": 0.0, "beta": 1.0, "gamma": 0.0,
+        "co_authorship":   co,
+        "rc_variant":      rc_variant,
+        "interpretation": (
+            f"NOT alphabetical, no CRediT → Relative Contribution (RC). "
+            f"Harmonic positional weights (Eqs. 2–3). {rc_detail}"
+        ),
+    }
+
+
+# ── Steps 4, 5 & 6: Journal-level aggregation & 3-layer classification ────────
 
 def analyze_papers(papers: list, min_authors: int = 4,
                    check_fulltext: bool = False, fulltext_sample: int = 30):
     """
-    Compute per-paper alphabetical flags and aggregate journal-level statistics.
+    Per-paper 3-tier classification and journal-level 3-layer decision.
+
+    3-Layer Journal Decision (in priority order):
+      Layer 1 — EC_rate  >= 0.30  →  Explicit Contribution (EC)
+      Layer 2 — A/R_rate >= 0.75  →  Alphabetical / Random  (A/R)
+      Layer 3 — A/R_rate <= 0.25  →  Relative Contribution  (RC)
+      Fallback                    →  Mixed / Hybrid
 
     Parameters
     ----------
@@ -611,27 +847,37 @@ def analyze_papers(papers: list, min_authors: int = 4,
     Returns
     -------
     paper_results : list of per-paper dicts
-    summary       : dict with journal-level statistics and classification
+    summary       : dict with journal-level statistics and 3-tier classification
     """
     paper_results = []
-    alpha_count = 0
     total_eligible = 0
+
+    # Per-tier counters
+    ec_count  = 0
+    ar_count  = 0
+    rc_count  = 0
+
+    # Co-authorship counters
+    co_first_count = 0
+    co_last_count  = 0
+
+    # CRediT full-text counters
     credit_section_hits = 0
     credit_checked = 0
 
-    # Decide which DOIs to check for full-text CRediT
+    # Decide which DOIs to check for full-text CRediT (Tier 1 signal)
     dois_to_check = set()
     if check_fulltext:
         eligible_dois = [
             p["doi"] for p in papers
-            if len(p["authors"]) >= min_authors and p["doi"] != "N/A"
+            if len(p.get("authors", [])) >= min_authors and p.get("doi", "N/A") != "N/A"
         ]
         sample_size = min(fulltext_sample, len(eligible_dois))
         dois_to_check = set(random.sample(eligible_dois, sample_size))
-        print(f"\n🔍 Full-text CRediT check: sampling {len(dois_to_check)} papers...")
+        print(f"\n  Full-text CRediT check: sampling {len(dois_to_check)} papers...")
 
     for paper in papers:
-        authors = paper["authors"]
+        authors = paper.get("authors", [])
         n = len(authors)
 
         # Filter: too few authors → high false-positive risk, skip
@@ -639,16 +885,10 @@ def analyze_papers(papers: list, min_authors: int = 4,
             continue
 
         total_eligible += 1
-        alpha = is_alphabetical(authors)
-        if alpha:
-            alpha_count += 1
 
-        # Get detailed paper classification
-        paper_classification = classify_paper_author_order(authors)
-
-        # Full-text CRediT check (only for sampled DOIs)
+        # Full-text CRediT check — only for sampled DOIs (Tier 1 signal)
         has_credit = None
-        if check_fulltext and paper["doi"] in dois_to_check:
+        if check_fulltext and paper.get("doi", "N/A") in dois_to_check:
             credit_checked += 1
             has_credit = check_author_contributions_html(paper["doi"])
             if has_credit:
@@ -656,57 +896,125 @@ def analyze_papers(papers: list, min_authors: int = 4,
             print(
                 f"  [{credit_checked}/{len(dois_to_check)}] "
                 f"{paper['doi'][:35]}... → "
-                f"{' CRediT found' if has_credit else ' No CRediT'}"
+                f"{'CRediT found' if has_credit else 'No CRediT'}"
             )
             time.sleep(random.uniform(1.5, 3.0))  # polite delay
 
+        # 3-tier per-paper classification (EC → A/R → RC)
+        clf = classify_paper_author_order(authors, has_credit=has_credit)
+
+        # Update tier counters
+        if clf["classification"] == "EC":
+            ec_count += 1
+        elif clf["classification"] == "A/R":
+            ar_count += 1
+        elif clf["classification"] == "RC":
+            rc_count += 1
+
+        # Co-authorship counters
+        co = clf["co_authorship"]
+        if co["has_co_first"]:
+            co_first_count += 1
+        if co["has_co_last"]:
+            co_last_count += 1
+
         paper_results.append({
-            "doi":                     paper["doi"],
-            "title":                   paper["title"],
-            "journal":                 paper["journal"],
-            "year":                    paper["year"],
-            "num_authors":             n,
-            "author_names":            " | ".join(a.get("family", "?") for a in authors),
-            "is_alphabetical":         alpha,
-            "author_order_classification": paper_classification["classification"],
-            "author_order_confidence":    paper_classification["confidence_score"],
-            "chance_prob":             round(chance_probability(n), 8),
-            "source":                  paper.get("source", "N/A"),
-            "has_credit_section":      has_credit,  # True / False / None (not checked)
+            "doi":                         paper.get("doi", "N/A"),
+            "title":                       paper.get("title", "N/A"),
+            "journal":                     paper.get("journal", "N/A"),
+            "year":                        paper.get("year"),
+            "num_authors":                 n,
+            "author_names":                " | ".join(a.get("family", "?") for a in authors),
+            "is_alphabetical":             clf["is_alphabetical"],
+            # 3-tier classification fields
+            "author_order_classification": clf["classification"],
+            "ordering_type":               clf["ordering_type"],
+            "rc_variant":                  clf["rc_variant"] or "—",
+            "author_order_confidence":     clf["confidence_score"],
+            # Contribution strength scores (α, β, γ)
+            "alpha":                       clf["alpha"],
+            "beta":                        clf["beta"],
+            "gamma":                       clf["gamma"],
+            # Co-authorship signals
+            "has_co_first":                co["has_co_first"],
+            "has_co_last":                 co["has_co_last"],
+            "co_first_signal":             co["co_first_signal"] or "—",
+            "co_last_signal":              co["co_last_signal"] or "—",
+            # Probability / provenance
+            "chance_prob":                 round(chance_probability(n), 8),
+            "source":                      paper.get("source", "N/A"),
+            "has_credit_section":          has_credit,
+            "interpretation":              clf["interpretation"],
         })
 
-    # Compute AlphabeticalRate
-    alpha_rate = alpha_count / total_eligible if total_eligible > 0 else 0.0
+    # ── Rates ────────────────────────────────────────────────────────────────
+    def rate(count):
+        return round(count / total_eligible, 4) if total_eligible > 0 else 0.0
 
-    # CRediT section rate
-    credit_rate = credit_section_hits / credit_checked if credit_checked > 0 else None
+    ec_rate  = rate(ec_count)
+    ar_rate  = rate(ar_count)
+    rc_rate  = rate(rc_count)
 
-    # Classification (threshold rules)
+    credit_rate = (
+        round(credit_section_hits / credit_checked, 4)
+        if credit_checked > 0 else None
+    )
+
+    # ── 3-Layer Journal Decision ──────────────────────────────────────────────
     if total_eligible < 20:
         conclusion = "Insufficient data"
         confidence = "Low"
-    elif alpha_rate >= 0.75:
-        conclusion = "Alphabetical-dominant"
+    elif ec_rate >= 0.30:
+        # Layer 1: EC dominant
+        conclusion = "Explicit Contribution (EC)"
         confidence = "High" if total_eligible >= 100 else "Medium"
-    elif alpha_rate <= 0.25:
-        conclusion = "Contribution-based"
+    elif ar_rate >= 0.75:
+        # Layer 2: A/R dominant
+        conclusion = "Alphabetical / Random (A/R)"
+        confidence = "High" if total_eligible >= 100 else "Medium"
+    elif ar_rate <= 0.25:
+        # Layer 3: RC dominant (not enough alphabetical papers)
+        conclusion = "Relative Contribution (RC)"
         confidence = "High" if total_eligible >= 100 else "Medium"
     else:
-        conclusion = "Mixed / Unclear"
+        conclusion = "Mixed / Hybrid"
         confidence = "Low"
 
+    # Dominant α/β/γ for journal level
+    journal_alpha = ar_rate
+    journal_beta  = rc_rate
+    journal_gamma = ec_rate
+
     summary = {
-        "total_papers_fetched":      len(papers),
-        "eligible_papers":           total_eligible,
-        "alphabetical_papers":       alpha_count,
-        "contribution_based_papers": total_eligible - alpha_count,
-        "alphabetical_rate":         round(alpha_rate, 4),
-        "conclusion":                conclusion,
-        "confidence":                confidence,
-        "min_authors_filter":        min_authors,
-        "credit_checked":            credit_checked,
-        "credit_section_hits":       credit_section_hits,
-        "credit_rate":               round(credit_rate, 4) if credit_rate is not None else None,
+        "total_papers_fetched":  len(papers),
+        "eligible_papers":       total_eligible,
+        # Per-tier paper counts
+        "ec_papers":             ec_count,
+        "ar_papers":             ar_count,
+        "rc_papers":             rc_count,
+        # Rates
+        "ec_rate":               ec_rate,
+        "ar_rate":               ar_rate,
+        "rc_rate":               rc_rate,
+        # Journal-level contribution strength scores
+        "journal_alpha":         round(journal_alpha, 4),
+        "journal_beta":          round(journal_beta, 4),
+        "journal_gamma":         round(journal_gamma, 4),
+        # Co-authorship
+        "co_first_papers":       co_first_count,
+        "co_last_papers":        co_last_count,
+        # Decision
+        "conclusion":            conclusion,
+        "confidence":            confidence,
+        "min_authors_filter":    min_authors,
+        # CRediT full-text check
+        "credit_checked":        credit_checked,
+        "credit_section_hits":   credit_section_hits,
+        "credit_rate":           credit_rate,
+        # Legacy (kept for backward compatibility)
+        "alphabetical_papers":   ar_count,
+        "contribution_based_papers": rc_count,
+        "alphabetical_rate":     ar_rate,
     }
 
     return paper_results, summary
@@ -741,6 +1049,20 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str,
             cell.font = font
             cell.alignment = center_align
 
+    # Convenience fill for each tier
+    ec_fill  = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")  # light green
+    ar_fill  = PatternFill(start_color="DEEAF1", end_color="DEEAF1", fill_type="solid")  # light blue
+    rc_fill  = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")  # light yellow
+
+    def tier_fill(classification):
+        if classification == "EC":
+            return ec_fill
+        elif classification == "A/R":
+            return ar_fill
+        elif classification == "RC":
+            return rc_fill
+        return yellow_fill
+
     # ─────────────────────────────────────────────────────────────────────────
     # Sheet 1: Journal Summary
     # ─────────────────────────────────────────────────────────────────────────
@@ -751,32 +1073,60 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str,
     make_header_style(ws1, 1, dark_blue)
 
     conclusion = summary["conclusion"]
-    if conclusion == "Contribution-based":
+    if "EC" in conclusion:
         result_fill = green_fill
-    elif conclusion == "Alphabetical-dominant":
+    elif "A/R" in conclusion or "Alphabetical" in conclusion:
         result_fill = blue_fill
-    else:
+    elif "RC" in conclusion or "Relative" in conclusion:
         result_fill = yellow_fill
+    else:
+        result_fill = red_fill
+
+    # ── Section 1: 3-Tier Statistical Results ──
+    ws1.append(["── 3-Tier Author Ordering Analysis ──", ""])
+    make_header_style(ws1, ws1.max_row, dark_blue)
 
     summary_rows = [
-        ("Journal / Query",                   journal_label),
-        ("Min Authors Filter",                f"≥ {summary['min_authors_filter']} authors"),
-        ("Total Papers Fetched",              summary["total_papers_fetched"]),
-        ("Eligible Papers (≥ min authors)",   summary["eligible_papers"]),
-        ("Alphabetical Papers",               summary["alphabetical_papers"]),
-        ("Contribution-based Papers",         summary["contribution_based_papers"]),
-        ("AlphabeticalRate",                  f"{summary['alphabetical_rate']:.2%}"),
-        ("Conclusion (Statistical)",          conclusion),
-        ("Confidence",                        summary["confidence"]),
+        ("Journal / Query",                        journal_label),
+        ("Min Authors Filter",                     f"≥ {summary['min_authors_filter']} authors"),
+        ("Total Papers Fetched",                   summary["total_papers_fetched"]),
+        ("Eligible Papers (≥ min authors)",        summary["eligible_papers"]),
+        ("",                                       ""),
+        ("EC  Papers (Explicit Contribution)",     summary["ec_papers"]),
+        ("A/R Papers (Alphabetical / Random)",     summary["ar_papers"]),
+        ("RC  Papers (Relative Contribution)",     summary["rc_papers"]),
+        ("",                                       ""),
+        ("EC  Rate  (γ — Tier 1 threshold ≥ 30%)", f"{summary['ec_rate']:.2%}"),
+        ("A/R Rate  (α — Tier 2 threshold ≥ 75%)", f"{summary['ar_rate']:.2%}"),
+        ("RC  Rate  (β — Tier 3 threshold ≤ 25%)", f"{summary['rc_rate']:.2%}"),
+        ("",                                       ""),
+        ("Journal α (A/R strength)",               f"{summary['journal_alpha']:.4f}"),
+        ("Journal β (RC  strength)",               f"{summary['journal_beta']:.4f}"),
+        ("Journal γ (EC  strength)",               f"{summary['journal_gamma']:.4f}"),
+        ("",                                       ""),
+        ("Co-First Author Papers",                 summary["co_first_papers"]),
+        ("Co-Last  Author Papers",                 summary["co_last_papers"]),
+        ("",                                       ""),
+        ("JOURNAL CLASSIFICATION",                 conclusion),
+        ("Confidence",                             summary["confidence"]),
     ]
 
     for metric, value in summary_rows:
         ws1.append([metric, value])
         row_idx = ws1.max_row
-        if metric in ("Conclusion (Statistical)", "Confidence", "AlphabeticalRate"):
+        if metric in ("JOURNAL CLASSIFICATION", "Confidence"):
             for col in [1, 2]:
                 ws1.cell(row_idx, col).fill = result_fill
-                ws1.cell(row_idx, col).font = Font(bold=True, size=11)
+                ws1.cell(row_idx, col).font = Font(bold=True, size=12)
+        elif metric in ("EC  Rate  (γ — Tier 1 threshold ≥ 30%)",):
+            for col in [1, 2]:
+                ws1.cell(row_idx, col).fill = ec_fill
+        elif metric in ("A/R Rate  (α — Tier 2 threshold ≥ 75%)",):
+            for col in [1, 2]:
+                ws1.cell(row_idx, col).fill = ar_fill
+        elif metric in ("RC  Rate  (β — Tier 3 threshold ≤ 25%)",):
+            for col in [1, 2]:
+                ws1.cell(row_idx, col).fill = rc_fill
         for col in [1, 2]:
             ws1.cell(row_idx, col).alignment = center_align
 
@@ -797,9 +1147,9 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str,
             ("Matched Keyword",          field_culture.get("matched_keyword") or "None"),
             ("Prior Confidence",         field_culture["prior_confidence"]),
             ("Interpretation",           (
-                "1st author = main contributor; last author may be PI/supervisor"
+                "1st author = main contributor; last author may be PI/supervisor (RC or EC)"
                 if "Contribution" in ft
-                else "Author list likely sorted A→Z by family name"
+                else "Author list likely sorted A→Z by family name (A/R)"
                 if "Alphabetical" in ft
                 else "No strong prior — rely on statistical analysis"
             )),
@@ -814,23 +1164,23 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str,
             for col in [1, 2]:
                 ws1.cell(row_idx, col).alignment = center_align
 
-    # ── Section 3: Author Contributions (CRediT) Signal ──
+    # ── Section 3: CRediT Full-text Signal ──
     ws1.append([])
     ws1.append(["── Author Contributions (CRediT) Signal ──", ""])
     make_header_style(ws1, ws1.max_row, "70AD47")
 
-    credit_rate = summary.get("credit_rate")  # float or None
+    credit_rate = summary.get("credit_rate")
     if credit_rate is not None:
         credit_rate_display = f"{credit_rate:.2%}"
         credit_signal = (
-            "Contribution-based (CRediT section present)"
+            "EC culture confirmed (CRediT section present)"
             if credit_rate >= 0.5
-            else "Likely NOT CRediT culture (low CRediT rate)"
+            else "Likely NOT EC culture (low CRediT rate)"
         )
         credit_signal_fill = green_fill if credit_rate >= 0.5 else red_fill
     else:
         credit_rate_display = "Not checked"
-        credit_signal = "Run with --check-fulltext to enable"
+        credit_signal = "Run with --check-fulltext to enable EC full-text detection"
         credit_signal_fill = yellow_fill
 
     credit_rows = [
@@ -849,25 +1199,29 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str,
         for col in [1, 2]:
             ws1.cell(row_idx, col).alignment = center_align
 
-    # ── Classification legend ──
+    # ── 3-Tier Classification Legend ──
     ws1.append([])
-    ws1.append(["AlphabeticalRate", "Classification", "Confidence Level"])
+    ws1.append(["Decision Layer", "Threshold", "Classification", "Nm-index Weight"])
     make_header_style(ws1, ws1.max_row, mid_blue)
 
     legend = [
-        ("≥ 75%",       "ALPHABETICAL-dominant", "High (if ≥ 100 papers)"),
-        ("26% – 74%",   "RANDOM / MIXED order",   "Low (inconclusive)"),
-        ("≤ 25%",       "CONTRIBUTION-based",     "High (if ≥ 100 papers)"),
+        ("Layer 1 (EC)",  "EC_rate  ≥ 30%",  "Explicit Contribution (EC)",    "γ = 1.0  (CRediT/ACI, Eqs. 4–5)"),
+        ("Layer 2 (A/R)", "A/R_rate ≥ 75%",  "Alphabetical / Random  (A/R)",  "α = 1.0  (Uniform 1/N,  Eq. 1)"),
+        ("Layer 3 (RC)",  "A/R_rate ≤ 25%",  "Relative Contribution  (RC)",   "β = 1.0  (Harmonic,    Eqs. 2–3)"),
+        ("Fallback",      "26% – 74%",        "Mixed / Hybrid",                "—"),
     ]
-    for row_data in legend:
+    tier_fills_legend = [ec_fill, ar_fill, rc_fill, yellow_fill]
+    for row_data, tfill in zip(legend, tier_fills_legend):
         ws1.append(list(row_data))
         row_idx = ws1.max_row
-        for col in range(1, 4):
+        for col in range(1, 5):
+            ws1.cell(row_idx, col).fill = tfill
             ws1.cell(row_idx, col).alignment = center_align
 
-    ws1.column_dimensions["A"].width = 42
-    ws1.column_dimensions["B"].width = 40
-    ws1.column_dimensions["C"].width = 25
+    ws1.column_dimensions["A"].width = 46
+    ws1.column_dimensions["B"].width = 38
+    ws1.column_dimensions["C"].width = 18
+    ws1.column_dimensions["D"].width = 34
 
     # ─────────────────────────────────────────────────────────────────────────
     # Sheet 2: Per-Paper Results
@@ -875,19 +1229,29 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str,
     ws2 = wb.create_sheet("Per-Paper Results")
 
     paper_headers = [
-        "No.",
-        "DOI",
-        "Publication Title",
-        "Journal",
-        "Year",
-        "# Authors",
-        "Author Family Names (in order)",
-        "Is Alphabetical?",
-        "Classification",
-        "Confidence Score",
-        "Chance Prob (1/n!)",
-        "Data Source",
-        "CRediT Section?",
+        "No.",                           # 1
+        "DOI",                           # 2
+        "Publication Title",             # 3
+        "Journal",                       # 4
+        "Year",                          # 5
+        "# Authors",                     # 6
+        "Author Family Names (in order)",# 7
+        "Is Alphabetical?",              # 8
+        "Classification (EC/A/R/RC)",    # 9
+        "Ordering Type",                 # 10
+        "RC Variant",                    # 11
+        "Confidence Score",              # 12
+        "α (A/R weight)",               # 13
+        "β (RC  weight)",               # 14
+        "γ (EC  weight)",               # 15
+        "Co-First Authors?",             # 16
+        "Co-Last Authors?",              # 17
+        "Co-First Signal",               # 18
+        "Co-Last Signal",                # 19
+        "Chance Prob (1/n!)",            # 20
+        "Data Source",                   # 21
+        "CRediT Section?",               # 22
+        "Interpretation",                # 23
     ]
     ws2.append(paper_headers)
     make_header_style(ws2, 1, mid_blue)
@@ -901,56 +1265,81 @@ def save_to_excel(paper_results: list, summary: dict, journal_label: str,
         else:
             credit_display = "Not checked"
 
+        classification = p.get("author_order_classification", "Random")
+
         row_data = [
-            i,
-            p["doi"],
-            p["title"],
-            p["journal"],
-            p["year"],
-            p["num_authors"],
-            p["author_names"],
-            "Yes" if p["is_alphabetical"] else "No",
-            p.get("author_order_classification", "Random"),
-            p.get("author_order_confidence", 0.0),
-            p["chance_prob"],
-            p.get("source", "N/A"),
-            credit_display,
+            i,                                                     # 1
+            p["doi"],                                              # 2
+            p["title"],                                            # 3
+            p["journal"],                                          # 4
+            p["year"],                                             # 5
+            p["num_authors"],                                      # 6
+            p["author_names"],                                     # 7
+            "Yes" if p["is_alphabetical"] else "No",              # 8
+            classification,                                        # 9
+            p.get("ordering_type", "—"),                          # 10
+            p.get("rc_variant", "—"),                             # 11
+            p.get("author_order_confidence", 0.0),                 # 12
+            p.get("alpha", 0.0),                                   # 13
+            p.get("beta",  0.0),                                   # 14
+            p.get("gamma", 0.0),                                   # 15
+            "Yes" if p.get("has_co_first") else "No",             # 16
+            "Yes" if p.get("has_co_last")  else "No",             # 17
+            p.get("co_first_signal", "—"),                        # 18
+            p.get("co_last_signal",  "—"),                        # 19
+            p["chance_prob"],                                      # 20
+            p.get("source", "N/A"),                               # 21
+            credit_display,                                        # 22
+            p.get("interpretation", ""),                          # 23
         ]
         ws2.append(row_data)
         row_idx = ws2.max_row
 
-        # Colour-code "Is Alphabetical?" column
-        cell = ws2.cell(row_idx, 8)
-        cell.fill = green_fill if p["is_alphabetical"] else red_fill
-        cell.font = Font(bold=True)
-        cell.alignment = center_align
+        # Colour-code "Is Alphabetical?" column (col 8)
+        alpha_cell = ws2.cell(row_idx, 8)
+        alpha_cell.fill = blue_fill if p["is_alphabetical"] else red_fill
+        alpha_cell.font = Font(bold=True)
+        alpha_cell.alignment = center_align
 
-        # Colour-code "Classification" column
-        classification = p.get("author_order_classification", "Random")
+        # Colour-code "Classification" column (col 9) by tier
         class_cell = ws2.cell(row_idx, 9)
-        if classification == "Alphabetical":
-            class_cell.fill = blue_fill
-            class_cell.font = Font(bold=True, color="FFFFFF")
-        elif classification == "Contribution-based":
-            class_cell.fill = green_fill
-            class_cell.font = Font(bold=True, color="FFFFFF")
-        else:
-            class_cell.fill = yellow_fill
-            class_cell.font = Font(bold=True)
+        class_cell.fill = tier_fill(classification)
+        class_cell.font = Font(bold=True)
         class_cell.alignment = center_align
 
-        # Colour-code CRediT column
-        credit_cell = ws2.cell(row_idx, 13)
+        # Colour-code α/β/γ columns (13–15)
+        for col_idx, score_key in [(13, "alpha"), (14, "beta"), (15, "gamma")]:
+            val = p.get(score_key, 0.0)
+            score_cell = ws2.cell(row_idx, col_idx)
+            if val == 1.0:
+                score_cell.fill = green_fill
+                score_cell.font = Font(bold=True)
+            score_cell.alignment = center_align
+
+        # Colour-code CRediT column (col 22)
+        credit_cell = ws2.cell(row_idx, 22)
         if credit_display == "Yes":
             credit_cell.fill = green_fill
             credit_cell.font = Font(bold=True)
         elif credit_display == "No":
             credit_cell.fill = red_fill
+        credit_cell.alignment = center_align
+
+        # Co-first / co-last (cols 16–17)
+        for col_idx in [16, 17]:
+            cell = ws2.cell(row_idx, col_idx)
+            if cell.value == "Yes":
+                cell.fill = ec_fill
+                cell.font = Font(bold=True)
+            cell.alignment = center_align
 
         for col in range(1, len(paper_headers) + 1):
-            ws2.cell(row_idx, col).alignment = top_align
+            ws2.cell(row_idx, col).alignment = (
+                top_align if col in [3, 7, 10, 23] else center_align
+            )
 
-    col_widths = [5, 30, 60, 30, 8, 10, 65, 16, 20, 15, 18, 15, 14]
+    col_widths = [5, 28, 52, 28, 7, 9, 55, 15, 22, 28, 18, 14, 12, 12, 12,
+                  15, 14, 15, 14, 18, 14, 13, 55]
     for col_idx, width in enumerate(col_widths, 1):
         letter = ws2.cell(1, col_idx).column_letter
         ws2.column_dimensions[letter].width = width
@@ -1089,40 +1478,57 @@ def main():
         fulltext_sample=args.fulltext_sample,
     )
 
-    # ── Print summary to console ──
-    credit_rate = summary.get("credit_rate")
-    
-    # Determine order classification
-    alpha_rate = summary["alphabetical_rate"]
-    if alpha_rate >= 0.75:
-        order_type = "ALPHABETICAL-DOMINANT"
-        order_emoji = "🔤"
-    elif alpha_rate <= 0.25:
-        order_type = "CONTRIBUTION-BASED"
-        order_emoji = "👥"
+    # ── Print 3-tier summary to console ──
+    conclusion   = summary["conclusion"]
+    ec_rate      = summary["ec_rate"]
+    ar_rate      = summary["ar_rate"]
+    rc_rate      = summary["rc_rate"]
+    credit_rate  = summary.get("credit_rate")
+
+    if "EC" in conclusion:
+        tier_label = "EC  (Explicit Contribution)"
+    elif "A/R" in conclusion or "Alphabetical" in conclusion:
+        tier_label = "A/R (Alphabetical / Random)"
+    elif "RC" in conclusion or "Relative" in conclusion:
+        tier_label = "RC  (Relative Contribution)"
     else:
-        order_type = "RANDOM / MIXED"
-        order_emoji = "🎲"
-    
-    print(f"\n{'='*60}")
-    print(f"  RESULTS: AUTHOR ORDERING CLASSIFICATION")
-    print(f"{'='*60}")
-    print(f"  Total papers fetched          : {summary['total_papers_fetched']}")
-    print(f"  Eligible papers (≥{args.min_authors} authors)  : {summary['eligible_papers']}")
-    print(f"  Alphabetical papers           : {summary['alphabetical_papers']}")
-    print(f"  Contribution-based papers     : {summary['contribution_based_papers']}")
-    print(f"  AlphabeticalRate              : {summary['alphabetical_rate']:.2%}")
-    print(f"  ─────────────────────────────────────────────────")
-    print(f"  {order_emoji} CLASSIFICATION         : {order_type}")
-    print(f"  Confidence                    : {summary['confidence']}")
-    print(f"  ─────────────────────────────────────────────────")
-    print(f"  Field Culture Prior           : {field_culture['field_type']}")
-    print(f"  Prior Confidence              : {field_culture['prior_confidence']}")
-    if args.check_fulltext:
-        print(f"  CRediT Section Rate           : "
-              f"{credit_rate:.2%}" if isinstance(credit_rate, float)
-              else f"  CRediT Section Rate           : N/A")
-    print(f"{'='*60}")
+        tier_label = "Mixed / Hybrid"
+
+    W = 64
+    print(f"\n{'='*W}")
+    print(f"  3-TIER AUTHOR ORDERING CLASSIFICATION")
+    print(f"  Journal : {journal_label}")
+    print(f"{'='*W}")
+    print(f"  Total papers fetched              : {summary['total_papers_fetched']}")
+    print(f"  Eligible papers (>= {args.min_authors} authors)    : {summary['eligible_papers']}")
+    print(f"  {'─'*56}")
+    print(f"  Per-paper tier breakdown:")
+    print(f"    EC  papers (Explicit Contribution) : {summary['ec_papers']:4d}  [{ec_rate:.1%}]")
+    print(f"    A/R papers (Alphabetical / Random) : {summary['ar_papers']:4d}  [{ar_rate:.1%}]")
+    print(f"    RC  papers (Relative Contribution) : {summary['rc_papers']:4d}  [{rc_rate:.1%}]")
+    print(f"  {'─'*56}")
+    print(f"  Contribution strength scores (journal level):")
+    print(f"    alpha (A/R) = {summary['journal_alpha']:.4f}")
+    print(f"    beta  (RC)  = {summary['journal_beta']:.4f}")
+    print(f"    gamma (EC)  = {summary['journal_gamma']:.4f}")
+    print(f"  {'─'*56}")
+    print(f"  Co-authorship patterns:")
+    print(f"    Papers with co-first authors  : {summary['co_first_papers']}")
+    print(f"    Papers with co-last  authors  : {summary['co_last_papers']}")
+    print(f"  {'─'*56}")
+    print(f"  3-Layer Decision:")
+    print(f"    Layer 1 — EC_rate  >= 30% : {ec_rate:.1%}  {'<== TRIGGERED' if ec_rate >= 0.30 else ''}")
+    print(f"    Layer 2 — A/R_rate >= 75% : {ar_rate:.1%}  {'<== TRIGGERED' if ar_rate >= 0.75 else ''}")
+    print(f"    Layer 3 — A/R_rate <= 25% : {ar_rate:.1%}  {'<== TRIGGERED' if ar_rate <= 0.25 and ec_rate < 0.30 else ''}")
+    print(f"  {'─'*56}")
+    print(f"  CLASSIFICATION  : {tier_label}")
+    print(f"  Confidence      : {summary['confidence']}")
+    print(f"  {'─'*56}")
+    print(f"  Field Culture Prior : {field_culture['field_type']}")
+    print(f"  Prior Confidence    : {field_culture['prior_confidence']}")
+    if args.check_fulltext and credit_rate is not None:
+        print(f"  CRediT Section Rate : {credit_rate:.2%}")
+    print(f"{'='*W}")
 
     # ── Step 7: Export ──
     save_to_excel(paper_results, summary, journal_label, field_culture=field_culture)
