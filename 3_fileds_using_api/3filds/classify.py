@@ -528,7 +528,7 @@ client = OpenAI(
     base_url="https://api.deepseek.com"
 )
 
-MODEL_NAME = "deepseek-chat"
+MODEL_NAME = "deepseek-reasoner"
 
 MAIN_FIELDS = [
     "Multidisciplinary",
@@ -863,7 +863,7 @@ MAIN_FIELDS = [
     "Podiatry",
     "Radiological and Ultrasound Technology",
     "Respiratory Care",
-    "Speech and Hearing"
+    "Speech and Hearing","Genetics"
 ]
 # --- Paper classification ---
 def classify_paper(title, abstract, fields):
@@ -927,4 +927,4 @@ def classify_csv(input_csv, output_csv):
         print("Processing complete. Output saved to", output_csv)
 
 if __name__ == "__main__":
-    classify_csv('input4.csv', 'output4.csv')
+    classify_csv('input4_1.csv', 'output4_1.csv')
