@@ -87,11 +87,18 @@ CREDIT_KEYWORDS = [
     "writing - review",
     "review & editing",
     "review and editing",
-    # Section header phrases that signal a CRediT block
+    # Section header phrases that signal a CRediT block (1 match is sufficient)
     "author contributions",
     "authors' contributions",
     "contributions of authors",
 ]
+
+# Section headers that alone are enough to confirm a CRediT block
+CREDIT_SECTION_HEADERS = {
+    "author contributions",
+    "authors' contributions",
+    "contributions of authors",
+}
 
 
 # ── ACI Detection ─────────────────────────────────────────────────────────────
@@ -213,11 +220,26 @@ def fetch_fulltext(doi: str) -> tuple[str, str]:
 
 def check_credit_keywords(html_lower: str) -> bool:
     """
-    Return True if >= 2 CRediT keywords are found in the HTML text.
-    Two or more matches gives confident evidence of a CRediT section.
+    Return True if the full text contains evidence of a CRediT section.
+
+    Two-tier check:
+      1. If ANY section-header phrase is found ("author contributions", etc.)
+         → immediately True (these headers only appear in contribution sections).
+      2. Otherwise require >= 2 CRediT role keywords (e.g. "conceptualization"
+         + "supervision") to confirm a role-based contribution block.
+
+    This avoids false positives from papers that mention a single role word
+    (e.g. "software" or "resources") in an unrelated context.
     """
-    matched = [kw for kw in CREDIT_KEYWORDS if kw in html_lower]
-    return len(matched) >= 2
+    # Tier 1: section header alone is conclusive
+    for header in CREDIT_SECTION_HEADERS:
+        if header in html_lower:
+            return True
+
+    # Tier 2: need >= 2 CRediT role keywords
+    role_keywords = [kw for kw in CREDIT_KEYWORDS if kw not in CREDIT_SECTION_HEADERS]
+    matched_roles = [kw for kw in role_keywords if kw in html_lower]
+    return len(matched_roles) >= 2
 
 
 # ── Steps 5 & 6: Author Name Normalisation & Alphabetical Check ───────────────
@@ -232,8 +254,15 @@ def normalize_family_name(name: str) -> str:
 def is_alphabetical(authors: list) -> bool:
     """
     Return True if authors are sorted A→Z by normalised family name.
-    Returns False if any author is missing a family name.
+
+    Guards:
+      - Requires >= 4 authors (fewer authors make the test statistically
+        unreliable — 3 authors have a 1/6 = 16.7% false-positive rate).
+      - Returns False if any author is missing a family name.
     """
+    if len(authors) < 4:
+        return False  # not enough authors to reliably detect alphabetical ordering
+
     family_names = []
     for author in authors:
         family = author.get("family", "").strip()
@@ -268,17 +297,6 @@ def classify_paper(authors: list, has_credit: bool, has_aci: bool) -> dict:
     go directly to Steps 5→6 (alphabetical check then RC default).
     """
     n = len(authors)
-
-    if n < 4:
-        return {
-            "classification": "Excluded",
-            "ec_type":        None,
-            "ordering_type":  "Excluded / Too few authors",
-            "is_alphabetical": False,
-            "confidence":     0.0,
-            "chance_prob":    0.0,
-            "interpretation": f"Only {n} author(s) — need >= 4 to classify reliably",
-        }
 
     # Step 3: EC-CRediT
     if has_credit is True:
@@ -347,11 +365,24 @@ def classify_paper(authors: list, has_credit: bool, has_aci: bool) -> dict:
 
 # ── Step 1a: Fetch from Crossref ──────────────────────────────────────────────
 
-def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
-    """Fetch paper metadata from the Crossref API."""
+MIN_ELIGIBLE_PAPERS = 20   # must reach this many 4+-author papers before stopping
+
+
+def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500,
+                          min_eligible=MIN_ELIGIBLE_PAPERS, min_authors=4):
+    """
+    Fetch paper metadata from the Crossref API.
+
+    Keeps fetching beyond `max_papers` if needed until at least `min_eligible`
+    papers with >= `min_authors` authors have been collected, so that journals
+    full of single-author editorials/letters never produce "Insufficient data".
+    A hard cap of max(max_papers * 5, 1500) prevents runaway fetching.
+    """
     papers = []
-    rows_per_page = 100
-    offset = 0
+    eligible_count = 0
+    rows_per_page  = 100
+    offset         = 0
+    hard_cap       = max(max_papers * 5, 1500)
 
     filters = ["type:journal-article"]
     if issn:
@@ -367,9 +398,9 @@ def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
     if journal_name and not issn:
         base_params["query.container-title"] = journal_name
 
-    print(f"\n📡 [Crossref] Fetching papers (target: {max_papers})...")
+    print(f"\n📡 [Crossref] Fetching papers (target: {max_papers}, need >= {min_eligible} eligible)...")
 
-    while len(papers) < max_papers:
+    while len(papers) < hard_cap:
         params = {**base_params, "offset": offset}
         try:
             resp = requests.get(CROSSREF_BASE, params=params, timeout=20)
@@ -398,9 +429,16 @@ def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
                     "journal": journal,
                     "source":  "Crossref",
                 })
+                if len(authors) >= min_authors:
+                    eligible_count += 1
 
             offset += rows_per_page
-            print(f"  {len(papers)} papers fetched...")
+            print(f"  {len(papers)} papers fetched ({eligible_count} eligible)...")
+
+            # Stop once we have enough total AND enough eligible
+            if len(papers) >= max_papers and eligible_count >= min_eligible:
+                break
+
             if len(items) < rows_per_page:
                 break
 
@@ -411,8 +449,12 @@ def fetch_papers_crossref(issn=None, journal_name=None, max_papers=500):
             print(f"  ⚠️  Crossref error: {e}")
             break
 
-    print(f"✅ Crossref: {len(papers)} papers.")
-    return papers[:max_papers]
+    if eligible_count < min_eligible:
+        print(f"  ⚠️  Only {eligible_count} eligible papers found (need {min_eligible}). "
+              f"Journal may have few multi-author papers in Crossref.")
+
+    print(f"✅ Crossref: {len(papers)} papers ({eligible_count} with >= {min_authors} authors).")
+    return papers
 
 
 # ── Step 1b: Fetch from Semantic Scholar ─────────────────────────────────────
@@ -582,10 +624,10 @@ def analyze_papers(papers: list, min_authors: int = 4, sample: int = 50):
     credit_hits      = 0
     aci_hits         = 0
 
-    # Select which DOIs get full-text checking
+    # Select which DOIs get full-text checking (all papers regardless of author count)
     eligible_dois = [
         p["doi"] for p in papers
-        if len(p.get("authors", [])) >= min_authors and p.get("doi", "N/A") != "N/A"
+        if p.get("doi", "N/A") != "N/A"
     ]
     sample_size   = min(sample, len(eligible_dois))
     sampled_dois  = set(random.sample(eligible_dois, sample_size)) if eligible_dois else set()
@@ -596,8 +638,6 @@ def analyze_papers(papers: list, min_authors: int = 4, sample: int = 50):
         authors = paper.get("authors", [])
         n       = len(authors)
 
-        if n < min_authors:
-            continue
         total_eligible += 1
 
         has_credit  = None
@@ -1036,7 +1076,8 @@ def main():
 
     if args.source in ("crossref", "both", "all"):
         papers.extend(fetch_papers_crossref(
-            issn=args.issn, journal_name=args.journal, max_papers=args.max
+            issn=args.issn, journal_name=args.journal, max_papers=args.max,
+            min_eligible=MIN_ELIGIBLE_PAPERS, min_authors=args.min_authors,
         ))
 
     if args.source in ("semantic", "both", "all"):
