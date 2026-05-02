@@ -1,1 +1,1 @@
-from huggingface_hub import login; token = input("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"); login(token=token) 
+from huggingface_hub import login; token = input("HF_TOKEN"); login(token=token) 
