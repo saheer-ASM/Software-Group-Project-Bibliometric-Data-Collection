@@ -19,12 +19,12 @@ body{
 
 .container{
     position: relative;
-    width: 850px;
-    height: 550px;
+    width: 100vw;
+    min-height: 100vh;
     background: #fff;
-    margin: 20px;
-    border-radius: 30px;
-    box-shadow: 0 0 30px rgba(0, 0, 0, .2);
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
     overflow: hidden;
 }
 
@@ -52,7 +52,7 @@ form{ width: 100%; }
     align-items: center;
     color: #333;
     text-align: center;
-    padding: 40px;
+    padding: clamp(32px, 5vw, 72px);
     z-index: 1;
     transition: .4s ease-in-out 0.4s, visibility 0s 0.3s;
 }
@@ -64,7 +64,7 @@ form{ width: 100%; }
 
 .input-box{
     position: relative;
-    margin: 30px 0;
+    margin: 24px 0;
 }
 
     .input-box input{
@@ -233,7 +233,7 @@ form{ width: 100%; }
     }
 
 @media screen and (max-width: 650px){
-    .container{ height: calc(100vh - 40px); }
+    .container{ min-height: 100vh; }
 
     .form-box{
         bottom: 0;

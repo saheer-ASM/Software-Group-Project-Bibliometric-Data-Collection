@@ -5,6 +5,13 @@ const AuthForm = ({ onLogin }) => {
   const [isActive, setIsActive] = useState(false);
   const [loginUsername, setLoginUsername] = useState('');
   const [registerUsername, setRegisterUsername] = useState('');
+<<<<<<< HEAD
+=======
+  const [registerEmail, setRegisterEmail] = useState('');
+  const [registerDesignation, setRegisterDesignation] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
+>>>>>>> 3cd032d (Registration UI update)
 
   const handleRegisterClick = () => {
     setIsActive(true);
@@ -16,6 +23,7 @@ const AuthForm = ({ onLogin }) => {
 
   const handleLoginSubmit = (e) => {
     e.preventDefault();
+<<<<<<< HEAD
     // Pass username to parent component
     onLogin(loginUsername || 'User');
   };
@@ -24,6 +32,41 @@ const AuthForm = ({ onLogin }) => {
     e.preventDefault();
     // Pass username to parent component
     onLogin(registerUsername || 'User');
+=======
+    setError('');
+    if (registerPassword.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+    if (registerPassword !== registerConfirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: registerUsername,
+          email: registerEmail,
+          designation: registerDesignation,
+          password: registerPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.message || 'Registration failed');
+        return;
+      }
+      localStorage.setItem('token', data.token);
+      onLogin(data.user);
+    } catch {
+      setError('Network error. Is the server running?');
+    } finally {
+      setLoading(false);
+    }
+>>>>>>> 3cd032d (Registration UI update)
   };
 
   return (
@@ -65,10 +108,17 @@ const AuthForm = ({ onLogin }) => {
         <form onSubmit={handleRegisterSubmit}>
           <h1>Registration</h1>
           <div className="input-box">
+<<<<<<< HEAD
             <input 
               type="text" 
               placeholder="Username" 
               required 
+=======
+            <input
+              type="text"
+              placeholder="Full Name"
+              required
+>>>>>>> 3cd032d (Registration UI update)
               value={registerUsername}
               onChange={(e) => setRegisterUsername(e.target.value)}
             />
@@ -86,7 +136,24 @@ const AuthForm = ({ onLogin }) => {
             <input type="password" placeholder="Password" required />
             <i className='bx bxs-lock-alt'></i>
           </div>
+<<<<<<< HEAD
           <button type="submit" className="btn">Register</button>
+=======
+          <div className="input-box">
+            <input
+              type="password"
+              placeholder="Confirm Password"
+              required
+              minLength={8}
+              value={registerConfirmPassword}
+              onChange={(e) => setRegisterConfirmPassword(e.target.value)}
+            />
+            <i className='bx bxs-lock-alt'></i>
+          </div>
+          <button type="submit" className="btn" disabled={loading}>
+            {loading ? 'Registering…' : 'Register'}
+          </button>
+>>>>>>> 3cd032d (Registration UI update)
           <p>or register with social platforms</p>
           <div className="social-icons">
             <a href="#"><i className='bx bxl-google'></i></a>
