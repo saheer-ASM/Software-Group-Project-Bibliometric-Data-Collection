@@ -149,3 +149,6 @@ evaluation_results.json
 *.sqlite3
 # Jupyter notebooks
 *.ipynb
+
+login.py
+login_clean.py
