@@ -1,83 +1,79 @@
+# Bibliometric Data Collection Project
 
-📚 Bibliometric Data Collection Project
+Welcome to the team. Follow this guide to set up the project and contribute safely.
 
-Welcome to the team! Follow this guide to set up the project on your computer and start contributing.
+---
 
+## Phase 1: Initial Setup
 
-
-================================================================================================
- 🏁 Phase 1: Initial Download
-
-1. Open your Terminal(Command Prompt or PowerShell on Windows).
+1. Open Terminal (`Command Prompt`/`PowerShell` on Windows).
 2. Move to your Desktop:
 
-# cd Desktop
+```bash
+cd Desktop
+```
 
-3. Clone the project:
+3. Clone the repository:
 
-# git clone <YOUR_REPO_URL_HERE>
+```bash
+git clone <YOUR_REPO_URL_HERE>
+```
 
+4. Enter the project folder:
 
-4. Enter the folder:
+```bash
+cd Software-Group-Project-Bibliometric-Data-Collection
+```
 
-# cd Software-Group-Project-Bibliometric-Data-Collection
+---
 
-======================================================================================================
+## Phase 2: Daily Workflow (Safe Branching)
 
-🛠️ Phase 2: Daily Workflow (The "Safe" Way)
+Never code directly on `main`. Always create a feature branch.
 
-To avoid overwriting each other's work, we use **Branches**. Never code directly on the `main` branch!
+1. Get the latest code:
 
-1. Get the latest code
+```bash
+git checkout main
+git pull origin main
+```
 
-Before starting any new task, make sure your local code is up to date:
+2. Create your work branch:
 
-# git checkout main
-# git pull origin main
+Replace `task-name` with your task (example: `api-fix`).
 
+```bash
+git checkout -b feature/task-name
+```
 
- 2. Create a Work Branch
+3. Save your work:
 
-Create a new "playground" for your specific task:
-    Replace 'task-name' with what you are doing (e.g., feature/api-fix)
-# git checkout -b feature/task-name
+```bash
+git add .
+git commit -m "Brief description of what you changed"
+```
 
+---
 
-3. Save your work
+## Phase 3: Share Your Work
 
-As you write code, save your progress locally:
+1. Push your branch:
 
-
-# git add .
-# git commit -m "Brief description of what you changed"
-
-#git commit -m dashboard 
-================================================================================================
-
-
-📤 Phase 3: Sharing your work
-
-When your task is finished and tested:
-
-1. Push to GitHub
-
-# git push origin feature/task-name
-
-
-
+```bash
+git push -u origin feature/task-name
+```
 
 2. Create a Pull Request (PR):
- Go to the project page on GitHub.
- Click the green **"Compare & pull request"** button.
- Add a title and click **"Create pull request"**.
+- Go to the repository on GitHub.
+- Click **Compare & pull request**.
+- Add a clear title/description.
+- Click **Create pull request**.
 
+---
 
-=======================================================================
+## Important Rules
 
-
-## ⚠️ Important Rules
-
-* 🚫 **Do not push** `node_modules/` or `venv/` folders.
-* 🔑 **Do not push** `.env` files (API keys).
-* ✅ **Always pull** before you start a new branch.
+- Do not push `node_modules/`, `.venv/`, or `venv/`.
+- Do not push `.env` files (API keys/secrets).
+- Always pull latest `main` before creating a new branch.
 

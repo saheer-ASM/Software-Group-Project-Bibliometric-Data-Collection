@@ -103,10 +103,12 @@ const AuthForm = ({ onLogin }) => {
   };
 
   const handleRegisterClick = () => {
+    setError('');
     setIsActive(true);
   };
 
   const handleLoginClick = () => {
+    setError('');
     setIsActive(false);
   };
 
@@ -136,14 +138,15 @@ const AuthForm = ({ onLogin }) => {
 
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
+    setError('');
 
     if (registerPassword.length < 8) {
-      alert('Password must be at least 8 characters');
+      setError('Password must be at least 8 characters');
       return;
     }
 
     if (registerPassword !== registerConfirmPassword) {
-      alert('Passwords do not match');
+      setError('Passwords do not match');
       return;
     }
 
@@ -181,6 +184,16 @@ const AuthForm = ({ onLogin }) => {
 
   return (
     <div className={`container ${isActive ? 'active' : ''}`}>
+      {error && (
+        <div style={{
+          position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)',
+          background: '#ff4d4f', color: '#fff', padding: '10px 24px',
+          borderRadius: 8, zIndex: 9999, fontWeight: 500
+        }}>
+          {error}
+        </div>
+      )}
+
       {/* Login Form */}
       <div className="form-box login">
         <form onSubmit={handleLoginSubmit}>
@@ -208,7 +221,9 @@ const AuthForm = ({ onLogin }) => {
           <div className="forgot-link">
             <a href="#forgot" onClick={handleForgotPassword}>Forgot Password?</a>
           </div>
-          <button type="submit" className="btn">Login</button>
+          <button type="submit" className="btn" disabled={loading}>
+            {loading ? 'Logging in…' : 'Login'}
+          </button>
           <p>or login with social platforms</p>
           <div className="social-icons" aria-label="Social sign-in options">
             <button
@@ -307,7 +322,9 @@ const AuthForm = ({ onLogin }) => {
             />
             <span className="input-icon" aria-hidden="true">L</span>
           </div>
-          <button type="submit" className="btn">Register</button>
+          <button type="submit" className="btn" disabled={loading}>
+            {loading ? 'Registering…' : 'Register'}
+          </button>
           <p>or register with social platforms</p>
           <div className="social-icons" aria-label="Social sign-in options">
             <button

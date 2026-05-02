@@ -7,24 +7,26 @@ import Profile from './Profile';
 import './App.css';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('login'); // 'login', 'dashboard', 'explorer', 'settings', 'about', 'profile'
-  const [username, setUsername] = useState('');
-  const [userEmail, setUserEmail] = useState('');
+  const [currentPage, setCurrentPage] = useState('login');
+  const [user, setUser] = useState(null); // { id, username, email, designation }
   const [authorName, setAuthorName] = useState('');
   const [hasSearchedAuthor, setHasSearchedAuthor] = useState(false);
 
-  const handleLogin = (user) => {
-    setUsername(user);
-    setUserEmail(`${user.toLowerCase().replace(' ', '')}@university.edu`);
+  const handleLogin = (userData) => {
+    setUser(userData);
     setCurrentPage('dashboard');
   };
 
   const handleLogout = () => {
+    localStorage.removeItem('token');
     setCurrentPage('login');
-    setUsername('');
-    setUserEmail('');
+    setUser(null);
     setAuthorName('');
     setHasSearchedAuthor(false);
+  };
+
+  const handleUserUpdate = (updatedUser) => {
+    setUser((prev) => ({ ...prev, ...updatedUser }));
   };
 
   const handleNavigateToExplorer = (searchedAuthor) => {
@@ -39,24 +41,22 @@ function App() {
   };
 
   const handleNavigateToSettings = (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     setCurrentPage('profile');
   };
 
   const handleNavigateToAbout = (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     setCurrentPage('about');
   };
 
   const handleNavigateToProfile = (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     setCurrentPage('profile');
   };
 
   const handleBackToDashboard = (e) => {
-    if (e && e.preventDefault) {
-      e.preventDefault();
-    }
+    if (e && e.preventDefault) e.preventDefault();
     setCurrentPage('dashboard');
   };
 
@@ -66,8 +66,8 @@ function App() {
         <AuthForm onLogin={handleLogin} />
       )}
       {currentPage === 'dashboard' && (
-        <Dashboard 
-          username={username} 
+        <Dashboard
+          username={user?.username}
           onLogout={handleLogout}
           onNavigateToExplorer={handleNavigateToExplorer}
           onNavigateToSettings={handleNavigateToSettings}
@@ -78,7 +78,7 @@ function App() {
         />
       )}
       {currentPage === 'explorer' && (
-        <DataExplorer 
+        <DataExplorer
           authorName={authorName}
           onBack={handleBackToDashboard}
           onNavigateToSettings={handleNavigateToSettings}
@@ -91,7 +91,7 @@ function App() {
         />
       )}
       {currentPage === 'about' && (
-        <AboutUs 
+        <AboutUs
           onBack={handleBackToDashboard}
           onNavigateToSettings={handleNavigateToSettings}
           onNavigateToProfile={handleNavigateToProfile}
@@ -101,9 +101,9 @@ function App() {
         />
       )}
       {currentPage === 'profile' && (
-        <Profile 
-          username={username}
-          userEmail={userEmail}
+        <Profile
+          user={user}
+          onUserUpdate={handleUserUpdate}
           onBack={handleBackToDashboard}
           onNavigateToSettings={handleNavigateToSettings}
           onNavigateToAbout={handleNavigateToAbout}
