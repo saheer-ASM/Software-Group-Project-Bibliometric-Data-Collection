@@ -81,12 +81,71 @@ Thumbs.db
 *.log
 logs/
 
-# Model files (if large)
+# ============================================
+# MODEL FILES (Large files - NOT for GitHub)
+# ============================================
 *.h5
 *.pkl
 *.model
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.pb
 
-# Data files (optional - uncomment if needed)
-# *.csv
-# *.json
-# *.xlsx
+# Model folder - YOUR 440MB MODEL!
+scibert_finetuned/
+scibert_finetuned_v2/
+
+# ============================================
+# DATA FILES (CSV, Excel, etc.)
+# ============================================
+*.csv
+*.xlsx
+*.xls
+*.xlsm
+*.xlsb
+*.parquet
+*.feather
+
+# Specific data files in your project
+final_dataset.csv
+*input*.csv
+*output*.csv
+*.output.csv
+*_output.csv
+unique_fields_*.csv
+
+# ============================================
+# RESULTS & OUTPUT FOLDERS
+# ============================================
+results/
+results_new/
+3_fileds_using_api/3filds/results/
+feildclassification/results/
+feildclassification/results_new/
+*_output/
+output/
+
+# ============================================
+# SPECIFIC PROJECT PATTERNS
+# ============================================
+vresearch_classifier_output/
+3_fileds_using_api/3filds/*output*.csv
+3_fileds_using_api/3filds/*input*.csv
+
+# Jupyter notebooks with outputs (optional - keep if you want notebooks without outputs)
+# *.ipynb  # Uncomment if you don't want any notebooks at all
+
+# Training artifacts
+training_history.json
+evaluation_results.json
+*.log
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+# Jupyter notebooks
+*.ipynb

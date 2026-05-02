@@ -528,7 +528,7 @@ client = OpenAI(
     base_url="https://api.deepseek.com"
 )
 
-MODEL_NAME = "deepseek-chat"
+MODEL_NAME = "deepseek-reasoner"
 
 MAIN_FIELDS = [
     "Multidisciplinary",
@@ -863,14 +863,14 @@ MAIN_FIELDS = [
     "Podiatry",
     "Radiological and Ultrasound Technology",
     "Respiratory Care",
-    "Speech and Hearing"
+    "Speech and Hearing","Genetics"
 ]
 # --- Paper classification ---
 def classify_paper(title, abstract, fields):
     prompt = (
         f"Classify the following paper into the top 3 most relevant fields from this list: {', '.join(fields)}.\n"
         f"Title: {title}\nAbstract: {abstract}\n"
-        "Respond with the 3 fields and their confidence percentages, such that the sum of the confidences is 100%.Do not include any explanations or extra text "
+        "Respond with the 3 fields and their confidence percentages, such that the sum of the confidences is 100%.Do not include any explanations or extra text and you must give the fileds from above list only."
         "Format: Field 1: <name>, Confidence: <percent>%. "
         "Field 2: <name>, Confidence: <percent>%. "
         "Field 3: <name>, Confidence: <percent>%."
@@ -927,4 +927,4 @@ def classify_csv(input_csv, output_csv):
         print("Processing complete. Output saved to", output_csv)
 
 if __name__ == "__main__":
-    classify_csv('input0.csv', 'output0.csv')
+    classify_csv('input4_1.csv', 'output4_1.csv')
