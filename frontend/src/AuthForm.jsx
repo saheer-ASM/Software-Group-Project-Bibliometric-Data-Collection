@@ -1,6 +1,23 @@
 import React, { useState } from 'react';
 import './AuthForm.css';
 
+const SocialIcons = () => (
+  <div className="social-icons">
+    <a href="#google" aria-label="Google" title="Google">
+      <img src="/assets/google.png" alt="" />
+    </a>
+    <a href="#microsoft" aria-label="Microsoft" title="Microsoft">
+      <img src="/assets/microsoft.png" alt="" />
+    </a>
+    <a href="#github" aria-label="GitHub" title="GitHub">
+      <img src="/assets/github.png" alt="" />
+    </a>
+    <a href="#linkedin" aria-label="LinkedIn" title="LinkedIn">
+      <img src="/assets/linkedin.png" alt="" />
+    </a>
+  </div>
+);
+
 const AuthForm = ({ onLogin }) => {
   const [isActive, setIsActive] = useState(false);
   const [loginUsername, setLoginUsername] = useState('');
@@ -64,12 +81,7 @@ const AuthForm = ({ onLogin }) => {
           </div>
           <button type="submit" className="btn">Login</button>
           <p>or login with social platforms</p>
-          <div className="social-icons">
-            <a href="#google"><i className='bx bxl-google'></i></a>
-            <a href="#facebook"><i className='bx bxl-facebook'></i></a>
-            <a href="#github"><i className='bx bxl-github'></i></a>
-            <a href="#linkedin"><i className='bx bxl-linkedin'></i></a>
-          </div>
+          <SocialIcons />
         </form>
       </div>
 
@@ -131,12 +143,7 @@ const AuthForm = ({ onLogin }) => {
           </div>
           <button type="submit" className="btn">Register</button>
           <p>or register with social platforms</p>
-          <div className="social-icons">
-            <a href="#google"><i className='bx bxl-google'></i></a>
-            <a href="#facebook"><i className='bx bxl-facebook'></i></a>
-            <a href="#github"><i className='bx bxl-github'></i></a>
-            <a href="#linkedin"><i className='bx bxl-linkedin'></i></a>
-          </div>
+          <SocialIcons />
         </form>
       </div>
 
