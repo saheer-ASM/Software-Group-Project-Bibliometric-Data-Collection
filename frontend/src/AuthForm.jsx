@@ -5,13 +5,10 @@ const AuthForm = ({ onLogin }) => {
   const [isActive, setIsActive] = useState(false);
   const [loginUsername, setLoginUsername] = useState('');
   const [registerUsername, setRegisterUsername] = useState('');
-<<<<<<< HEAD
-=======
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerDesignation, setRegisterDesignation] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
->>>>>>> 3cd032d (Registration UI update)
 
   const handleRegisterClick = () => {
     setIsActive(true);
@@ -23,50 +20,23 @@ const AuthForm = ({ onLogin }) => {
 
   const handleLoginSubmit = (e) => {
     e.preventDefault();
-<<<<<<< HEAD
-    // Pass username to parent component
     onLogin(loginUsername || 'User');
   };
 
   const handleRegisterSubmit = (e) => {
     e.preventDefault();
-    // Pass username to parent component
-    onLogin(registerUsername || 'User');
-=======
-    setError('');
+
     if (registerPassword.length < 8) {
-      setError('Password must be at least 8 characters');
+      alert('Password must be at least 8 characters');
       return;
     }
+
     if (registerPassword !== registerConfirmPassword) {
-      setError('Passwords do not match');
+      alert('Passwords do not match');
       return;
     }
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: registerUsername,
-          email: registerEmail,
-          designation: registerDesignation,
-          password: registerPassword,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.message || 'Registration failed');
-        return;
-      }
-      localStorage.setItem('token', data.token);
-      onLogin(data.user);
-    } catch {
-      setError('Network error. Is the server running?');
-    } finally {
-      setLoading(false);
-    }
->>>>>>> 3cd032d (Registration UI update)
+
+    onLogin(registerUsername || 'User');
   };
 
   return (
@@ -76,10 +46,10 @@ const AuthForm = ({ onLogin }) => {
         <form onSubmit={handleLoginSubmit}>
           <h1>Login</h1>
           <div className="input-box">
-            <input 
-              type="text" 
-              placeholder="Username" 
-              required 
+            <input
+              type="text"
+              placeholder="Username"
+              required
               value={loginUsername}
               onChange={(e) => setLoginUsername(e.target.value)}
             />
@@ -90,15 +60,15 @@ const AuthForm = ({ onLogin }) => {
             <i className='bx bxs-lock-alt'></i>
           </div>
           <div className="forgot-link">
-            <a href="#">Forgot Password?</a>
+            <a href="#forgot">Forgot Password?</a>
           </div>
           <button type="submit" className="btn">Login</button>
           <p>or login with social platforms</p>
           <div className="social-icons">
-            <a href="#"><i className='bx bxl-google'></i></a>
-            <a href="#"><i className='bx bxl-facebook'></i></a>
-            <a href="#"><i className='bx bxl-github'></i></a>
-            <a href="#"><i className='bx bxl-linkedin'></i></a>
+            <a href="#google"><i className='bx bxl-google'></i></a>
+            <a href="#facebook"><i className='bx bxl-facebook'></i></a>
+            <a href="#github"><i className='bx bxl-github'></i></a>
+            <a href="#linkedin"><i className='bx bxl-linkedin'></i></a>
           </div>
         </form>
       </div>
@@ -108,37 +78,46 @@ const AuthForm = ({ onLogin }) => {
         <form onSubmit={handleRegisterSubmit}>
           <h1>Registration</h1>
           <div className="input-box">
-<<<<<<< HEAD
-            <input 
-              type="text" 
-              placeholder="Username" 
-              required 
-=======
             <input
               type="text"
               placeholder="Full Name"
               required
->>>>>>> 3cd032d (Registration UI update)
               value={registerUsername}
               onChange={(e) => setRegisterUsername(e.target.value)}
             />
             <i className='bx bxs-user'></i>
           </div>
           <div className="input-box">
-            <input type="email" placeholder="Email" required />
+            <input
+              type="email"
+              placeholder="Email"
+              required
+              value={registerEmail}
+              onChange={(e) => setRegisterEmail(e.target.value)}
+            />
             <i className='bx bxs-envelope'></i>
           </div>
           <div className="input-box">
-            <input type="text" placeholder="Designation" required />
+            <input
+              type="text"
+              placeholder="Designation"
+              required
+              value={registerDesignation}
+              onChange={(e) => setRegisterDesignation(e.target.value)}
+            />
             <i className='bx bxs-briefcase'></i>
           </div>
           <div className="input-box">
-            <input type="password" placeholder="Password" required />
+            <input
+              type="password"
+              placeholder="Password (min 8 chars)"
+              required
+              minLength={8}
+              value={registerPassword}
+              onChange={(e) => setRegisterPassword(e.target.value)}
+            />
             <i className='bx bxs-lock-alt'></i>
           </div>
-<<<<<<< HEAD
-          <button type="submit" className="btn">Register</button>
-=======
           <div className="input-box">
             <input
               type="password"
@@ -150,16 +129,13 @@ const AuthForm = ({ onLogin }) => {
             />
             <i className='bx bxs-lock-alt'></i>
           </div>
-          <button type="submit" className="btn" disabled={loading}>
-            {loading ? 'Registering…' : 'Register'}
-          </button>
->>>>>>> 3cd032d (Registration UI update)
+          <button type="submit" className="btn">Register</button>
           <p>or register with social platforms</p>
           <div className="social-icons">
-            <a href="#"><i className='bx bxl-google'></i></a>
-            <a href="#"><i className='bx bxl-facebook'></i></a>
-            <a href="#"><i className='bx bxl-github'></i></a>
-            <a href="#"><i className='bx bxl-linkedin'></i></a>
+            <a href="#google"><i className='bx bxl-google'></i></a>
+            <a href="#facebook"><i className='bx bxl-facebook'></i></a>
+            <a href="#github"><i className='bx bxl-github'></i></a>
+            <a href="#linkedin"><i className='bx bxl-linkedin'></i></a>
           </div>
         </form>
       </div>
