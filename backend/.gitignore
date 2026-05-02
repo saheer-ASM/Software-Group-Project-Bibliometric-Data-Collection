@@ -31,3 +31,7 @@ htmlcov/
 
 # Logs
 *.log
+
+
+# checkers
+test_db.py
