@@ -17,6 +17,7 @@ const AuthForm = ({ onLogin }) => {
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerDesignation, setRegisterDesignation] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
+  const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -47,6 +48,10 @@ const AuthForm = ({ onLogin }) => {
     setError('');
     if (registerPassword.length < 8) {
       setError('Password must be at least 8 characters');
+      return;
+    }
+    if (registerPassword !== registerConfirmPassword) {
+      setError('Passwords do not match');
       return;
     }
     setLoading(true);
@@ -134,7 +139,7 @@ const AuthForm = ({ onLogin }) => {
           <div className="input-box">
             <input
               type="text"
-              placeholder="Username"
+              placeholder="Full Name"
               required
               value={registerUsername}
               onChange={(e) => setRegisterUsername(e.target.value)}
@@ -169,6 +174,17 @@ const AuthForm = ({ onLogin }) => {
               minLength={8}
               value={registerPassword}
               onChange={(e) => setRegisterPassword(e.target.value)}
+            />
+            <i className='bx bxs-lock-alt'></i>
+          </div>
+          <div className="input-box">
+            <input
+              type="password"
+              placeholder="Confirm Password"
+              required
+              minLength={8}
+              value={registerConfirmPassword}
+              onChange={(e) => setRegisterConfirmPassword(e.target.value)}
             />
             <i className='bx bxs-lock-alt'></i>
           </div>
