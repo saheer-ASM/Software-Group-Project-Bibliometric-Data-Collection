@@ -1,1 +1,5 @@
-from huggingface_hub import login; token = input("HF_TOKEN"); login(token=token) 
+import os
+from huggingface_hub import login
+token = os.environ.get("HF_TOKEN")
+if token:
+    login(token=token)
