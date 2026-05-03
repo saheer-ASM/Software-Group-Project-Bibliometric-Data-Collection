@@ -33,3 +33,6 @@ htmlcov/
 *.log
 
 serviceAccountKey.json
+
+# checkers
+test_db.py
