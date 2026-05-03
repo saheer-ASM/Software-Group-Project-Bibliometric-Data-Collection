@@ -1,18 +1,17 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { auth, firestore, missingConfig } from './firebase';
 import './AuthForm.css';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
-
 const AuthForm = ({ onLogin }) => {
+  const navigate = useNavigate();
   const [isActive, setIsActive] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Login fields
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
 
-  // Register fields
   const [registerUsername, setRegisterUsername] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerDesignation, setRegisterDesignation] = useState('');
@@ -24,7 +23,7 @@ const AuthForm = ({ onLogin }) => {
     setError('');
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: loginUsername, password: loginPassword }),
@@ -46,6 +45,7 @@ const AuthForm = ({ onLogin }) => {
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
     setError('');
+
     if (registerPassword.length < 8) {
       setError('Password must be at least 8 characters');
       return;
@@ -56,27 +56,34 @@ const AuthForm = ({ onLogin }) => {
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: registerUsername,
-          email: registerEmail,
-          designation: registerDesignation,
-          password: registerPassword,
-        }),
+      const { createUserWithEmailAndPassword, updateProfile } = await import('firebase/auth');
+      const { doc, setDoc, getFirestore } = await import('firebase/firestore');
+      
+      const userCredential = await createUserWithEmailAndPassword(auth, registerEmail, registerPassword);
+      
+      await updateProfile(userCredential.user, {
+        displayName: registerUsername,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.message || 'Registration failed');
-        return;
-      }
-      localStorage.setItem('token', data.token);
-      onLogin(data.user);
-    } catch {
-      setError('Network error. Is the server running?');
-    } finally {
-      setLoading(false);
+
+      await setDoc(doc(getFirestore(), 'users', userCredential.user.uid), {
+        username: registerUsername,
+        email: registerEmail,
+        designation: registerDesignation,
+        createdAt: new Date(),
+      });
+
+      const token = await userCredential.user.getIdToken();
+      localStorage.setItem('token', token);
+      
+      onLogin({
+        id: userCredential.user.uid,
+        username: registerUsername,
+        email: registerEmail,
+        designation: registerDesignation,
+        photoURL: '',
+      });
+    } catch (err) {
+      setError(err.message || 'Registration failed');
     }
   };
 
@@ -104,7 +111,7 @@ const AuthForm = ({ onLogin }) => {
               value={loginUsername}
               onChange={(e) => setLoginUsername(e.target.value)}
             />
-            <i className='bx bxs-user'></i>
+            <span className="input-icon" aria-hidden="true">U</span>
           </div>
           <div className="input-box">
             <input
@@ -114,20 +121,52 @@ const AuthForm = ({ onLogin }) => {
               value={loginPassword}
               onChange={(e) => setLoginPassword(e.target.value)}
             />
-            <i className='bx bxs-lock-alt'></i>
+            <span className="input-icon" aria-hidden="true">L</span>
           </div>
           <div className="forgot-link">
-            <a href="#forgot">Forgot Password?</a>
+            <a href="#forgot" onClick={handleForgotPassword}>Forgot Password?</a>
           </div>
           <button type="submit" className="btn" disabled={loading}>
             {loading ? 'Logging in…' : 'Login'}
           </button>
           <p>or login with social platforms</p>
-          <div className="social-icons">
-            <a href="#google"><i className='bx bxl-google'></i></a>
-            <a href="#facebook"><i className='bx bxl-facebook'></i></a>
-            <a href="#github"><i className='bx bxl-github'></i></a>
-            <a href="#linkedin"><i className='bx bxl-linkedin'></i></a>
+          <div className="social-icons" aria-label="Social sign-in options">
+            <button
+              type="button"
+              className="social-link google"
+              aria-label="Sign in with Google"
+              disabled={loading}
+              onClick={() => handleSocialLogin('google')}
+            >
+              <img src="/assets/google.png" alt="" />
+            </button>
+            <button
+              type="button"
+              className="social-link microsoft"
+              aria-label="Sign in with Microsoft"
+              disabled={loading}
+              onClick={() => handleUnsupportedProvider('Microsoft')}
+            >
+              <img src="/assets/microsoft.png" alt="" />
+            </button>
+            <button
+              type="button"
+              className="social-link github"
+              aria-label="Sign in with GitHub"
+              disabled={loading}
+              onClick={() => handleSocialLogin('github')}
+            >
+              <img src="/assets/github.png" alt="" />
+            </button>
+            <button
+              type="button"
+              className="social-link linkedin"
+              aria-label="Sign in with LinkedIn"
+              disabled={loading}
+              onClick={() => handleUnsupportedProvider('LinkedIn')}
+            >
+              <img src="/assets/linkedin.png" alt="" />
+            </button>
           </div>
         </form>
       </div>
@@ -144,7 +183,7 @@ const AuthForm = ({ onLogin }) => {
               value={registerUsername}
               onChange={(e) => setRegisterUsername(e.target.value)}
             />
-            <i className='bx bxs-user'></i>
+            <span className="input-icon" aria-hidden="true">U</span>
           </div>
           <div className="input-box">
             <input
@@ -154,7 +193,7 @@ const AuthForm = ({ onLogin }) => {
               value={registerEmail}
               onChange={(e) => setRegisterEmail(e.target.value)}
             />
-            <i className='bx bxs-envelope'></i>
+            <span className="input-icon" aria-hidden="true">@</span>
           </div>
           <div className="input-box">
             <input
@@ -164,7 +203,7 @@ const AuthForm = ({ onLogin }) => {
               value={registerDesignation}
               onChange={(e) => setRegisterDesignation(e.target.value)}
             />
-            <i className='bx bxs-briefcase'></i>
+            <span className="input-icon" aria-hidden="true">D</span>
           </div>
           <div className="input-box">
             <input
@@ -175,7 +214,18 @@ const AuthForm = ({ onLogin }) => {
               value={registerPassword}
               onChange={(e) => setRegisterPassword(e.target.value)}
             />
-            <i className='bx bxs-lock-alt'></i>
+            <span className="input-icon" aria-hidden="true">L</span>
+          </div>
+          <div className="input-box">
+            <input
+              type="password"
+              placeholder="Confirm Password"
+              required
+              minLength={8}
+              value={registerConfirmPassword}
+              onChange={(e) => setRegisterConfirmPassword(e.target.value)}
+            />
+            <span className="input-icon" aria-hidden="true">L</span>
           </div>
           <div className="input-box">
             <input
@@ -192,11 +242,43 @@ const AuthForm = ({ onLogin }) => {
             {loading ? 'Registering…' : 'Register'}
           </button>
           <p>or register with social platforms</p>
-          <div className="social-icons">
-            <a href="#google"><i className='bx bxl-google'></i></a>
-            <a href="#facebook"><i className='bx bxl-facebook'></i></a>
-            <a href="#github"><i className='bx bxl-github'></i></a>
-            <a href="#linkedin"><i className='bx bxl-linkedin'></i></a>
+          <div className="social-icons" aria-label="Social sign-in options">
+            <button
+              type="button"
+              className="social-link google"
+              aria-label="Sign in with Google"
+              disabled={loading}
+              onClick={() => handleSocialLogin('google')}
+            >
+              <img src="/assets/google.png" alt="" />
+            </button>
+            <button
+              type="button"
+              className="social-link microsoft"
+              aria-label="Sign in with Microsoft"
+              disabled={loading}
+              onClick={() => handleUnsupportedProvider('Microsoft')}
+            >
+              <img src="/assets/microsoft.png" alt="" />
+            </button>
+            <button
+              type="button"
+              className="social-link github"
+              aria-label="Sign in with GitHub"
+              disabled={loading}
+              onClick={() => handleSocialLogin('github')}
+            >
+              <img src="/assets/github.png" alt="" />
+            </button>
+            <button
+              type="button"
+              className="social-link linkedin"
+              aria-label="Sign in with LinkedIn"
+              disabled={loading}
+              onClick={() => handleUnsupportedProvider('LinkedIn')}
+            >
+              <img src="/assets/linkedin.png" alt="" />
+            </button>
           </div>
         </form>
       </div>
@@ -206,12 +288,13 @@ const AuthForm = ({ onLogin }) => {
         <div className="toggle-panel toggle-left">
           <h1>Hello, Welcome!</h1>
           <p>Don't have an account?</p>
-          <button className="btn register-btn" onClick={() => { setError(''); setIsActive(true); }}>Register</button>
+          <button className="btn register-btn" onClick={handleRegisterClick}>Register</button>
         </div>
+
         <div className="toggle-panel toggle-right">
           <h1>Welcome Back!</h1>
           <p>Already have an account?</p>
-          <button className="btn login-btn" onClick={() => { setError(''); setIsActive(false); }}>Login</button>
+          <button className="btn login-btn" onClick={handleLoginClick}>Login</button>
         </div>
       </div>
     </div>
