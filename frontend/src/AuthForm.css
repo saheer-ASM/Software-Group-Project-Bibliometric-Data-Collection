@@ -90,13 +90,20 @@ form{ width: 100%; }
             font-weight: 400;
         }
     
-    .input-box i{
+    .input-icon{
         position: absolute;
         right: 20px;
         top: 50%;
         transform: translateY(-50%);
-        font-size: 20px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        font-size: 12px;
         color: #034078;
+        font-weight: 700;
+        pointer-events: none;
     }
 
 .forgot-link{ margin: -15px 0 15px; }
@@ -140,19 +147,31 @@ form{ width: 100%; }
     gap: 14px;
 }
 
-    .social-icons a{
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 44px;
-        height: 44px;
+    .social-link{
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        width: 48px;
+        height: 48px;
+        background: #fff;
         border: 2px solid #C0D6DF;
         border-radius: 8px;
+        font-size: 17px;
         color: #034078;
+        cursor: pointer;
+        font-weight: 800;
+        line-height: 1;
         transition: all 0.3s ease;
     }
 
-    .social-icons a:hover{
+    .social-link img{
+        width: 26px;
+        height: 26px;
+        object-fit: contain;
+        display: block;
+    }
+
+    .social-link:hover{
         border-color: #034078;
         background: #C0D6DF;
         transform: translateY(-2px);
