@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { auth } from './firebase';
 import './AuthForm.css';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
@@ -18,6 +19,73 @@ const AuthForm = ({ onLogin }) => {
   const [registerDesignation, setRegisterDesignation] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
+
+  const handleRegisterClick = () => setIsActive(true);
+  const handleLoginClick = () => setIsActive(false);
+
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotMessage, setForgotMessage] = useState('');
+
+  const handleForgotPassword = (e) => {
+    e.preventDefault();
+    setError('');
+    setForgotMessage('');
+    setShowForgotPassword(true);
+  };
+
+  const handleSendResetEmail = async (e) => {
+    e.preventDefault();
+    setError('');
+    setForgotMessage('');
+    setLoading(true);
+    try {
+      const { sendPasswordResetEmail } = await import('firebase/auth');
+      await sendPasswordResetEmail(auth, forgotEmail, {
+        url: `${window.location.origin}/reset-password`,
+        handleCodeInApp: true,
+      });
+      setForgotMessage('Reset link sent! Check your email inbox.');
+    } catch (err) {
+      if (err.code === 'auth/user-not-found') {
+        setError('No account found with that email');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('Enter a valid email address');
+      } else {
+        setError(err.message || 'Could not send reset email');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSocialLogin = async (provider) => {
+    setError('');
+    setLoading(true);
+    try {
+      const { GoogleAuthProvider, GithubAuthProvider, signInWithPopup } = await import('firebase/auth');
+      const prov = provider === 'google' ? new GoogleAuthProvider() : new GithubAuthProvider();
+      const result = await signInWithPopup(auth, prov);
+      const idToken = await result.user.getIdToken();
+
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/auth/social`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.message || `${provider} sign-in failed`);
+        return;
+      }
+      localStorage.setItem('token', data.token);
+      onLogin(data.user);
+    } catch (err) {
+      setError(err.message || `${provider} sign-in failed`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -92,6 +160,54 @@ const AuthForm = ({ onLogin }) => {
         </div>
       )}
 
+      {showForgotPassword && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000,
+          }}
+          onClick={() => setShowForgotPassword(false)}
+        >
+          <div
+            style={{ background: '#fff', borderRadius: 12, padding: 32, width: 340, boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ marginTop: 0 }}>Reset Password</h2>
+            {forgotMessage ? (
+              <>
+                <p>{forgotMessage}</p>
+                <button type="button" className="btn" onClick={() => setShowForgotPassword(false)}>Close</button>
+              </>
+            ) : (
+              <form onSubmit={handleSendResetEmail}>
+                <p>Enter your account email and we'll send you a link to reset your password.</p>
+                <div className="input-box">
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    required
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                  />
+                  <i className='bx bxs-envelope'></i>
+                </div>
+                <button type="submit" className="btn" disabled={loading} style={{ marginTop: 12 }}>
+                  {loading ? 'Sending…' : 'Send Reset Link'}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ marginTop: 8, background: 'transparent', color: '#1b3d6d', border: '1px solid #1b3d6d' }}
+                  onClick={() => setShowForgotPassword(false)}
+                >
+                  Cancel
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Login Form */}
       <div className="form-box login">
         <form onSubmit={handleLoginSubmit}>
@@ -117,17 +233,15 @@ const AuthForm = ({ onLogin }) => {
             <i className='bx bxs-lock-alt'></i>
           </div>
           <div className="forgot-link">
-            <a href="#forgot">Forgot Password?</a>
+            <a href="#forgot" onClick={handleForgotPassword}>Forgot Password?</a>
           </div>
           <button type="submit" className="btn" disabled={loading}>
             {loading ? 'Logging in…' : 'Login'}
           </button>
           <p>or login with social platforms</p>
           <div className="social-icons">
-            <a href="#google"><i className='bx bxl-google'></i></a>
-            <a href="#facebook"><i className='bx bxl-facebook'></i></a>
-            <a href="#github"><i className='bx bxl-github'></i></a>
-            <a href="#linkedin"><i className='bx bxl-linkedin'></i></a>
+            <button type="button" onClick={() => handleSocialLogin('google')} disabled={loading}><i className='bx bxl-google'></i></button>
+            <button type="button" onClick={() => handleSocialLogin('github')} disabled={loading}><i className='bx bxl-github'></i></button>
           </div>
         </form>
       </div>
@@ -193,10 +307,8 @@ const AuthForm = ({ onLogin }) => {
           </button>
           <p>or register with social platforms</p>
           <div className="social-icons">
-            <a href="#google"><i className='bx bxl-google'></i></a>
-            <a href="#facebook"><i className='bx bxl-facebook'></i></a>
-            <a href="#github"><i className='bx bxl-github'></i></a>
-            <a href="#linkedin"><i className='bx bxl-linkedin'></i></a>
+            <button type="button" onClick={() => handleSocialLogin('google')} disabled={loading}><i className='bx bxl-google'></i></button>
+            <button type="button" onClick={() => handleSocialLogin('github')} disabled={loading}><i className='bx bxl-github'></i></button>
           </div>
         </form>
       </div>
@@ -206,12 +318,12 @@ const AuthForm = ({ onLogin }) => {
         <div className="toggle-panel toggle-left">
           <h1>Hello, Welcome!</h1>
           <p>Don't have an account?</p>
-          <button className="btn register-btn" onClick={() => { setError(''); setIsActive(true); }}>Register</button>
+          <button className="btn register-btn" onClick={handleRegisterClick}>Register</button>
         </div>
         <div className="toggle-panel toggle-right">
           <h1>Welcome Back!</h1>
           <p>Already have an account?</p>
-          <button className="btn login-btn" onClick={() => { setError(''); setIsActive(false); }}>Login</button>
+          <button className="btn login-btn" onClick={handleLoginClick}>Login</button>
         </div>
       </div>
     </div>
