@@ -1,5 +1,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const admin = require('firebase-admin');
 const authMiddleware = require('../middleware/auth');
 const userStore = require('../services/firebaseUserStore');
 
@@ -65,6 +66,25 @@ router.post('/login', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// POST /api/auth/social  (Google / GitHub sign-in)
+router.post('/social', async (req, res) => {
+  try {
+    const { idToken } = req.body;
+    if (!idToken) return res.status(400).json({ message: 'ID token required' });
+
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const { email, name, picture } = decoded;
+
+    if (!email) return res.status(400).json({ message: 'No email in token' });
+
+    const user = await userStore.findOrCreateSocialUser({ email, displayName: name, photoURL: picture });
+    const token = signToken(user.id);
+    res.json({ token, user: userStore.publicUser(user) });
+  } catch (err) {
+    res.status(401).json({ message: 'Social sign-in failed', error: err.message });
   }
 });
 

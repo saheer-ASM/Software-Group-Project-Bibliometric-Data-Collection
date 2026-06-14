@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { auth, firestore, missingConfig } from './firebase';
+import { auth } from './firebase';
 import './AuthForm.css';
 
 const AuthForm = ({ onLogin }) => {
-  const navigate = useNavigate();
   const [isActive, setIsActive] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,6 +15,50 @@ const AuthForm = ({ onLogin }) => {
   const [registerDesignation, setRegisterDesignation] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
+
+  const handleRegisterClick = () => setIsActive(true);
+  const handleLoginClick = () => setIsActive(false);
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    if (!loginUsername) {
+      setError('Enter your username first, then click Forgot Password');
+      return;
+    }
+    setError('Password reset is not available. Please contact your administrator.');
+  };
+
+  const handleSocialLogin = async (provider) => {
+    setError('');
+    setLoading(true);
+    try {
+      const { GoogleAuthProvider, GithubAuthProvider, signInWithPopup } = await import('firebase/auth');
+      const prov = provider === 'google' ? new GoogleAuthProvider() : new GithubAuthProvider();
+      const result = await signInWithPopup(auth, prov);
+      const idToken = await result.user.getIdToken();
+
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/auth/social`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.message || `${provider} sign-in failed`);
+        return;
+      }
+      localStorage.setItem('token', data.token);
+      onLogin(data.user);
+    } catch (err) {
+      setError(err.message || `${provider} sign-in failed`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUnsupportedProvider = (name) => {
+    setError(`${name} sign-in is not supported yet`);
+  };
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -56,34 +98,27 @@ const AuthForm = ({ onLogin }) => {
     }
     setLoading(true);
     try {
-      const { createUserWithEmailAndPassword, updateProfile } = await import('firebase/auth');
-      const { doc, setDoc, getFirestore } = await import('firebase/firestore');
-      
-      const userCredential = await createUserWithEmailAndPassword(auth, registerEmail, registerPassword);
-      
-      await updateProfile(userCredential.user, {
-        displayName: registerUsername,
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: registerUsername,
+          email: registerEmail,
+          designation: registerDesignation,
+          password: registerPassword,
+        }),
       });
-
-      await setDoc(doc(getFirestore(), 'users', userCredential.user.uid), {
-        username: registerUsername,
-        email: registerEmail,
-        designation: registerDesignation,
-        createdAt: new Date(),
-      });
-
-      const token = await userCredential.user.getIdToken();
-      localStorage.setItem('token', token);
-      
-      onLogin({
-        id: userCredential.user.uid,
-        username: registerUsername,
-        email: registerEmail,
-        designation: registerDesignation,
-        photoURL: '',
-      });
-    } catch (err) {
-      setError(err.message || 'Registration failed');
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.message || 'Registration failed');
+        return;
+      }
+      localStorage.setItem('token', data.token);
+      onLogin(data.user);
+    } catch {
+      setError('Network error. Is the server running?');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -226,17 +261,6 @@ const AuthForm = ({ onLogin }) => {
               onChange={(e) => setRegisterConfirmPassword(e.target.value)}
             />
             <span className="input-icon" aria-hidden="true">L</span>
-          </div>
-          <div className="input-box">
-            <input
-              type="password"
-              placeholder="Confirm Password"
-              required
-              minLength={8}
-              value={registerConfirmPassword}
-              onChange={(e) => setRegisterConfirmPassword(e.target.value)}
-            />
-            <i className='bx bxs-lock-alt'></i>
           </div>
           <button type="submit" className="btn" disabled={loading}>
             {loading ? 'Registering…' : 'Register'}
