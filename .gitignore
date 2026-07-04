@@ -153,4 +153,5 @@ evaluation_results.json
 login.py
 login_clean.py
 
-serviceAccountKey.json
+
+feildclassification/
