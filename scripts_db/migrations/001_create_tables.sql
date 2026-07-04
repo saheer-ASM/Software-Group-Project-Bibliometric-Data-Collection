@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS publication_author (
 """,
 
 """
-CREATE TABLE IF NOT EXISTS self_citation (
+CREATE TABLE IF NOT EXISTS citation (
     pub_id          VARCHAR(100) NOT NULL,
     cited_pub_id    VARCHAR(100) NOT NULL,
 
@@ -70,6 +70,25 @@ CREATE TABLE IF NOT EXISTS self_citation (
         ON DELETE CASCADE,
 
     FOREIGN KEY (cited_pub_id)
+        REFERENCES publication(pub_id)
+        ON DELETE CASCADE
+);
+"""
+
+"""
+CREATE TABLE IF NOT EXISTS field_classification (
+    pub_id          VARCHAR(100) PRIMARY KEY,
+
+    field1_name     VARCHAR(255),
+    field1_weight   DECIMAL(5,2),
+
+    field2_name     VARCHAR(255),
+    field2_weight   DECIMAL(5,2),
+
+    field3_name     VARCHAR(255),
+    field3_weight   DECIMAL(5,2),
+
+    FOREIGN KEY (pub_id)
         REFERENCES publication(pub_id)
         ON DELETE CASCADE
 );

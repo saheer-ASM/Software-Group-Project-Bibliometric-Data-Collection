@@ -86,15 +86,15 @@ def ensure_author(cur, cache, author_obj):
 
 
 # ---------------- INSERT PUBLICATION ----------------
-def insert_publication(cur, pub_cache, pub_id, title, abstract, year):
+def insert_publication(cur, pub_cache, pub_id, title, abstract, year, total_citation):
     if pub_id in pub_cache:
         return False
 
     cur.execute("""
-        INSERT INTO publication (pub_id, pub_title, abstract, year)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO publication (pub_id, pub_title, abstract, year, total_citation)
+        VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT DO NOTHING
-    """, (pub_id, title, abstract, year))
+    """, (pub_id, title, abstract, year, total_citation))
 
     pub_cache.add(pub_id)
     return True
@@ -143,9 +143,10 @@ def main():
             title = w.get("display_name")
             year = w.get("publication_year")
             abstract = rebuild_abstract(w.get("abstract_inverted_index"))
+            total_citation = w.get("cited_by_count", 0)
 
             # insert publication
-            insert_publication(cur, pub_cache, pub_id, title, abstract, year)
+            insert_publication(cur, pub_cache, pub_id, title, abstract, year, total_citation)
 
             # process authors safely
             for a in w.get("authorships", []):
