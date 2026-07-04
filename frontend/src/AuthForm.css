@@ -69,7 +69,7 @@ form{ width: 100%; }
 
     .input-box input{
         width: 100%;
-        padding: 13px 50px 13px 20px;
+        padding: 13px 20px;
         background: #f5f5f5;
         border-radius: 8px;
         border: 1px solid #e0e0e0;
@@ -91,19 +91,7 @@ form{ width: 100%; }
         }
     
     .input-icon{
-        position: absolute;
-        right: 20px;
-        top: 50%;
-        transform: translateY(-50%);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 22px;
-        height: 22px;
-        font-size: 12px;
-        color: #034078;
-        font-weight: 700;
-        pointer-events: none;
+        display: none;
     }
 
 .forgot-link{ margin: -15px 0 15px; }
