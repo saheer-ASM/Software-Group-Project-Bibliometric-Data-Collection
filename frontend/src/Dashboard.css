@@ -131,11 +131,11 @@
 
 /* Main Content */
 .dashboard-main {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2.5rem 2rem;
+  width: 100%;
+  padding: 2.5rem 3rem;
   position: relative;
   z-index: 1;
+  box-sizing: border-box;
 }
 
 @keyframes fadeIn {
@@ -471,11 +471,11 @@
 }
 
 .footer-content {
-  max-width: 1280px;
-  margin: 0 auto;
+  width: 100%;
   display: grid;
   grid-template-columns: 2fr 1fr 1fr 1fr;
   gap: 2.5rem;
+  box-sizing: border-box;
 }
 
 .footer-section h3,
