@@ -4,44 +4,97 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-conn = psycopg2.connect(
-    host=os.getenv("DB_HOST"),
-    port=os.getenv("DB_PORT"),
-    dbname=os.getenv("DB_NAME"),
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
-    sslmode="require"        
-)
-cur = conn.cursor()
 
-# Tracking table — remembers which migrations already ran
-cur.execute("""
-    CREATE TABLE IF NOT EXISTS migrations_log (
-        filename   VARCHAR(255) PRIMARY KEY,
-        applied_at TIMESTAMP DEFAULT NOW()
+# =========================================
+# DB CONNECTION
+# =========================================
+def get_conn():
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST"),
+        port=int(os.getenv("DB_PORT") or 5432),
+        dbname=os.getenv("DB_NAME"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD"),
+        sslmode="require"
+    )
+
+
+# =========================================
+# CREATE TABLES SQL
+# =========================================
+TABLES = [
+    """
+    CREATE TABLE IF NOT EXISTS author (
+        author_id   VARCHAR(100) PRIMARY KEY,
+        author_name VARCHAR(255) NOT NULL
     );
-""")
-conn.commit()
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS publication (
+        pub_id          VARCHAR(100) PRIMARY KEY,
+        pub_title       TEXT,
+        abstract        TEXT,
+        year            INT,
+        total_citation  INT DEFAULT 0
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS citation (
+        pub_id          VARCHAR(100) NOT NULL,
+        cited_pub_id    VARCHAR(100) NOT NULL,
+        PRIMARY KEY (pub_id, cited_pub_id),
+        FOREIGN KEY (pub_id) REFERENCES publication(pub_id) ON DELETE CASCADE,
+        FOREIGN KEY (cited_pub_id) REFERENCES publication(pub_id) ON DELETE CASCADE
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS field_classification (
+        pub_id          VARCHAR(100) PRIMARY KEY,
+        field1_name     VARCHAR(255),
+        field1_weight   DECIMAL(5,2),
+        field2_name     VARCHAR(255),
+        field2_weight   DECIMAL(5,2),
+        field3_name     VARCHAR(255),
+        field3_weight   DECIMAL(5,2),
+        FOREIGN KEY (pub_id) REFERENCES publication(pub_id) ON DELETE CASCADE
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS author_contribution_weight (
+        pub_id   VARCHAR(100) NOT NULL,
+        author_id VARCHAR(100) NOT NULL,
+        author_ordering_nome VARCHAR(255),
+        field1_author_contribution_weight DECIMAL(6,4),
+        field2_author_contribution_weight DECIMAL(6,4), 
+        field3_author_contribution_weight DECIMAL(6,4),
+        overoll_author_contribution_weight DECIMAL(6,4),
+        PRIMARY KEY (pub_id, author_id),
+        FOREIGN KEY (pub_id) REFERENCES publication(pub_id) ON DELETE CASCADE,
+        FOREIGN KEY (author_id) REFERENCES author(author_id)
+    );
+    """,
+]
 
-migrations_dir = "migrations"
-sql_files = sorted(f for f in os.listdir(migrations_dir) if f.endswith(".sql"))
 
-for filename in sql_files:
-    cur.execute("SELECT filename FROM migrations_log WHERE filename = %s", (filename,))
-    if cur.fetchone():
-        print(f"  Skipping {filename} (already applied)")
-        continue
+# =========================================
+# MAIN EXECUTION
+# =========================================
+def main():
+    conn = get_conn()
+    cur = conn.cursor()
 
-    filepath = os.path.join(migrations_dir, filename)
-    with open(filepath, "r") as f:
-        sql = f.read()
+    print("Creating tables...")
 
-    print(f"  Applying {filename}...")
-    cur.execute(sql)
-    cur.execute("INSERT INTO migrations_log (filename) VALUES (%s)", (filename,))
+    for sql in TABLES:
+        cur.execute(sql)
+        print("✔ Table executed")
+
     conn.commit()
-    print(f"  Done!")
+    cur.close()
+    conn.close()
 
-cur.close()
-conn.close()
-print("\nAll migrations complete. Your tables are ready.")
+    print("\n✅ All tables created successfully!")
+
+
+if __name__ == "__main__":
+    main()

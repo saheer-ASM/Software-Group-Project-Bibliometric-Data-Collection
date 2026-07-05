@@ -22,18 +22,15 @@ def get_conn():
 
 
 # ---------------- CACHE ----------------
-def load_existing_authors(cur):
-    cur.execute("SELECT author_id FROM author")
-    return set(r[0] for r in cur.fetchall())
-
-
 def load_existing_publications(cur):
+    """Load all publication IDs that already exist in the database"""
     cur.execute("SELECT pub_id FROM publication")
     return set(r[0] for r in cur.fetchall())
 
 
 # ---------------- ABSTRACT CLEANER ----------------
 def rebuild_abstract(inv_index):
+    """Convert OpenAlex's abstract_inverted_index back to readable text"""
     if not inv_index or not isinstance(inv_index, dict):
         return None
 
@@ -45,8 +42,9 @@ def rebuild_abstract(inv_index):
     return " ".join(words[i] for i in sorted(words.keys()))
 
 
-# ---------------- FETCH OPENALEX ----------------
-def fetch_works(author_id):
+# ---------------- FETCH WORKS BY AUTHOR ----------------
+def fetch_works_by_author(author_id):
+    """Fetch all works for a specific author from OpenAlex"""
     try:
         params = {
             "filter": f"author.id:{author_id}",
@@ -56,60 +54,37 @@ def fetch_works(author_id):
         r.raise_for_status()
         return r.json().get("results", [])
     except Exception as e:
-        print(f"[ERROR] OpenAlex fetch failed for {author_id}: {e}")
+        print(f"[ERROR] OpenAlex fetch failed for author {author_id}: {e}")
         return []
 
 
-# ---------------- SAFE AUTHOR HANDLER ----------------
-def ensure_author(cur, cache, author_obj):
-    if not isinstance(author_obj, dict):
-        return None
-
-    author_id_full = author_obj.get("id")
-    if not author_id_full:
-        return None
-
-    aid = author_id_full.split("/")[-1]
-    name = author_obj.get("display_name") or "Unknown"
-
-    if aid not in cache:
-        cur.execute("""
-            INSERT INTO author (author_id, author_name)
-            VALUES (%s, %s)
-            ON CONFLICT DO NOTHING
-        """, (aid, name))
-
-        cache.add(aid)
-        print(f"[NEW AUTHOR] {name} ({aid})")
-
-    return aid
-
-
-# ---------------- INSERT PUBLICATION ----------------
-def insert_publication(cur, pub_cache, pub_id, title, abstract, year, total_citation):
+# ---------------- INSERT OR UPDATE PUBLICATION ----------------
+def insert_or_update_publication(cur, pub_cache, pub_id, title, abstract, year, total_citation):
+    """
+    Insert a publication if it doesn't exist, or update it if it does
+    Returns True if inserted/updated, False if failed
+    """
     if pub_id in pub_cache:
-        return False
-
-    cur.execute("""
-        INSERT INTO publication (pub_id, pub_title, abstract, year, total_citation)
-        VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT DO NOTHING
-    """, (pub_id, title, abstract, year, total_citation))
-
-    pub_cache.add(pub_id)
-    return True
-
-
-# ---------------- LINK TABLE ----------------
-def link_author(cur, pub_id, author_id):
-    if not author_id:
-        return
-
-    cur.execute("""
-        INSERT INTO publication_author (pub_id, author_id)
-        VALUES (%s, %s)
-        ON CONFLICT DO NOTHING
-    """, (pub_id, author_id))
+        # Publication exists - update it
+        cur.execute("""
+            UPDATE publication 
+            SET pub_title = %s, 
+                abstract = %s, 
+                year = %s, 
+                total_citation = %s
+            WHERE pub_id = %s
+        """, (title, abstract, year, total_citation, pub_id))
+        return True
+    else:
+        # Publication doesn't exist - insert it
+        cur.execute("""
+            INSERT INTO publication (pub_id, pub_title, abstract, year, total_citation)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (pub_id) DO NOTHING
+        """, (pub_id, title, abstract, year, total_citation))
+        
+        pub_cache.add(pub_id)
+        return True
 
 
 # ---------------- MAIN PIPELINE ----------------
@@ -117,24 +92,49 @@ def main():
     conn = get_conn()
     cur = conn.cursor()
 
-    print("Loading cache...")
+    print("=" * 60)
+    print("AUTHOR-BASED PUBLICATION FETCHER")
+    print("(Updates/Inserts Publications from Authors)")
+    print("=" * 60)
 
-    author_cache = load_existing_authors(cur)
+    # Load existing publications cache
+    print("\nLoading existing publications...")
     pub_cache = load_existing_publications(cur)
+    print(f"Publications in DB: {len(pub_cache)}")
 
-    print(f"Authors: {len(author_cache)}")
-    print(f"Publications: {len(pub_cache)}")
-
-    # fetch authors from DB
-    cur.execute("SELECT author_id FROM author LIMIT 5")
+    # Get ALL authors from the author table
+    cur.execute("SELECT author_id FROM author ORDER BY author_id")
     authors = cur.fetchall()
+    
+    print(f"\nProcessing {len(authors)} authors...")
+    print("-" * 60)
 
-    for (author_id,) in authors:
-        print(f"\n🔍 Processing author {author_id}")
+    # Track statistics
+    new_publications_count = 0
+    updated_publications_count = 0
+    total_works_found = 0
+    authors_with_no_works = 0
+    skipped_authors = 0
 
-        works = fetch_works(author_id)
-        print(f"Found {len(works)} works")
+    for idx, (author_id,) in enumerate(authors, 1):
+        print(f"\n[{idx}/{len(authors)}] 🔍 Processing author: {author_id}")
 
+        # Fetch works for this author
+        works = fetch_works_by_author(author_id)
+        
+        if not works:
+            print(f"  ℹ️  No works found for author {author_id}")
+            authors_with_no_works += 1
+            continue
+
+        print(f"  Found {len(works)} works")
+        total_works_found += len(works)
+
+        # Track for this author
+        author_new = 0
+        author_updated = 0
+
+        # Process each work
         for w in works:
             pub_id = (w.get("id") or "").split("/")[-1]
             if not pub_id:
@@ -145,29 +145,56 @@ def main():
             abstract = rebuild_abstract(w.get("abstract_inverted_index"))
             total_citation = w.get("cited_by_count", 0)
 
-            # insert publication
-            insert_publication(cur, pub_cache, pub_id, title, abstract, year, total_citation)
+            # Check if publication exists
+            if pub_id in pub_cache:
+                # Update existing publication
+                cur.execute("""
+                    UPDATE publication 
+                    SET pub_title = %s, 
+                        abstract = %s, 
+                        year = %s, 
+                        total_citation = %s
+                    WHERE pub_id = %s
+                """, (title, abstract, year, total_citation, pub_id))
+                author_updated += 1
+            else:
+                # Insert new publication
+                cur.execute("""
+                    INSERT INTO publication (pub_id, pub_title, abstract, year, total_citation)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (pub_id) DO NOTHING
+                """, (pub_id, title, abstract, year, total_citation))
+                pub_cache.add(pub_id)
+                author_new += 1
 
-            # process authors safely
-            for a in w.get("authorships", []):
-                if not isinstance(a, dict):
-                    continue
+        new_publications_count += author_new
+        updated_publications_count += author_updated
+        print(f"  ✅ New: {author_new}, Updated: {author_updated}")
 
-                auth = a.get("author")
-                if not auth or not isinstance(auth, dict):
-                    continue
+        # Commit every 5 authors
+        if idx % 5 == 0:
+            conn.commit()
+            print(f"  💾 Checkpoint saved ({idx} authors processed)")
 
-                aid = ensure_author(cur, author_cache, auth)
-                link_author(cur, pub_id, aid)
-
-            print(f"✔ Done {pub_id}")
-
-        conn.commit()
+        # Rate limiting
         time.sleep(1)
 
+    # Final commit
+    conn.commit()
     cur.close()
     conn.close()
-    print("\n✅ PIPELINE COMPLETED SAFELY")
+    
+    # Print summary
+    print("\n" + "=" * 60)
+    print("✅ PIPELINE COMPLETED")
+    print("=" * 60)
+    print(f"👤 Authors processed: {len(authors)}")
+    print(f"📊 Authors with works: {len(authors) - authors_with_no_works}")
+    print(f"📊 Authors with no works: {authors_with_no_works}")
+    print(f"📚 Total works found: {total_works_found}")
+    print(f"📚 New publications added: {new_publications_count}")
+    print(f"📚 Existing publications updated: {updated_publications_count}")
+    print(f"📚 Total publications now: {len(pub_cache)}")
 
 
 if __name__ == "__main__":
