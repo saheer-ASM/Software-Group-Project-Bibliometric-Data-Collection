@@ -14,6 +14,18 @@ function getServiceAccount() {
     return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
   }
 
+  // Try path from env var
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+    try {
+      const serviceAccountPath = path.resolve(process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
+      if (fs.existsSync(serviceAccountPath)) {
+        return JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+      }
+    } catch (err) {
+      console.warn(`Could not load Firebase credentials from path:`, err.message);
+    }
+  }
+
   // Try individual environment variables
   if (
     process.env.FIREBASE_PROJECT_ID &&
@@ -21,23 +33,10 @@ function getServiceAccount() {
     process.env.FIREBASE_PRIVATE_KEY
   ) {
     return {
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      project_id: process.env.FIREBASE_PROJECT_ID,
+      client_email: process.env.FIREBASE_CLIENT_EMAIL,
+      private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     };
-  }
-
-  // Try loading from file path (local development)
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
-    try {
-      const filePath = path.resolve(process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
-      if (fs.existsSync(filePath)) {
-        const fileContent = fs.readFileSync(filePath, 'utf8');
-        return JSON.parse(fileContent);
-      }
-    } catch (err) {
-      console.warn(`Could not load Firebase credentials from ${process.env.FIREBASE_SERVICE_ACCOUNT_PATH}:`, err.message);
-    }
   }
 
   return null;
