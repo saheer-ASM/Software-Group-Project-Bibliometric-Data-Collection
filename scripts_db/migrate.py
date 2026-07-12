@@ -59,18 +59,36 @@ TABLES = [
         FOREIGN KEY (pub_id) REFERENCES publication(pub_id) ON DELETE CASCADE
     );
     """,
-    """
+   """
     CREATE TABLE IF NOT EXISTS author_contribution_weight (
-        pub_id   VARCHAR(100) NOT NULL,
-        author_id VARCHAR(100) NOT NULL,
-        author_ordering_nome VARCHAR(255),
-        field1_author_contribution_weight DECIMAL(6,4),
-        field2_author_contribution_weight DECIMAL(6,4), 
-        field3_author_contribution_weight DECIMAL(6,4),
-        overoll_author_contribution_weight DECIMAL(6,4),
-        PRIMARY KEY (pub_id, author_id),
+        pub_id                                  VARCHAR(100) PRIMARY KEY,
+        author1Id                               TEXT,
+        author2Id                               TEXT,
+        author3Id                               TEXT,
+        author4Id                               TEXT,
+        author5Id                               TEXT,
+        author6Id                               TEXT,
+        author7Id                               TEXT,
+        author8Id                               TEXT,
+        author9Id                               TEXT, 
+        author10Id                               TEXT,
+        author_ordering_nome                    TEXT,
+        field1_author_contribution_weight       DECIMAL(6,4),
+        field2_author_contribution_weight       DECIMAL(6,4),
+        field3_author_contribution_weight       DECIMAL(6,4),
+        overall_author_contribution_weight      DECIMAL(6,4),
         FOREIGN KEY (pub_id) REFERENCES publication(pub_id) ON DELETE CASCADE,
-        FOREIGN KEY (author_id) REFERENCES author(author_id)
+        FOREIGN KEY (author1Id) REFERENCES author(author_id),
+        FOREIGN KEY (author2Id) REFERENCES author(author_id),
+        FOREIGN KEY (author3Id) REFERENCES author(author_id),
+        FOREIGN KEY (author4Id) REFERENCES author(author_id),
+        FOREIGN KEY (author5Id) REFERENCES author(author_id),
+        FOREIGN KEY (author6Id) REFERENCES author(author_id),
+        FOREIGN KEY (author7Id) REFERENCES author(author_id),
+        FOREIGN KEY (author8Id) REFERENCES author(author_id),
+        FOREIGN KEY (author9Id) REFERENCES author(author_id),
+        FOREIGN KEY (author10Id) REFERENCES author(author_id)
+    
     );
     """,
 ]

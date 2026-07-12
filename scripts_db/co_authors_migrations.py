@@ -34,12 +34,6 @@ def load_existing_publications(cur):
     return set(r[0] for r in cur.fetchall())
 
 
-def load_existing_author_contributions(cur):
-    """Load all existing author-publication links to avoid duplicates"""
-    cur.execute("SELECT pub_id, author_id FROM author_contribution_weight")
-    return {(r[0], r[1]) for r in cur.fetchall()}
-
-
 def get_publications_without_authors(cur):
     """
     Get only publications that don't have any authors linked yet
@@ -51,20 +45,7 @@ def get_publications_without_authors(cur):
         WHERE acw.pub_id IS NULL
         ORDER BY p.pub_id
     """)
-    return cur.fetchall()
-
-
-# ---------------- ABSTRACT CLEANER ----------------
-def rebuild_abstract(inv_index):
-    if not inv_index or not isinstance(inv_index, dict):
-        return None
-
-    words = {}
-    for word, positions in inv_index.items():
-        for p in positions:
-            words[p] = word
-
-    return " ".join(words[i] for i in sorted(words.keys()))
+    return [r[0] for r in cur.fetchall()]
 
 
 # ---------------- FETCH WORK DETAILS ----------------
@@ -107,33 +88,71 @@ def insert_author(cur, author_cache, author_obj):
         """, (author_id, name))
         
         author_cache.add(author_id)
-        print(f"[NEW AUTHOR] {name} ({author_id})")
+        print(f"    [NEW AUTHOR] {name} ({author_id})")
         return author_id
     else:
         # Author already exists, still return the ID
         return author_id
 
 
-# ---------------- INSERT AUTHOR CONTRIBUTION ----------------
-def insert_author_contribution(cur, contribution_cache, pub_id, author_id):
+# ---------------- INSERT AUTHOR CONTRIBUTION FOR MULTIPLE AUTHORS ----------------
+def insert_author_contributions(cur, pub_id, authors_data):
     """
-    Link an author to a publication in the author_contribution_weight table
-    """
-    if not pub_id or not author_id:
-        return False
+    Insert all authors for a publication in ONE row
     
-    pair = (pub_id, author_id)
-    if pair in contribution_cache:
+    Args:
+        pub_id: Publication ID
+        authors_data: List of tuples [(author_id, author_name), ...]
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    if not pub_id or not authors_data:
         return False
 
-    cur.execute("""
-        INSERT INTO author_contribution_weight (pub_id, author_id)
-        VALUES (%s, %s)
-        ON CONFLICT (pub_id, author_id) DO NOTHING
-    """, (pub_id, author_id))
+    # Prepare author IDs (up to 10)
+    author1Id = authors_data[0][0] if len(authors_data) > 0 else None
+    author2Id = authors_data[1][0] if len(authors_data) > 1 else None
+    author3Id = authors_data[2][0] if len(authors_data) > 2 else None
+    author4Id = authors_data[3][0] if len(authors_data) > 3 else None
+    author5Id = authors_data[4][0] if len(authors_data) > 4 else None
+    author6Id = authors_data[5][0] if len(authors_data) > 5 else None
+    author7Id = authors_data[6][0] if len(authors_data) > 6 else None
+    author8Id = authors_data[7][0] if len(authors_data) > 7 else None
+    author9Id = authors_data[8][0] if len(authors_data) > 8 else None
+    author10Id = authors_data[9][0] if len(authors_data) > 9 else None
 
-    contribution_cache.add(pair)
-    print(f"[CONTRIBUTION] {pub_id} → {author_id}")
+    # Create author_ordering_nome (comma-separated author names)
+    author_names = [name for _, name in authors_data[:10]]
+    author_ordering_nome = ", ".join(author_names)
+
+    # Insert the row
+    sql = """
+    INSERT INTO author_contribution_weight 
+    (pub_id, author1Id, author2Id, author3Id, author4Id, author5Id, author6Id, author7Id, author8Id, author9Id, author10Id, author_ordering_nome)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT (pub_id) DO UPDATE SET
+        author1Id = EXCLUDED.author1Id,
+        author2Id = EXCLUDED.author2Id,
+        author3Id = EXCLUDED.author3Id,
+        author4Id = EXCLUDED.author4Id,
+        author5Id = EXCLUDED.author5Id,
+        author6Id = EXCLUDED.author6Id,
+        author7Id = EXCLUDED.author7Id,
+        author8Id = EXCLUDED.author8Id,
+        author9Id = EXCLUDED.author9Id,
+        author10Id = EXCLUDED.author10Id,
+        author_ordering_nome = EXCLUDED.author_ordering_nome
+    """
+
+    cur.execute(sql, (
+        pub_id,
+        author1Id, author2Id, author3Id, author4Id, author5Id, author6Id, author7Id, author8Id, author9Id, author10Id,
+        author_ordering_nome
+    ))
+
+    print(f"    ✅ Inserted {len(authors_data)} author(s) for publication {pub_id}")
+    print(f"       Authors: {author_ordering_nome}")
     return True
 
 
@@ -142,19 +161,17 @@ def main():
     conn = get_conn()
     cur = conn.cursor()
 
-    print("=" * 60)
-    print("AUTHOR DISCOVERY PIPELINE (From Publications)")
-    print("=" * 60)
+    print("=" * 70)
+    print("AUTHOR DISCOVERY PIPELINE (From OpenAlex Publications)")
+    print("=" * 70)
 
     # Load existing data into caches
     print("\nLoading existing data...")
     author_cache = load_existing_authors(cur)
     pub_cache = load_existing_publications(cur)
-    contribution_cache = load_existing_author_contributions(cur)
 
     print(f"Authors in DB: {len(author_cache)}")
     print(f"Publications in DB: {len(pub_cache)}")
-    print(f"Contributions already stored: {len(contribution_cache)}")
 
     # Get ONLY publications that don't have authors linked yet
     publications = get_publications_without_authors(cur)
@@ -168,23 +185,23 @@ def main():
     
     print(f"\nFound {len(publications)} publication(s) without authors")
     print("Processing only these publications...")
-    print("-" * 60)
+    print("-" * 70)
 
     # Track statistics
     new_authors_count = 0
-    contributions_added_count = 0
+    publications_processed = 0
     skipped_publications = 0
     publications_with_no_authors = 0
 
     # Process each publication that needs authors
-    for idx, (pub_id,) in enumerate(publications, 1):
-        print(f"\n[{idx}/{len(publications)}] 📄 Processing publication: {pub_id}")
+    for idx, pub_id in enumerate(publications, 1):
+        print(f"\n[{idx}/{len(publications)}] 📄 Publication: {pub_id}")
 
         # Fetch full work details from OpenAlex
         work = fetch_work_details(pub_id)
         
         if not work:
-            print(f"  ⚠️  Skipping {pub_id} - couldn't fetch data")
+            print(f"  ⚠️  Skipping - couldn't fetch data from OpenAlex")
             skipped_publications += 1
             continue
 
@@ -192,15 +209,15 @@ def main():
         authorships = work.get("authorships", [])
         
         if not authorships:
-            print(f"  ℹ️  No authors found for {pub_id}")
+            print(f"  ℹ️  No authors found for this publication")
             publications_with_no_authors += 1
             continue
 
         print(f"  Found {len(authorships)} author(s)")
 
-        authors_added_for_this_pub = 0
+        # Collect all authors for this publication
+        authors_data = []  # List of (author_id, author_name) tuples
         
-        # Process each author
         for authorship in authorships:
             if not isinstance(authorship, dict):
                 continue
@@ -209,17 +226,19 @@ def main():
             if not author_obj or not isinstance(author_obj, dict):
                 continue
 
-            # Insert author if new
+            # Insert author into author table if new
             author_id = insert_author(cur, author_cache, author_obj)
             
             if author_id:
-                # Insert contribution link
-                added = insert_author_contribution(cur, contribution_cache, pub_id, author_id)
-                if added:
-                    contributions_added_count += 1
-                    authors_added_for_this_pub += 1
+                author_name = author_obj.get("display_name", "Unknown")
+                authors_data.append((author_id, author_name))
+                new_authors_count += 1
 
-        print(f"  ✅ Added {authors_added_for_this_pub} author contributions for {pub_id}")
+        # Insert all authors for this publication in ONE row
+        if authors_data:
+            added = insert_author_contributions(cur, pub_id, authors_data)
+            if added:
+                publications_processed += 1
 
         # Commit every 10 publications to avoid large transactions
         if idx % 10 == 0:
@@ -233,17 +252,15 @@ def main():
     conn.commit()
     
     # Print summary
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 70)
     print("✅ PIPELINE COMPLETED")
-    print("=" * 60)
-    print(f"📊 Publications processed: {len(publications)}")
+    print("=" * 70)
+    print(f"📊 Publications processed successfully: {publications_processed}")
     print(f"📊 Publications with no authors: {publications_with_no_authors}")
     print(f"⏭️  Skipped publications (API errors): {skipped_publications}")
     print(f"👤 New authors added: {new_authors_count}")
-    print(f"🔗 New contributions added: {contributions_added_count}")
     print(f"📚 Total authors now: {len(author_cache)}")
     print(f"📚 Total publications now: {len(pub_cache)}")
-    print(f"🔗 Total contributions now: {len(contribution_cache)}")
 
     cur.close()
     conn.close()
