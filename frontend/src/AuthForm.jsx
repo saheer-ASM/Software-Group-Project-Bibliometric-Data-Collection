@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { auth } from './firebase';
+import { auth, missingConfig } from './firebase';
 import './AuthForm.css';
 
 const AuthForm = ({ onLogin }) => {
@@ -7,7 +7,7 @@ const AuthForm = ({ onLogin }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const [loginUsername, setLoginUsername] = useState('');
+  const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
 
   const [registerUsername, setRegisterUsername] = useState('');
@@ -16,48 +16,98 @@ const AuthForm = ({ onLogin }) => {
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
 
-  const handleRegisterClick = () => setIsActive(true);
-  const handleLoginClick = () => setIsActive(false);
-
-  const handleForgotPassword = async (e) => {
-    e.preventDefault();
-    if (!loginUsername) {
-      setError('Enter your username first, then click Forgot Password');
-      return;
-    }
-    setError('Password reset is not available. Please contact your administrator.');
+  const ensureFirebaseConfig = () => {
+    if (missingConfig.length === 0) return true;
+    setError('Firebase web config is missing. Fill frontend/.env from Firebase Project settings.');
+    return false;
   };
 
-  const handleSocialLogin = async (provider) => {
+  const handleSocialLogin = async (providerName) => {
     setError('');
-    setLoading(true);
-    try {
-      const { GoogleAuthProvider, GithubAuthProvider, signInWithPopup } = await import('firebase/auth');
-      const prov = provider === 'google' ? new GoogleAuthProvider() : new GithubAuthProvider();
-      const result = await signInWithPopup(auth, prov);
-      const idToken = await result.user.getIdToken();
+    if (!ensureFirebaseConfig()) return;
 
-      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/auth/social`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.message || `${provider} sign-in failed`);
+    try {
+      let userCredential;
+      if (providerName === 'google') {
+        const { GoogleAuthProvider, signInWithPopup } = await import('firebase/auth');
+        const provider = new GoogleAuthProvider();
+        userCredential = await signInWithPopup(auth, provider);
+      } else if (providerName === 'github') {
+        const { GithubAuthProvider, signInWithPopup } = await import('firebase/auth');
+        const provider = new GithubAuthProvider();
+        userCredential = await signInWithPopup(auth, provider);
+      } else {
+        setError(`${providerName} sign-in is not connected in the app yet.`);
         return;
       }
-      localStorage.setItem('token', data.token);
-      onLogin(data.user);
+
+      const token = await userCredential.user.getIdToken();
+      localStorage.setItem('token', token);
+      localStorage.setItem('authProvider', providerName);
+
+      const appUser = {
+        id: userCredential.user.uid,
+        username: userCredential.user.displayName || userCredential.user.email?.split('@')[0] || 'User',
+        email: userCredential.user.email || '',
+        designation: 'Researcher',
+        photoURL: userCredential.user.photoURL || '',
+      };
+
+      onLogin(appUser);
     } catch (err) {
-      setError(err.message || `${provider} sign-in failed`);
+      if (err.code === 'auth/popup-closed-by-user') {
+        setError('Sign-in popup was closed before completing login.');
+      } else if (err.code === 'auth/account-exists-with-different-credential') {
+        setError('An account already exists with this email using another sign-in method.');
+      } else {
+        setError(err.message || `${providerName} sign-in failed`);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleUnsupportedProvider = (name) => {
-    setError(`${name} sign-in is not supported yet`);
+  const handleUnsupportedProvider = (providerName) => {
+    setError(`${providerName} sign-in is not connected in the app yet.`);
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!ensureFirebaseConfig()) return;
+
+    const email = window.prompt('Enter the email address for password reset:');
+    const cleanEmail = String(email || '').trim();
+
+    if (!cleanEmail) {
+      setError('Please enter an email address to reset your password.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { sendPasswordResetEmail } = await import('firebase/auth');
+      await sendPasswordResetEmail(auth, cleanEmail);
+      setError(`Password reset email sent to ${cleanEmail}. Please check the inbox.`);
+    } catch (err) {
+      if (err.code === 'auth/invalid-email') {
+        setError('Please enter a valid email address.');
+      } else {
+        setError(err.message || 'Could not send password reset email.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegisterClick = () => {
+    setError('');
+    setIsActive(true);
+  };
+
+  const handleLoginClick = () => {
+    setError('');
+    setIsActive(false);
   };
 
   const handleLoginSubmit = async (e) => {
@@ -65,20 +115,41 @@ const AuthForm = ({ onLogin }) => {
     setError('');
     setLoading(true);
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: loginUsername, password: loginPassword }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.message || 'Login failed');
-        return;
+      const { signInWithEmailAndPassword } = await import('firebase/auth');
+      const { doc, getDoc, getFirestore } = await import('firebase/firestore');
+      
+      const userCredential = await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
+      const token = await userCredential.user.getIdToken();
+      localStorage.setItem('token', token);
+      
+      // Attempt to fetch designation from Firestore if available
+      let designation = 'Researcher';
+      let username = userCredential.user.displayName || userCredential.user.email?.split('@')[0] || 'User';
+      
+      try {
+        const userDoc = await getDoc(doc(getFirestore(), 'users', userCredential.user.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          if (userData.designation) designation = userData.designation;
+          if (userData.username) username = userData.username;
+        }
+      } catch (firestoreErr) {
+        console.warn('Could not fetch user document:', firestoreErr);
       }
-      localStorage.setItem('token', data.token);
-      onLogin(data.user);
-    } catch {
-      setError('Network error. Is the server running?');
+
+      onLogin({
+        id: userCredential.user.uid,
+        username,
+        email: userCredential.user.email || '',
+        designation,
+        photoURL: userCredential.user.photoURL || '',
+      });
+    } catch (err) {
+      if (err.code === 'auth/invalid-credential') {
+        setError('Invalid email or password.');
+      } else {
+        setError(err.message || 'Login failed');
+      }
     } finally {
       setLoading(false);
     }
@@ -140,13 +211,13 @@ const AuthForm = ({ onLogin }) => {
           <h1>Login</h1>
           <div className="input-box">
             <input
-              type="text"
-              placeholder="Username"
+              type="email"
+              placeholder="Email"
               required
-              value={loginUsername}
-              onChange={(e) => setLoginUsername(e.target.value)}
+              value={loginEmail}
+              onChange={(e) => setLoginEmail(e.target.value)}
             />
-            <span className="input-icon" aria-hidden="true">U</span>
+            <span className="input-icon" aria-hidden="true">@</span>
           </div>
           <div className="input-box">
             <input
@@ -170,7 +241,8 @@ const AuthForm = ({ onLogin }) => {
               type="button"
               className="social-link google"
               aria-label="Sign in with Google"
-              disabled={loading}
+              disabled={loading || missingConfig.length > 0}
+              title={missingConfig.length > 0 ? 'Firebase not configured' : ''}
               onClick={() => handleSocialLogin('google')}
             >
               <img src="/assets/google.png" alt="" />
@@ -179,7 +251,8 @@ const AuthForm = ({ onLogin }) => {
               type="button"
               className="social-link microsoft"
               aria-label="Sign in with Microsoft"
-              disabled={loading}
+              disabled={true}
+              title="Not connected yet"
               onClick={() => handleUnsupportedProvider('Microsoft')}
             >
               <img src="/assets/microsoft.png" alt="" />
@@ -188,7 +261,8 @@ const AuthForm = ({ onLogin }) => {
               type="button"
               className="social-link github"
               aria-label="Sign in with GitHub"
-              disabled={loading}
+              disabled={loading || missingConfig.length > 0}
+              title={missingConfig.length > 0 ? 'Firebase not configured' : ''}
               onClick={() => handleSocialLogin('github')}
             >
               <img src="/assets/github.png" alt="" />
@@ -197,7 +271,8 @@ const AuthForm = ({ onLogin }) => {
               type="button"
               className="social-link linkedin"
               aria-label="Sign in with LinkedIn"
-              disabled={loading}
+              disabled={true}
+              title="Not connected yet"
               onClick={() => handleUnsupportedProvider('LinkedIn')}
             >
               <img src="/assets/linkedin.png" alt="" />
@@ -271,7 +346,8 @@ const AuthForm = ({ onLogin }) => {
               type="button"
               className="social-link google"
               aria-label="Sign in with Google"
-              disabled={loading}
+              disabled={loading || missingConfig.length > 0}
+              title={missingConfig.length > 0 ? 'Firebase not configured' : ''}
               onClick={() => handleSocialLogin('google')}
             >
               <img src="/assets/google.png" alt="" />
@@ -289,7 +365,8 @@ const AuthForm = ({ onLogin }) => {
               type="button"
               className="social-link github"
               aria-label="Sign in with GitHub"
-              disabled={loading}
+              disabled={loading || missingConfig.length > 0}
+              title={missingConfig.length > 0 ? 'Firebase not configured' : ''}
               onClick={() => handleSocialLogin('github')}
             >
               <img src="/assets/github.png" alt="" />
@@ -298,7 +375,8 @@ const AuthForm = ({ onLogin }) => {
               type="button"
               className="social-link linkedin"
               aria-label="Sign in with LinkedIn"
-              disabled={loading}
+              disabled={true}
+              title="Not connected yet"
               onClick={() => handleUnsupportedProvider('LinkedIn')}
             >
               <img src="/assets/linkedin.png" alt="" />
