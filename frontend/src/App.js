@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import AuthForm from './AuthForm';
+import ResetPassword from './ResetPassword';
 import Dashboard from './Dashboard';
 import DataExplorer from './DataExplorer';
 import AboutUs from './AboutUs';
@@ -7,7 +8,9 @@ import Profile from './Profile';
 import './App.css';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('login');
+  const [currentPage, setCurrentPage] = useState(
+    window.location.pathname === '/reset-password' ? 'reset-password' : 'login'
+  );
   const [user, setUser] = useState(null); // { id, username, email, designation }
   const [authorName, setAuthorName] = useState('');
   const [hasSearchedAuthor, setHasSearchedAuthor] = useState(false);
@@ -64,6 +67,9 @@ function App() {
     <div className="App">
       {currentPage === 'login' && (
         <AuthForm onLogin={handleLogin} />
+      )}
+      {currentPage === 'reset-password' && (
+        <ResetPassword onLogin={handleLogin} />
       )}
       {currentPage === 'dashboard' && (
         <Dashboard

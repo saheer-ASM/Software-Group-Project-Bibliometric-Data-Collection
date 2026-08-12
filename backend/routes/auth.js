@@ -76,15 +76,44 @@ router.post('/social', async (req, res) => {
     if (!idToken) return res.status(400).json({ message: 'ID token required' });
 
     const decoded = await admin.auth().verifyIdToken(idToken);
-    const { email, name, picture } = decoded;
+    const { email, name, picture, uid } = decoded;
 
     if (!email) return res.status(400).json({ message: 'No email in token' });
 
-    const user = await userStore.findOrCreateSocialUser({ email, displayName: name, photoURL: picture });
+    const user = await userStore.findOrCreateSocialUser({ email, displayName: name, photoURL: picture, firebaseUid: uid });
     const token = signToken(user.id);
     res.json({ token, user: userStore.publicUser(user) });
   } catch (err) {
     res.status(401).json({ message: 'Social sign-in failed', error: err.message });
+  }
+});
+
+// POST /api/auth/reset-password
+// Called after the user completes Firebase's "forgot password" email flow
+// (confirmPasswordReset + sign-in on the frontend). Keeps our own bcrypt
+// password store in sync with the password the user just set in Firebase.
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { idToken, newPassword } = req.body;
+    if (!idToken || !newPassword) {
+      return res.status(400).json({ message: 'ID token and new password are required' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters' });
+    }
+
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    if (!decoded.email) return res.status(400).json({ message: 'No email in token' });
+
+    const user = await userStore.findByEmail(decoded.email);
+    if (!user) return res.status(404).json({ message: 'No account found for this email' });
+
+    await userStore.updatePassword(user.id, newPassword, { syncFirebase: false });
+
+    const token = signToken(user.id);
+    res.json({ token, user: userStore.publicUser(user) });
+  } catch (err) {
+    res.status(401).json({ message: 'Password reset failed', error: err.message });
   }
 });
 

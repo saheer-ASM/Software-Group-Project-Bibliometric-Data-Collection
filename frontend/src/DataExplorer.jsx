@@ -1,412 +1,398 @@
-import React, { useState, useCallback } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import './DataExplorer.css';
 
+const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+function getToken() {
+  return localStorage.getItem('token');
+}
+
 const DataExplorer = ({
-  authorName,
+  authorName = '',
   onBack,
-  onNavigateToSettings,
   onNavigateToAbout,
   onNavigateToProfile,
+  onNavigateToSettings,
   onLogout,
   hasSearchedAuthor,
   onResetSearch,
-  onNavigateToExplorer
+  onNavigateToExplorer,
 }) => {
-  const [loading, setLoading] = useState(false);
-  const [data, setData] = useState(null);
-  const [error, setError] = useState('');
-  const [searchQuery, setSearchQuery] = useState(authorName || '');
-  const [selectedField, setSelectedField] = useState('');
-  const [selectedYear, setSelectedYear] = useState('');
-  const [selectedHIndex, setSelectedHIndex] = useState('');
-  const [selectedNmIndex, setSelectedNmIndex] = useState('');
+  const [searchQuery,   setSearchQuery]   = useState(authorName);
+  const [searchResults, setSearchResults] = useState([]);
+  const [selectedAuthor, setSelectedAuthor] = useState(null);
+  const [publications,  setPublications]  = useState([]);
+  const [loading,       setLoading]       = useState(false);
+  const [error,         setError]         = useState('');
+  const [filterField,   setFilterField]   = useState('');
+  const [filterYear,    setFilterYear]    = useState('');
 
-  // Default "empty" profile shown before any data is fetched
-  const defaultProfile = {
-    author: 'Researcher',
-    email: 'researcher@university.edu',
-    totalPublications: 0,
-    totalCitations: 0,
-    totalSelfCitations: 0,
-    nmIndex: 0,
-    hIndex: 0,
-    cScore: 0,
-    trendData: [
-      { name: 'P', publications: 200, citations: 240 },
-      { name: 'Q', publications: 221, citations: 180 },
-      { name: 'R', publications: 229, citations: 200 },
-      { name: 'S', publications: 200, citations: 220 },
-      { name: 'T', publications: 250, citations: 260 }
-    ],
-    publications: []
-  };
-
-  // Fetch author data from backend API
-  const handleSearch = useCallback(async (queryOverride) => {
-    const query = queryOverride || searchQuery;
-    if (!query.trim()) {
-      setError('Please enter an author name');
-      return;
-    }
-
+  // Search authors by name
+  const doSearch = useCallback(async (name) => {
+    if (!name || name.trim().length < 2) return;
     setLoading(true);
     setError('');
-
     try {
-      const response = await fetch(`/api/search?author=${encodeURIComponent(query)}`);
-      if (!response.ok) {
-        throw new Error('Author not found');
+      const res = await fetch(
+        `${API}/api/authors/search?name=${encodeURIComponent(name.trim())}`,
+        { headers: { Authorization: `Bearer ${getToken()}` } }
+      );
+      if (!res.ok) throw new Error((await res.json()).message || 'Search failed');
+      const { authors } = await res.json();
+      setSearchResults(authors);
+      if (authors.length === 1) {
+        loadAuthorDetails(authors[0].author_id);
+      } else if (authors.length === 0) {
+        setError('No authors found for that name.');
       }
-      const result = await response.json();
-      setData(result);
-    } catch (err) {
-      // Simulated fallback data
-      const simulatedData = {
-        author: query,
-        email: 'researcher@university.edu',
-        totalPublications: 45,
-        totalCitations: 320,
-        totalSelfCitations: 28,
-        nmIndex: 12,
-        hIndex: 8,
-        cScore: 2.85,
-        trendData: [
-          { name: 'P', publications: 200, citations: 240 },
-          { name: 'Q', publications: 221, citations: 180 },
-          { name: 'R', publications: 229, citations: 200 },
-          { name: 'S', publications: 200, citations: 220 },
-          { name: 'T', publications: 250, citations: 260 }
-        ],
-        publications: [
-          {
-            id: 1,
-            title: 'Advanced Techniques in Machine Learning for Data Analysis',
-            fields: ['Machine Learning', 'Data Science', 'AI', 'Analytics', 'Algorithms'],
-            authors: ['Dr. Smith', 'Dr. Johnson', 'Dr. Williams'],
-            selfCitations: 12,
-            publishedYear: 2023,
-            totalCitations: 45
-          },
-          {
-            id: 2,
-            title: 'Neural Network Applications in Healthcare Systems',
-            fields: ['Neural Networks', 'Healthcare', 'Deep Learning', 'Medical AI', 'Systems'],
-            authors: ['Dr. Brown', 'Dr. Davis', 'Dr. Miller'],
-            selfCitations: 8,
-            publishedYear: 2023,
-            totalCitations: 62
-          },
-          {
-            id: 3,
-            title: 'Distributed Computing Frameworks for Big Data Processing',
-            fields: ['Distributed Systems', 'Big Data', 'Cloud Computing', 'Frameworks', 'Scalability'],
-            authors: ['Dr. Wilson', 'Dr. Taylor', 'Dr. Anderson'],
-            selfCitations: 5,
-            publishedYear: 2022,
-            totalCitations: 38
-          }
-        ]
-      };
-      setData(simulatedData);
+    } catch (e) {
+      setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [searchQuery]);
+  }, []);
 
-  // Auto-fetch when authorName prop changes
-  React.useEffect(() => {
+  // Load full author profile + publications
+  const loadAuthorDetails = useCallback(async (authorId, field = '', year = '') => {
+    setLoading(true);
+    setError('');
+    try {
+      const params = new URLSearchParams();
+      if (field) params.set('field', field);
+      if (year)  params.set('year',  year);
+      const qs = params.toString() ? `?${params}` : '';
+
+      const res = await fetch(
+        `${API}/api/authors/${authorId}${qs}`,
+        { headers: { Authorization: `Bearer ${getToken()}` } }
+      );
+      if (!res.ok) throw new Error((await res.json()).message || 'Failed to load author');
+      const { author, publications: pubs } = await res.json();
+      setSelectedAuthor(author);
+      setPublications(pubs);
+      setSearchResults([]);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Trigger search when authorName prop changes (from Dashboard)
+  useEffect(() => {
     if (authorName) {
       setSearchQuery(authorName);
-      setTimeout(() => handleSearch(authorName), 100);
+      doSearch(authorName);
     }
-  }, [authorName]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authorName, doSearch]);
 
-  const handleResetSearchClick = () => {
-    setData(null);
-    setError('');
+  // Re-fetch when filters change
+  useEffect(() => {
+    if (selectedAuthor) {
+      loadAuthorDetails(selectedAuthor.author_id, filterField, filterYear);
+    }
+  }, [filterField, filterYear]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    const next = searchQuery.trim();
+    if (next) {
+      setSelectedAuthor(null);
+      setPublications([]);
+      doSearch(next);
+      onNavigateToExplorer(next);
+    }
+  };
+
+  const handleClear = () => {
     setSearchQuery('');
-    setSelectedField('');
-    setSelectedYear('');
-    setSelectedHIndex('');
-    setSelectedNmIndex('');
-    if (onResetSearch) onResetSearch();
+    setSelectedAuthor(null);
+    setPublications([]);
+    setSearchResults([]);
+    setError('');
+    onResetSearch();
   };
 
   const handleExportCSV = () => {
-    const exportData = data || defaultProfile;
-    const csvContent = [
-      ['Author', exportData.author],
-      ['Email', exportData.email],
-      ['Total Publications', exportData.totalPublications],
-      ['Total Citations', exportData.totalCitations],
-      ['H-Index', exportData.hIndex],
-      [],
-      ['Title', 'Fields', 'Authors', 'Self Citations', 'Published Year', 'Total Citations']
-    ];
+    if (!selectedAuthor || publications.length === 0) return;
 
-    exportData.publications.forEach(pub => {
-      csvContent.push([
-        pub.title,
-        pub.fields.join('; '),
-        pub.authors.join('; '),
-        pub.selfCitations,
-        pub.publishedYear,
-        pub.totalCitations
-      ]);
-    });
+    const headers = ['Title', 'Year', 'Venue', 'Total Citations', 'Self Citations', 'Fields'];
+    const rows = publications.map((p) => [
+      `"${p.title.replace(/"/g, '""')}"`,
+      p.year || '',
+      `"${(p.venue || '').replace(/"/g, '""')}"`,
+      p.total_citations,
+      p.self_citations,
+      `"${(Array.isArray(p.fields) ? p.fields.join('; ') : '')}"`,
+    ]);
 
-    const csvString = csvContent.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-    const element = document.createElement('a');
-    element.setAttribute('href', 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvString));
-    element.setAttribute('download', `${exportData.author}_data.csv`);
-    element.style.display = 'none';
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
+    const csv = [headers, ...rows].map((r) => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `${selectedAuthor.name.replace(/\s+/g, '_')}_publications.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
-  // The displayed profile is either fetched data or the default placeholder
-  const displayData = data || defaultProfile;
+  const heroMetrics = useMemo(() => {
+    if (!selectedAuthor) {
+      return [
+        { label: 'Total Publications',  value: '--' },
+        { label: 'Total Citations',      value: '--' },
+        { label: 'Total Self Citations', value: '--' },
+        { label: 'H-Index',             value: '--' },
+        { label: 'C Score',             value: '--' },
+        { label: 'Nm-Index',            value: '--' },
+      ];
+    }
+    return [
+      { label: 'Total Publications',  value: selectedAuthor.totalPublications  ?? '--' },
+      { label: 'Total Citations',     value: selectedAuthor.totalCitations      ?? '--' },
+      { label: 'Total Self Citations',value: selectedAuthor.totalSelfCitations  ?? '--' },
+      { label: 'H-Index',            value: selectedAuthor.hIndex               ?? '--' },
+      { label: 'C Score',            value: selectedAuthor.cIndex               ?? '--' },
+      { label: 'Nm-Index',           value: selectedAuthor.nmIndex              ?? '--' },
+    ];
+  }, [selectedAuthor]);
+
+  const displayName  = selectedAuthor?.name  || authorName || 'Search an Author';
+  const displayEmail = selectedAuthor?.email || (selectedAuthor?.name
+    ? `${selectedAuthor.name.replace(/\s+/g, '.').toLowerCase()}@university.edu`
+    : '');
 
   return (
-    <div className="de-container">
-      {/* Header */}
-      <header className="de-header">
-        <div className="de-header-left">
-          <i className='bx bxs-graduation'></i>
-          <span className="de-logo">ScholarMetrics</span>
-        </div>
-        <div className="de-header-right">
-          <nav className="de-nav">
-            <a href="#dashboard" onClick={onBack} className="de-nav-link">Dashboard</a>
-            <a href="#explorer" className="de-nav-link de-nav-active">Data Explorer</a>
-            <a href="#about" onClick={onNavigateToAbout} className="de-nav-link">About Us</a>
-            <button className="de-nav-link de-logout-btn" onClick={onLogout}>Logout</button>
-          </nav>
-          <div className="de-user-icon" onClick={onNavigateToProfile}>
-            <i className='bx bxs-user-circle'></i>
+    <div className="data-explorer-page">
+      <header className="explorer-header">
+        <div className="brand-block">
+          <div className="brand-icon">A</div>
+          <div>
+            <div className="brand-name">Acade Mine</div>
+            <div className="brand-subtitle">Data Explorer</div>
           </div>
         </div>
+
+        <nav className="explorer-nav">
+          <button type="button" onClick={onBack}>Dashboard</button>
+          <button type="button" onClick={onNavigateToProfile}>Settings</button>
+          <button type="button" onClick={onNavigateToAbout}>About Us</button>
+          <button type="button" className="logout-button" onClick={onLogout}>Logout</button>
+        </nav>
       </header>
 
-      {/* Main Content */}
-      <main className="de-main">
-        {/* Page title + Reset Search */}
-        <div className="de-title-row">
-          <h1 className="de-page-title">Data Explorer</h1>
-          <button className="de-reset-btn" onClick={handleResetSearchClick}>
-            <i className='bx bx-reset'></i> Reset Search
-          </button>
-        </div>
+      <main className="explorer-main">
+        <section className="hero-section">
+          <div className="hero-card">
+            <div className="hero-card-left">
+              <span className="eyebrow">Data Explorer</span>
+              <h1>Discover scholarly publication trends</h1>
+              <p>Review author metrics, publication performance, and contribution highlights in one unified space.</p>
 
-        {/* Author Profile Card — always visible */}
-        <section className="de-profile-card">
-          {/* Left: Avatar + name + metrics */}
-          <div className="de-profile-left">
-            <div className="de-profile-top">
-              <div className="de-avatar">
-                <i className='bx bxs-user-circle'></i>
-              </div>
-              <div className="de-profile-info">
-                <h2 className="de-author-name">{displayData.author}</h2>
-                <p className="de-author-email">{displayData.email}</p>
+              <form onSubmit={handleSearch} className="explorer-search-form">
+                <input
+                  type="text"
+                  placeholder="Search author by name…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                <button type="submit" disabled={loading}>
+                  {loading ? '…' : 'Search'}
+                </button>
+                {searchQuery && (
+                  <button type="button" onClick={handleClear}>Clear</button>
+                )}
+              </form>
+
+              {error && <p className="explorer-error">{error}</p>}
+
+              {searchResults.length > 1 && (
+                <ul className="search-results-list">
+                  {searchResults.map((a) => (
+                    <li key={a.author_id}>
+                      <button
+                        type="button"
+                        onClick={() => loadAuthorDetails(a.author_id)}
+                      >
+                        <strong>{a.name}</strong>
+                        {a.affiliation && <span> — {a.affiliation}</span>}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="hero-metrics">
+                {heroMetrics.slice(0, 3).map((m) => (
+                  <div key={m.label} className="hero-metric-card">
+                    <span>{m.label}</span>
+                    <strong>{m.value}</strong>
+                  </div>
+                ))}
               </div>
             </div>
 
-            <div className="de-metrics-grid">
-              <div className="de-metric-box">
-                <span className="de-metric-label">TOTAL PUBLICATIONS</span>
-                <span className="de-metric-value">{displayData.totalPublications}</span>
+            <div className="hero-card-right">
+              <div className="profile-banner">
+                <div className="profile-avatar">{displayName.charAt(0).toUpperCase()}</div>
+                <div>
+                  <div className="profile-name">{displayName}</div>
+                  {selectedAuthor?.affiliation && (
+                    <div className="profile-affiliation">{selectedAuthor.affiliation}</div>
+                  )}
+                  <div className="profile-email">{displayEmail}</div>
+                </div>
               </div>
-              <div className="de-metric-box">
-                <span className="de-metric-label">TOTAL CITATIONS</span>
-                <span className="de-metric-value">{displayData.totalCitations}</span>
+
+              <div className="metrics-grid">
+                {heroMetrics.slice(3).map((m) => (
+                  <div key={m.label} className="metric-badge">
+                    <span>{m.label}</span>
+                    <strong>{m.value}</strong>
+                  </div>
+                ))}
               </div>
-              <div className="de-metric-box">
-                <span className="de-metric-label">TOTAL SELF CITATIONS</span>
-                <span className="de-metric-value">{displayData.totalSelfCitations}</span>
-              </div>
-              <div className="de-metric-box">
-                <span className="de-metric-label">NM INDEX</span>
-                <span className="de-metric-value">{displayData.nmIndex}</span>
-              </div>
-              <div className="de-metric-box">
-                <span className="de-metric-label">H INDEX</span>
-                <span className="de-metric-value">{displayData.hIndex}</span>
-              </div>
-              <div className="de-metric-box">
-                <span className="de-metric-label">C SCORE</span>
-                <span className="de-metric-value">{displayData.cScore}</span>
+
+              <div className="chart-card">
+                <div className="chart-header">
+                  <div>
+                    <span className="eyebrow">Performance</span>
+                    <h2>Publications vs Citations</h2>
+                  </div>
+                </div>
+                <div className="line-chart">
+                  <div className="line-grid" />
+                  <div className="line-path" />
+                  <div className="points">
+                    <span style={{ left: '10%' }} />
+                    <span style={{ left: '30%' }} />
+                    <span style={{ left: '50%' }} />
+                    <span style={{ left: '70%' }} />
+                    <span style={{ left: '90%' }} />
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-
-          {/* Right: Line Chart */}
-          <div className="de-chart-area">
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={displayData.trendData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Line
-                  type="monotone"
-                  dataKey="publications"
-                  stroke="#2a5298"
-                  strokeWidth={2.5}
-                  dot={{ r: 5, fill: '#2a5298' }}
-                  activeDot={{ r: 7 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="citations"
-                  stroke="#e53e3e"
-                  strokeWidth={2.5}
-                  dot={{ r: 5, fill: '#e53e3e' }}
-                  activeDot={{ r: 7 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
           </div>
         </section>
 
-        {error && <div className="de-error">{error}</div>}
-        {loading && <div className="de-loading">Searching...</div>}
-
-        {/* Filter Section */}
-        <section className="de-filter-section">
-          <div className="de-filter-header">
-            <i className='bx bx-filter-alt'></i>
-            <span>Filter</span>
-          </div>
-          <div className="de-filter-controls">
-            <div className="de-filter-group">
+        <section className="filter-section">
+          <div className="filter-row">
+            <div className="filter-field">
               <label>Field</label>
-              <select value={selectedField} onChange={(e) => setSelectedField(e.target.value)}>
-                <option value="">Select Field</option>
-                <option value="cs">Computer Science</option>
-                <option value="bio">Biology</option>
-                <option value="phys">Physics</option>
-                <option value="math">Mathematics</option>
-                <option value="med">Medicine</option>
+              <select value={filterField} onChange={(e) => setFilterField(e.target.value)}>
+                <option value="">All Fields</option>
+                <option>Computer Science</option>
+                <option>Biology</option>
+                <option>Engineering</option>
+                <option>Medicine</option>
+                <option>Physics</option>
+                <option>Mathematics</option>
               </select>
             </div>
-            <div className="de-filter-group">
+            <div className="filter-field">
               <label>Year</label>
-              <select value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)}>
-                <option value="">Select Year</option>
-                <option value="2024">2024</option>
-                <option value="2023">2023</option>
-                <option value="2022">2022</option>
-                <option value="2021">2021</option>
-                <option value="2020">2020</option>
+              <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
+                <option value="">All Years</option>
+                {[2024, 2023, 2022, 2021, 2020, 2019, 2018].map((y) => (
+                  <option key={y}>{y}</option>
+                ))}
               </select>
             </div>
-            <div className="de-filter-group">
+            <div className="filter-field">
               <label>H-Index</label>
-              <select value={selectedHIndex} onChange={(e) => setSelectedHIndex(e.target.value)}>
-                <option value="">Nm-Index</option>
-                <option value="high">High (&gt;10)</option>
-                <option value="medium">Medium (5-10)</option>
-                <option value="low">Low (&lt;5)</option>
+              <select disabled>
+                <option>{selectedAuthor?.hIndex ?? '--'}</option>
               </select>
             </div>
-            <div className="de-filter-group">
+            <div className="filter-field">
               <label>Nm-Index</label>
-              <select value={selectedNmIndex} onChange={(e) => setSelectedNmIndex(e.target.value)}>
-                <option value="">Nm-Index</option>
-                <option value="high">High (&gt;15)</option>
-                <option value="medium">Medium (8-15)</option>
-                <option value="low">Low (&lt;8)</option>
+              <select disabled>
+                <option>{selectedAuthor?.nmIndex ?? '--'}</option>
               </select>
             </div>
           </div>
         </section>
 
-        {/* Publications Section */}
-        {data && data.publications && data.publications.length > 0 && (
-          <section className="de-publications">
-            {data.publications.map((pub) => (
-              <div key={pub.id} className="de-pub-card">
-                <div className="de-pub-main">
-                  <h3 className="de-pub-title">{pub.title}</h3>
-                  <div className="de-pub-fields">
-                    {pub.fields.map((field, idx) => (
-                      <span key={idx} className="de-field-tag">{field}</span>
+        <section className="publication-section">
+          {loading && <p className="explorer-loading">Loading…</p>}
+
+          {!loading && publications.length === 0 && selectedAuthor && (
+            <p className="explorer-empty">No publications found for the selected filters.</p>
+          )}
+
+          {publications.map((pub) => (
+            <article key={pub.publication_id} className="publication-card">
+              <div className="publication-main">
+                <div>
+                  <h3>{pub.title}</h3>
+                  {pub.venue && <p className="pub-venue">{pub.venue} · {pub.year}</p>}
+                  <div className="field-bars">
+                    {(Array.isArray(pub.fields) ? pub.fields : []).map((f) => (
+                      <span key={f}>{f}</span>
                     ))}
                   </div>
-                  <div className="de-pub-authors">
-                    <h4>Authors Contribution</h4>
-                    <ul>
-                      {pub.authors.map((author, idx) => (
-                        <li key={idx}>{author}</li>
-                      ))}
-                    </ul>
-                  </div>
                 </div>
-                <div className="de-pub-stats">
-                  <div className="de-pub-stat">
-                    <span className="de-pub-stat-label">Total Self Citations</span>
-                    <span className="de-pub-stat-value">{pub.selfCitations}</span>
-                  </div>
-                  <div className="de-pub-stat">
-                    <span className="de-pub-stat-label">Published Year</span>
-                    <span className="de-pub-stat-value">{pub.publishedYear}</span>
-                  </div>
-                  <div className="de-pub-stat">
-                    <span className="de-pub-stat-label">Total Citations</span>
-                    <span className="de-pub-stat-value">{pub.totalCitations}</span>
-                  </div>
+                <div className="publication-details">
+                  <span>Co-Authors</span>
+                  {(pub.coAuthors || []).length > 0
+                    ? pub.coAuthors.map((a) => <p key={a.author_id}>{a.name}</p>)
+                    : <p>—</p>}
                 </div>
               </div>
-            ))}
-          </section>
-        )}
 
-        {/* Export CSV Button */}
-        <div className="de-export-section">
-          <button className="de-export-btn" onClick={handleExportCSV}>
-            Click here to Export CSV
-          </button>
-        </div>
+              <div className="publication-stats">
+                <div>
+                  <span>Self Citations</span>
+                  <strong>{pub.self_citations}</strong>
+                </div>
+                <div>
+                  <span>Published Year</span>
+                  <strong>{pub.year || '—'}</strong>
+                </div>
+                <div>
+                  <span>Total Citations</span>
+                  <strong>{pub.total_citations}</strong>
+                </div>
+              </div>
+            </article>
+          ))}
+
+          <div className="explorer-actions">
+            <button
+              className="primary-button"
+              type="button"
+              onClick={handleExportCSV}
+              disabled={!selectedAuthor || publications.length === 0}
+            >
+              Export CSV
+            </button>
+          </div>
+        </section>
       </main>
 
-      {/* Footer */}
-      <footer className="de-footer">
-        <div className="de-footer-content">
-          <div className="de-footer-section">
-            <div className="de-footer-brand">
-              <i className='bx bx-file'></i>
-              <h3>ScholarMetrics</h3>
-            </div>
-            <p>Revolutionizing research evaluation through intelligent automation and comprehensive data collection across global scholarly databases.</p>
-          </div>
-          <div className="de-footer-section">
+      <footer className="explorer-footer">
+        <div className="footer-left">
+          <h3>Acade Mine</h3>
+          <p>Revolutionizing research evaluation through intelligent automation and comprehensive data collection across global scholarly databases.</p>
+        </div>
+        <div className="footer-links">
+          <div>
             <h4>Quick Links</h4>
             <ul>
-              <li><a href="#dashboard" onClick={onBack}>Dashboard</a></li>
-              <li><a href="#explorer">Data Explorer</a></li>
-              <li><a href="#settings" onClick={onNavigateToSettings}>Settings</a></li>
-              <li><a href="#about" onClick={onNavigateToAbout}>About Us</a></li>
+              <li><button type="button" onClick={onBack}>Dashboard</button></li>
+              <li><button type="button">Data Explorer</button></li>
+              <li><button type="button" onClick={onNavigateToSettings}>Settings</button></li>
+              <li><button type="button" onClick={onNavigateToAbout}>About Us</button></li>
             </ul>
           </div>
-          <div className="de-footer-section">
-            <h4>Resources</h4>
-            <ul>
-              <li><a href="#docs">Documentation</a></li>
-              <li><a href="#api">API Reference</a></li>
-              <li><a href="#tutorials">Tutorials</a></li>
-              <li><a href="#faq">FAQ</a></li>
-            </ul>
-          </div>
-          <div className="de-footer-section">
+          <div>
             <h4>Contact</h4>
             <ul>
-              <li><a href="#support">Support Center</a></li>
+              <li><button type="button">Support Center</button></li>
               <li><a href="mailto:info@academine.edu">info@academine.edu</a></li>
-              <li><a href="#feedback">Send Feedback</a></li>
-              <li><a href="#report">Report an Issue</a></li>
+              <li><button type="button">Send Feedback</button></li>
+              <li><button type="button">Report an Issue</button></li>
             </ul>
           </div>
         </div>
