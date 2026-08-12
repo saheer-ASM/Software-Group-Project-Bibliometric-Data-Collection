@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { auth, firestore, missingConfig } from './firebase';
+import { auth, missingConfig } from './firebase';
 import './AuthForm.css';
 
 const AuthForm = ({ onLogin }) => {
-  const navigate = useNavigate();
   const [isActive, setIsActive] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -171,34 +169,27 @@ const AuthForm = ({ onLogin }) => {
     }
     setLoading(true);
     try {
-      const { createUserWithEmailAndPassword, updateProfile } = await import('firebase/auth');
-      const { doc, setDoc, getFirestore } = await import('firebase/firestore');
-      
-      const userCredential = await createUserWithEmailAndPassword(auth, registerEmail, registerPassword);
-      
-      await updateProfile(userCredential.user, {
-        displayName: registerUsername,
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: registerUsername,
+          email: registerEmail,
+          designation: registerDesignation,
+          password: registerPassword,
+        }),
       });
-
-      await setDoc(doc(getFirestore(), 'users', userCredential.user.uid), {
-        username: registerUsername,
-        email: registerEmail,
-        designation: registerDesignation,
-        createdAt: new Date(),
-      });
-
-      const token = await userCredential.user.getIdToken();
-      localStorage.setItem('token', token);
-      
-      onLogin({
-        id: userCredential.user.uid,
-        username: registerUsername,
-        email: registerEmail,
-        designation: registerDesignation,
-        photoURL: '',
-      });
-    } catch (err) {
-      setError(err.message || 'Registration failed');
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.message || 'Registration failed');
+        return;
+      }
+      localStorage.setItem('token', data.token);
+      onLogin(data.user);
+    } catch {
+      setError('Network error. Is the server running?');
+    } finally {
+      setLoading(false);
     }
   };
 

@@ -120,12 +120,42 @@ async function comparePassword(user, candidatePassword) {
   return bcrypt.compare(candidatePassword, user.password);
 }
 
+async function findOrCreateSocialUser({ email, displayName, photoURL }) {
+  const existing = await findByEmail(email);
+  if (existing) return existing;
+
+  // Generate a unique username from display name
+  let base = (displayName || email.split('@')[0]).replace(/[^a-zA-Z0-9_]/g, '').slice(0, 20) || 'user';
+  let username = base;
+  let attempt = 1;
+  while (await findByUsername(username)) {
+    username = `${base}${attempt++}`;
+  }
+
+  const now = new Date().toISOString();
+  const docRef = usersCollection.doc();
+  const user = {
+    username,
+    usernameLower: username.toLowerCase(),
+    email: normalizeEmail(email),
+    designation: '',
+    password: null,
+    photoURL: photoURL || '',
+    createdAt: now,
+    updatedAt: now,
+  };
+  await docRef.set(user);
+  return { id: docRef.id, ...user };
+}
+
 module.exports = {
   comparePassword,
   createUser,
   findById,
+  findByEmail,
   findByUsername,
   findConflict,
+  findOrCreateSocialUser,
   publicUser,
   updatePassword,
   updateUser,
