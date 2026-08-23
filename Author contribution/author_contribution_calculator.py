@@ -17,8 +17,17 @@ class AuthorContributionCalculator:
             author_list: List[str],
             paper_id: str
     ) -> str:
+        
+        num_authors = len(author_list)
 
-        sorted_authors = sorted(author_list)
+         # For 1 or 2 authors, always assume relative ordering
+
+        if num_authors <=2:
+            return "relative"
+        
+        # For 3 or more authors, use the normal ordering detection
+
+        sorted_authors = sorted(author_list, key=lambda x: x.lower())
 
 
         if [a.lower() for a in author_list] == \
@@ -29,6 +38,8 @@ class AuthorContributionCalculator:
         else:
 
             return "relative"
+        
+        
 
 
     def calculate_alphabetical_weights(
@@ -42,6 +53,8 @@ class AuthorContributionCalculator:
 
         if num_authors == 0:
             return {}
+        
+        
 
 
         contribution = field_weight / num_authors
@@ -72,6 +85,12 @@ class AuthorContributionCalculator:
 
         if num_authors==0:
             return {}
+        
+            # One author gets 100% contribution
+        if num_authors == 1:
+            return {
+            1: field_weight
+        }
 
 
         core_first = core_first_indices or []
@@ -223,3 +242,10 @@ class AuthorContributionCalculator:
             )
 
         }
+
+
+
+
+
+
+
