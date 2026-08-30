@@ -238,7 +238,14 @@ def load_authors(connection):
 
 def load_effective_citations(connection):
     """
-    Load capped adjusted citation values.
+    Load per (paper, author, field) effective-citation data.
+
+    IMPORTANT: this table is unique at (pub_id, author_id,
+    field_name) -- NOT at pub_id alone. It already contains the
+    fully combined per-author-per-field weight (author_field_weight,
+    i.e. Eq. 1/3/4/5's W_p^{f,i}) and the correct per-row
+    career_factor -- these are read directly rather than being
+    recomputed from author_contribution_weight.
 
     Database table:
 
@@ -247,12 +254,25 @@ def load_effective_citations(connection):
     Database columns:
 
         pub_id
+        author_id
+        field_name
+        career_factor
+        author_field_weight
         capped_adjusted_citation
+        calculation_status
 
     Python DataFrame:
 
         paper_id
+        author_id
+        field_id
+        career_factor
+        author_field_weight
         capped_adjusted_citations
+
+    Only rows with calculation_status = 'READY' are loaded. Rows
+    still pending (e.g. MISSING_VALUE) are excluded, since they do
+    not yet have a valid capped_adjusted_citation to work with.
     """
 
     config = TABLE_COLUMNS[
@@ -267,10 +287,30 @@ def load_effective_citations(connection):
         config["paper_id"]
     )
 
+    author_id = quote_identifier(
+        config["author_id"]
+    )
+
+    field_id = quote_identifier(
+        config["field_id"]
+    )
+
+    career_factor = quote_identifier(
+        config["career_factor"]
+    )
+
+    author_field_weight = quote_identifier(
+        config["author_field_weight"]
+    )
+
     citation = quote_identifier(
         config[
             "capped_adjusted_citations"
         ]
+    )
+
+    calculation_status = quote_identifier(
+        config["calculation_status"]
     )
 
     query = f"""
@@ -279,17 +319,32 @@ def load_effective_citations(connection):
             {paper_id}
                 AS paper_id,
 
+            {author_id}
+                AS author_id,
+
+            {field_id}
+                AS field_id,
+
+            {career_factor}
+                AS career_factor,
+
+            {author_field_weight}
+                AS author_field_weight,
+
             {citation}
                 AS capped_adjusted_citations
 
         FROM {table}
 
-        WHERE {citation}
+        WHERE {calculation_status} = 'READY'
+
+          AND {citation}
             IS NOT NULL
     """
 
     print(
-        "Fetching capped adjusted citations..."
+        "Fetching effective citation data "
+        "(paper, author, field level)..."
     )
 
     dataframe = pd.read_sql(
@@ -299,10 +354,79 @@ def load_effective_citations(connection):
 
     print(
         f"  Loaded {len(dataframe)} "
+        f"paper-author-field effective "
         f"citation records"
     )
 
     return dataframe
+
+
+# =============================================================
+# APPLY CITATION OUTLIER CAP
+# =============================================================
+
+# Fixed outlier cap: no paper's capped_adjusted_citations value is
+# allowed to exceed this, regardless of field. This is a flat cap
+# (not a per-field percentile) applied uniformly across the whole
+# dataset, per instruction.
+OUTLIER_CITATION_CAP = 150
+
+
+def apply_citation_outlier_cap(
+    paper_citations,
+    cap=OUTLIER_CITATION_CAP,
+):
+    """
+    Cap capped_adjusted_citations at a fixed outlier threshold.
+
+    Any paper whose citation value exceeds `cap` (default 150) is
+    truncated down to `cap`. Values at or below `cap` are left
+    unchanged. This reduces the influence of any single
+    exceptionally-cited paper on downstream calculations (effective
+    citation sums, field normalization, and the Modified Hm-index
+    itself), without needing a per-field percentile computation.
+
+    Parameters:
+        paper_citations: DataFrame with a
+            "capped_adjusted_citations" column.
+        cap: the fixed ceiling to apply (default 150).
+
+    Returns:
+        A copy of paper_citations with capped_adjusted_citations
+        clipped at `cap`.
+    """
+
+    paper_citations = paper_citations.copy()
+
+    paper_citations[
+        "capped_adjusted_citations"
+    ] = pd.to_numeric(
+        paper_citations[
+            "capped_adjusted_citations"
+        ],
+        errors="coerce",
+    )
+
+    before_count = (
+        paper_citations[
+            "capped_adjusted_citations"
+        ] > cap
+    ).sum()
+
+    paper_citations[
+        "capped_adjusted_citations"
+    ] = paper_citations[
+        "capped_adjusted_citations"
+    ].clip(upper=cap)
+
+    print(
+        f"  Applied outlier cap of {cap} "
+        f"citations "
+        f"({before_count} record(s) were "
+        f"above the cap and got truncated)"
+    )
+
+    return paper_citations
 
 
 # =============================================================
@@ -420,6 +544,16 @@ def load_paper_fields(connection):
         connection,
     )
 
+    # Convert field weights from percentage to proportion,
+    # matching the same treatment already applied to
+    # contribution_weight in load_author_contribution_weight().
+    dataframe["field_weight"] = (
+        pd.to_numeric(
+            dataframe["field_weight"],
+            errors="coerce",
+        ) / 100.0
+    )
+
     print(
         f"  Loaded {len(dataframe)} "
         f"paper-field records"
@@ -429,104 +563,16 @@ def load_paper_fields(connection):
 
 
 # =============================================================
-# CALCULATE FIELD NORMALIZATION
+# NOTE: calculate_field_normalization() has been REMOVED.
+#
+# Field normalization (Hm'_f) is no longer computed here as a
+# percentile of citations. Per supervisor instruction, it is now
+# computed INTERNALLY inside ModifiedHmIndexCalculator.calculate()
+# as the mean of every author's raw effective rank across all
+# authors in that field -- a "running value" recalculated fresh
+# on every call, not stored or passed in from outside. See the
+# class docstring in calculator.py for details.
 # =============================================================
-
-def calculate_field_normalization(
-    field_classification,
-    paper_citations,
-):
-    """
-    Calculate Hm field normalization.
-
-    Steps:
-        1. Collect citations for each field.
-        2. Calculate the 90th percentile of citations
-           for each field.
-        3. Store the result as hm_field_normalization.
-
-    Returns:
-        DataFrame containing:
-
-            field_id
-            hm_field_normalization
-    """
-
-    # =========================================================
-    # 1. JOIN PAPER FIELDS WITH CITATIONS
-    # =========================================================
-
-    field_citations = field_classification.merge(
-        paper_citations[
-            [
-                "paper_id",
-                "capped_adjusted_citations",
-            ]
-        ],
-        on="paper_id",
-        how="inner",
-    )
-
-    # =========================================================
-    # 2. CLEAN CITATION VALUES
-    # =========================================================
-
-    field_citations[
-        "capped_adjusted_citations"
-    ] = pd.to_numeric(
-        field_citations[
-            "capped_adjusted_citations"
-        ],
-        errors="coerce",
-    )
-
-    field_citations = field_citations.dropna(
-        subset=[
-            "field_id",
-            "capped_adjusted_citations",
-        ]
-    )
-
-    # =========================================================
-    # 3. CALCULATE 90TH PERCENTILE FOR EACH FIELD
-    # =========================================================
-
-    field_normalization = (
-        field_citations
-        .groupby("field_id")[
-            "capped_adjusted_citations"
-        ]
-        .quantile(0.90)
-        .reset_index()
-    )
-
-    # =========================================================
-    # 4. RENAME RESULT
-    # =========================================================
-
-    field_normalization = field_normalization.rename(
-        columns={
-            "capped_adjusted_citations":
-                "hm_field_normalization"
-        }
-    )
-
-    # =========================================================
-    # 5. REMOVE INVALID NORMALIZATION VALUES
-    # =========================================================
-
-    field_normalization = field_normalization[
-        field_normalization[
-            "hm_field_normalization"
-        ] > 0
-    ]
-
-    return field_normalization[
-        [
-            "field_id",
-            "hm_field_normalization",
-        ]
-    ]
 
 
 # =============================================================
@@ -536,6 +582,16 @@ def calculate_field_normalization(
 def get_data_from_database():
     """
     Load all required data from PostgreSQL.
+
+    NOTE: load_author_contribution_weight() and load_authors() are
+    no longer called here. author_paper_field_effective_citation
+    already contains the fully combined author_field_weight and the
+    correct career_factor per (paper, author, field) row -- there is
+    no need to separately load and recombine
+    author_contribution_weight or the author table's
+    career_compensation for this calculation. Both loader functions
+    remain defined above in case another part of the system still
+    needs them directly.
     """
 
     connection = get_connection()
@@ -548,30 +604,18 @@ def get_data_from_database():
         print("=" * 60)
 
         # -----------------------------------------------------
-        # Author contribution
+        # Effective citations (paper, author, field level)
         # -----------------------------------------------------
 
-        paper_authors = (
-            load_author_contribution_weight(
+        effective_citations = (
+            load_effective_citations(
                 connection
             )
         )
 
-        # -----------------------------------------------------
-        # Author career factors
-        # -----------------------------------------------------
-
-        authors = load_authors(
-            connection
-        )
-
-        # -----------------------------------------------------
-        # Effective citations
-        # -----------------------------------------------------
-
-        paper_citations = (
-            load_effective_citations(
-                connection
+        effective_citations = (
+            apply_citation_outlier_cap(
+                effective_citations
             )
         )
 
@@ -585,14 +629,8 @@ def get_data_from_database():
 
         return {
 
-            "paper_authors":
-                paper_authors,
-
-            "authors":
-                authors,
-
-            "paper_citations":
-                paper_citations,
+            "effective_citations":
+                effective_citations,
 
             "field_classification":
                 field_classification,
@@ -764,38 +802,12 @@ def main():
 
         print()
         print(
-            "STEP 2: Calculating field normalization..."
+            "STEP 2: Calculating Modified Hm-index..."
         )
-
-        field_normalization = (
-            calculate_field_normalization(
-                data[
-                    "field_classification"
-                ],
-
-                data[
-                    "paper_citations"
-                ],
-            )
-        )
-
         print(
-            f"  Calculated normalization "
-            f"for "
-            f"{len(field_normalization)} "
-            f"fields"
-        )
-
-        print("\nFIELD NORMALIZATION:")
-        print(field_normalization.to_string(index=False))
-
-        # =====================================================
-        # STEP 3
-        # =====================================================
-
-        print()
-        print(
-            "STEP 3: Calculating Modified Hm-index..."
+            "  (field normalization is now computed "
+            "internally by the calculator, as a running "
+            "field-average value -- see calculator.py)"
         )
 
         calculator = (
@@ -804,28 +816,15 @@ def main():
 
         results = calculator.calculate(
 
-            paper_authors=
+            effective_citations=
                 data[
-                    "paper_authors"
-                ],
-
-            authors=
-                data[
-                    "authors"
-                ],
-
-            paper_citations=
-                data[
-                    "paper_citations"
+                    "effective_citations"
                 ],
 
             field_classification=
                 data[
                     "field_classification"
                 ],
-
-            field_normalization=
-                field_normalization,
         )
 
         print(
@@ -835,12 +834,12 @@ def main():
         )
 
         # =====================================================
-        # STEP 4
+        # STEP 3
         # =====================================================
 
         print()
         print(
-            "STEP 4: RESULTS SUMMARY"
+            "STEP 3: RESULTS SUMMARY"
         )
 
         print("-" * 60)
@@ -890,12 +889,12 @@ def main():
             )
 
         # =====================================================
-        # STEP 5
+        # STEP 4
         # =====================================================
 
         print()
         print(
-            "STEP 5: Updating author table..."
+            "STEP 4: Updating author table..."
         )
 
         update_authors_table(

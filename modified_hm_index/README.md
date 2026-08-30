@@ -6,10 +6,11 @@ This module calculates the **Modified Hm-index** for authors using a modified Hm
 
 * Author career factor
 * Author contribution weight
-* Capped adjusted citations
+* Capped adjusted citations (outlier-capped at a fixed threshold before reaching this calculation — see Section 6)
 * Multiple research fields
-* Field-specific normalization
-* Field weights
+* Field weights (applied both within each field's calculation and when combining fields)
+* An h-index-style threshold condition that limits which papers count toward the field-specific score
+* A **field-average normalization**, computed internally and freshly on every run (see Section 9)
 
 The calculated Modified Hm-index is written back to the `author` table.
 
@@ -27,6 +28,7 @@ modified_hm_index/
 ├── database.py
 ├── calculator.py
 ├── run_calculation.py
+├── test_calculator.py
 └── README.md
 ```
 
@@ -36,8 +38,9 @@ modified_hm_index/
 | -------------------- | ------------------------------------------------------------------------ |
 | `config.py`          | Contains database table and column mappings                              |
 | `database.py`        | Creates the PostgreSQL database connection                               |
-| `calculator.py`      | Contains the Modified Hm-index calculation logic                         |
-| `run_calculation.py` | Loads database data, performs calculations, and updates the author table |
+| `calculator.py`      | Contains the Modified Hm-index calculation logic, including internal field normalization |
+| `run_calculation.py` | Loads database data, applies the citation outlier cap, runs the calculator, and updates the author table |
+| `test_calculator.py` | Regression tests for the calculation logic (see Section 21)              |
 | `README.md`          | Documentation for the module                                             |
 
 ---
@@ -111,6 +114,12 @@ contribution_weight
 ```
 
 Each author position is converted into a separate record. The implementation uses `UNION ALL` to combine all author positions.
+
+`contribution_weight` here is the **position/ordering-based** weight for the author on that paper (e.g. from alphabetical, relative-contribution/harmonic, or CRediT/ACI ordering). It does **not** yet include the paper's field split — that is applied separately via `field_weight` (see Section 5 and Section 8).
+
+> **IMPORTANT — one row per (paper, author), not per (paper, field):** `paper_authors` must contain exactly one row per `(paper_id, author_id)` combination. If an author's contribution row is accidentally duplicated once per field the paper belongs to, the merge in `calculator.py` will silently cross-join and double (or worse) every downstream value for that paper. Field-specific splitting is handled entirely through `field_classification` (Section 5) — never through duplicating rows in `paper_authors`.
+
+> **Note:** `run_calculation.py` divides the raw database value by 100 (`contribution_weight = raw / 100.0`), so the source column is expected to be stored as a percentage (0–100), not already as a proportion (0–1). Confirm this matches your schema before running against a new database.
 
 ---
 
@@ -195,7 +204,7 @@ paper_id
 capped_adjusted_citations
 ```
 
-The capped adjusted citation value is used in the effective citation calculation.
+This is the citation value used throughout the calculation — after the outlier cap in Section 6 is applied to it.
 
 ---
 
@@ -252,9 +261,34 @@ field_weight
 
 As with author contributions, the three field positions are combined into one normalized DataFrame using `UNION ALL`.
 
+`field_weight` (V_p^f in the underlying model) is used **twice** in the calculation:
+
+1. Inside the field-specific effective citation and effective rank calculation (Section 8), to scale a multi-field paper's contribution down to its share in that particular field.
+2. Again when combining each field's Hm score into the author's overall score (Section 12).
+
 ---
 
-# 6. Data Processing Flow
+# 6. Citation Outlier Cap
+
+Before citations reach the field normalization or the main calculator, a **fixed outlier cap of 150 citations** is applied in `run_calculation.py`:
+
+```python
+OUTLIER_CITATION_CAP = 150
+
+def apply_citation_outlier_cap(paper_citations, cap=OUTLIER_CITATION_CAP):
+    paper_citations["capped_adjusted_citations"] = (
+        paper_citations["capped_adjusted_citations"].clip(upper=cap)
+    )
+    return paper_citations
+```
+
+Any paper's `capped_adjusted_citations` value above 150 is truncated down to 150; values at or below 150 are left unchanged. This is applied once, in `get_data_from_database()`, immediately after citations are loaded — so both the calculator and (indirectly) the field normalization step described in Section 9 operate on already-capped values.
+
+This is a **flat cap applied uniformly across every field** — not a per-field percentile.
+
+---
+
+# 7. Data Processing Flow
 
 The complete calculation follows these steps:
 
@@ -273,19 +307,27 @@ PostgreSQL Database
         Load Database Data
                 │
                 ▼
+        Apply Outlier Cap (150 citations, Section 6)
+                │
+                ▼
         Normalize Wide Tables
                 │
                 ▼
-        Calculate Field Normalization
+        Calculate Effective Citations (field-weighted, Eq. 15)
                 │
                 ▼
-        Calculate Effective Citations
+        PASS 1: Per-Author-Field Effective Rank (Eq. 18/19 numerator,
+                with the h-index-style threshold condition)
+                │
+                ▼
+        PASS 2: Field-Average Normalization (Eq. 19 denominator,
+                computed internally from the current data)
                 │
                 ▼
         Calculate Field-Specific Hm
                 │
                 ▼
-        Calculate Weighted Hm
+        Calculate Weighted Hm (Eq. 20)
                 │
                 ▼
         Calculate Modified Hm-index
@@ -296,161 +338,15 @@ PostgreSQL Database
 
 ---
 
-# 7. Field Normalization
+# 8. Effective Citation Calculation (Equation 15)
 
-Field normalization is calculated before the Modified Hm-index calculation.
-
-The process is:
-
-1. Join paper fields with citation data.
-2. Clean citation values.
-3. Group citations by research field.
-4. Calculate the **90th percentile** for each field.
-5. Store the result as `hm_field_normalization`.
-6. Remove normalization values that are not greater than zero.
-
-The resulting DataFrame contains:
-
-```text
-field_id
-hm_field_normalization
-```
-
-This normalization is calculated by `calculate_field_normalization()` in `run_calculation.py`.
-
----
-
-# 8. Modified Hm-index Calculation
-
-The main calculation is implemented in:
-
-```text
-calculator.py
-```
-
-The calculator expects five DataFrames:
-
-```python
-calculate(
-    paper_authors,
-    authors,
-    paper_citations,
-    field_classification,
-    field_normalization
-)
-```
-
-The required columns are validated before calculation begins.
-
----
-
-## 8.1 Merge Author Contribution and Career Factor
-
-Author contribution data is joined with author career-factor data using:
-
-```text
-author_id
-```
-
-The resulting data contains:
-
-```text
-paper_id
-author_id
-contribution_weight
-career_factor
-```
-
----
-
-## 8.2 Merge Citation Data
-
-Citation information is joined using:
-
-```text
-paper_id
-```
-
-This adds:
-
-```text
-capped_adjusted_citations
-```
-
----
-
-## 8.3 Merge Research Fields
-
-Paper-field information is joined using:
-
-```text
-paper_id
-```
-
-This adds:
-
-```text
-field_id
-field_weight
-```
-
----
-
-## 8.4 Merge Field Normalization
-
-Field normalization is joined using:
-
-```text
-field_id
-```
-
-This adds:
-
-```text
-hm_field_normalization
-```
-
-The resulting dataset contains all values required for the Modified Hm-index calculation.
-
----
-
-# 9. Data Validation
-
-The calculator converts the following values to numeric values:
-
-```text
-career_factor
-contribution_weight
-capped_adjusted_citations
-field_weight
-hm_field_normalization
-```
-
-Invalid numeric values are converted to `NaN` and removed.
-
-The calculation only retains records where:
-
-```text
-hm_field_normalization > 0
-contribution_weight > 0
-career_factor > 0
-field_weight > 0
-```
-
-If no valid records remain, the calculation stops with an error.
-
-This prevents invalid database values from affecting the final index.
-
----
-
-# 10. Effective Citation Calculation
-
-The implementation calculates effective citations as:
+The calculator computes effective citations as:
 
 ```text
 TC_eff =
 Career Factor
 × Contribution Weight
+× Field Weight
 × Capped Adjusted Citations
 ```
 
@@ -460,72 +356,84 @@ In Python:
 data["tc_eff"] = (
     data["career_factor"]
     * data["contribution_weight"]
+    * data["field_weight"]
     * data["capped_adjusted_citations"]
 )
 ```
 
-The calculated value is stored in:
-
-```text
-tc_eff
-```
+`field_weight` is included here so that a paper split across multiple fields (e.g. 60% Computer Science, 40% Biomedical Engineering) contributes only its proportional share of citations to each field's calculation, rather than being fully counted in every field it belongs to.
 
 This value is then used to rank papers within each author-field combination.
 
 ---
 
-# 11. Field-Specific Hm Calculation
+# 9. Field Normalization — Computed Internally (Equations 18–19)
 
-The data is grouped by:
+**This is the central design decision in the current implementation, and it differs from earlier drafts of this module.** `Hm'_f` (the field normalization denominator in Equation 19) is **not** supplied as an external input, and is **not** a percentile of raw citations. It is calculated internally, inside `calculator.calculate()`, as a **field average** of every author's own raw effective rank — recalculated fresh from the current dataset on every call ("a running value," not a stored constant).
 
-```text
-author_id
-field_id
+This decision follows directly from the paper's own text (Sections 2.4.4–2.4.6 describe `Hf'_f`/`Hm'_f`/`G'_f` only as "field normalization," and a companion abstract explicitly describes the analogous `Hf'_f` as "normalized by field average"). The paper's own worked numerical demo (Section 3.3) never shows how its example constants (e.g. `Hm'_f = 3`) were derived — this implementation fills that gap using the "field average" description.
+
+### 9.1 Pass 1 — per author-field effective rank
+
+For each `(author_id, field_id)` combination present in the data, papers are sorted by `tc_eff` descending, and the calculator finds the largest `k` (`k_valid`) such that cumulative effective citations still meet or exceed cumulative effective rank (the same h-index-style threshold condition as before — see Section 11 in earlier revisions of this README):
+
+```python
+sorted_group["r_eff"] = sorted_group["effective_rank_contribution"].cumsum()
+sorted_group["cum_tc_eff"] = sorted_group["tc_eff"].cumsum()
+
+k_valid = 0
+for satisfied in (sorted_group["cum_tc_eff"] >= sorted_group["r_eff"]):
+    if satisfied:
+        k_valid += 1
+    else:
+        break
+
+max_r_eff = sorted_group["r_eff"].iloc[k_valid - 1] if k_valid > 0 else 0.0
 ```
 
-For each author-field combination, papers are sorted by:
+The result of this pass, `max_r_eff`, is the Equation 19 **numerator only** — it is not yet divided by anything.
 
-```text
-tc_eff
+### 9.2 Pass 2 — field-average normalization
+
+Once every author-field combination has a `max_r_eff`, the calculator groups by `field_id` and takes the **mean**:
+
+```python
+field_normalization = (
+    author_field_df
+    .groupby("field_id")["max_r_eff"]
+    .mean()
+    .reset_index()
+    .rename(columns={"max_r_eff": "hm_field_normalization"})
+)
 ```
 
-in descending order.
+Each author's own `max_r_eff` is then divided by their field's average:
 
-The effective contribution for each paper is calculated as:
-
-```text
-effective_rank_contribution =
-career_factor × contribution_weight
+```python
+author_field_df["hm_prime_field_author"] = (
+    author_field_df["max_r_eff"] / author_field_df["hm_field_normalization"]
+)
 ```
 
-Then the cumulative effective contribution is calculated:
+### 9.3 What this means in practice
 
-```text
-r_eff = cumulative sum of effective_rank_contribution
-```
-
-The maximum value of `r_eff` is used for the field-specific Hm calculation.
+- An author whose contribution is exactly at their field's average scores **1.0** for that field.
+- An author above the field average scores **above 1.0**; below average scores **below 1.0**.
+- **A field with only one contributing author always normalizes to exactly 1.0** for that author, since the "field average" and the author's own value are identical when there is no one else to compare against. This is expected behavior, not a bug — with no peers, you are the average.
+- Authors with zero papers in a field are naturally excluded from that field's average, since they never produce a `max_r_eff` for a field they don't publish in.
+- Because this is recalculated from scratch on every run, results for the same author can shift between runs purely because *other authors'* data changed the field average — this is intentional ("a running value"), not instability.
 
 ---
 
-# 12. Field-Specific Normalization
+# 10. Field-Specific Normalization (Equation 19)
 
-For each author-field combination:
+Putting Section 9's two passes together, for each author-field combination:
 
 ```text
 Hm'field,author =
-Maximum Effective Rank
+max_r_eff (this author, this field)
 /
-Field Normalization
-```
-
-In the implementation:
-
-```python
-hm_prime_field_author = (
-    max_r_eff
-    / normalization
-)
+Field Average of max_r_eff (all authors, this field)
 ```
 
 The result is stored as:
@@ -534,17 +442,9 @@ The result is stored as:
 hm_prime_field_author
 ```
 
-The field-specific result contains:
-
-```text
-author_id
-field_id
-hm_prime_field_author
-```
-
 ---
 
-# 13. Weighted Hm Across Fields
+# 11. Weighted Hm Across Fields (Equation 20)
 
 The field-specific Hm value is combined with the paper's field weight:
 
@@ -562,11 +462,11 @@ data["weighted_hm"] = (
 )
 ```
 
-This allows an author who works across multiple research fields to have the field contributions incorporated into the final index.
+This allows an author who works across multiple research fields to have the field contributions incorporated into the final index. Note this is the **second** use of `field_weight` in the calculation (see Section 5) — the first use scales the per-field effective citations and rank (Section 8/9), and this second use weights how much each field's resulting score contributes to the author's overall index.
 
 ---
 
-# 14. Final Modified Hm-index
+# 12. Final Modified Hm-index
 
 The calculation groups results by:
 
@@ -612,6 +512,48 @@ modified_hm_index
 
 ---
 
+# 13. Calculator Interface
+
+```python
+calculate(
+    paper_authors: pd.DataFrame,
+    authors: pd.DataFrame,
+    paper_citations: pd.DataFrame,
+    field_classification: pd.DataFrame,
+) -> pd.DataFrame
+```
+
+> **Note:** this signature takes **four** DataFrames. There is **no `field_normalization` argument** — earlier drafts of this module took a fifth `field_normalization` DataFrame computed externally; that has been removed, since normalization is now computed internally as described in Section 9.
+
+---
+
+# 14. Data Validation
+
+The calculator converts the following values to numeric values:
+
+```text
+career_factor
+contribution_weight
+capped_adjusted_citations
+field_weight
+```
+
+Invalid numeric values are converted to `NaN` and removed.
+
+The calculation only retains records where:
+
+```text
+contribution_weight > 0
+career_factor > 0
+field_weight > 0
+```
+
+If no valid records remain, the calculation stops with an error.
+
+This prevents invalid database values from affecting the final index.
+
+---
+
 # 15. Running the Calculation
 
 From the project environment, run:
@@ -629,28 +571,19 @@ python run_calculation.py
 The program executes the following major steps:
 
 ```text
-STEP 1: Loading database data
-STEP 2: Calculating field normalization
-STEP 3: Calculating Modified Hm-index
-STEP 4: Results summary
-STEP 5: Updating author table
+STEP 1: Loading database data (includes applying the 150-citation outlier cap)
+STEP 2: Calculating Modified Hm-index (field normalization computed internally)
+STEP 3: Results summary
+STEP 4: Updating author table
 ```
 
-The runner loads the four required database datasets before performing the calculation.
+> **Recommended for first runs against a new or changed database:** comment out the `update_authors_table(results)` call in `main()` and inspect `results['modified_hm_index'].describe()` plus a few known authors before allowing the calculation to write to the `author` table. This is especially worth doing after this normalization redesign, since the score's meaning has changed (relative-to-field-average rather than relative-to-a-percentile-of-citations) — existing intuitions about "what a good score looks like" from before this change no longer apply directly.
 
 ---
 
 # 16. Console Output
 
 During execution, the program displays:
-
-### Field Normalization
-
-```text
-FIELD NORMALIZATION:
-field_id    hm_field_normalization
-...
-```
 
 ### Author Calculation Data
 
@@ -664,7 +597,6 @@ field_id
 career_factor
 contribution_weight
 capped_adjusted_citations
-hm_field_normalization
 tc_eff
 ```
 
@@ -764,22 +696,7 @@ field3_weight
 
 ### Important
 
-A separate database table called:
-
-```text
-field_normalization
-```
-
-is **not required** by the current implementation.
-
-Field normalization is calculated dynamically in Python from the field classification and citation data. The resulting DataFrame contains:
-
-```text
-field_id
-hm_field_normalization
-```
-
-and is passed directly to the calculator.
+**No `field_normalization` table is needed, and no percentile is computed from citation data.** Field normalization is calculated entirely inside `calculator.calculate()` from the same author-contribution and citation data already being loaded — see Section 9.
 
 ---
 
@@ -833,11 +750,20 @@ No valid data remains after cleaning.
 
 ### No Field Results
 
-If field-specific Hm values cannot be calculated:
+If field-specific effective rank values cannot be calculated:
 
 ```text
 ValueError:
-No field-specific Hm-index values were calculated.
+No field-specific effective rank values were calculated.
+```
+
+### No Positive Field Averages
+
+If every field's average effective rank comes out to zero or negative (should not normally happen, since effective rank is built from validated positive inputs):
+
+```text
+ValueError:
+No fields have a positive average effective rank; cannot normalize.
 ```
 
 ### Database Update Failure
@@ -852,7 +778,45 @@ is performed so that incomplete database updates are avoided.
 
 ---
 
-# 21. Dependencies
+# 21. Testing
+
+Regression tests for the calculation logic live in:
+
+```text
+test_calculator.py
+```
+
+These tests run entirely against in-memory DataFrames — no database connection is required.
+
+### Running the tests
+
+```bash
+pytest test_calculator.py -v
+```
+
+### What is covered
+
+| Test | Purpose |
+| --- | --- |
+| `test_two_author_field_average` | Hand-verified regression check on the core field-average arithmetic: an above-average and a below-average contributor in the same field, checked against an independent calculation |
+| `test_solo_author_in_field_normalizes_to_one` | Confirms the solo-contributor edge case (Section 9.3) — a field with exactly one author must normalize to 1.0 |
+| `test_long_tail_triggers_early_break` | Confirms the Eq. 19 threshold condition (`k_valid`) genuinely stops accumulating papers once cumulative citations fall behind cumulative rank, with the exact expected value hand-derived and asserted (a looser "compare to the unbroken case" assertion was tried first and found unreliable — see the in-file comments) |
+| `test_field_weight_applied_inside_field_specific_calc` | Confirms `field_weight` is applied inside the per-field calculation (Eq. 15/18), not only in the final cross-field combination (Eq. 20) |
+| `test_eq20_multi_author_multi_field` | A full, hand-verified multi-author, multi-field scenario exercising Pass 1, Pass 2, and the Eq. 20 combination together |
+| `test_missing_required_column_raises` | Confirms column validation still raises `ValueError` on malformed input |
+| `test_all_rows_filtered_out_raises` | Confirms the calculator fails loudly, rather than silently returning an empty result, when all rows are filtered out during cleaning |
+
+### Not currently covered
+
+* No test exercises `database.py` or `run_calculation.py` directly (these require a live PostgreSQL connection).
+* No test for tie-breaking when two papers have identical `tc_eff`.
+* No test for how much a single new author's data shifts the field average for *other* authors already in that field (relevant given normalization is a "running value" recalculated on every run).
+
+Add new test cases to `test_calculator.py` alongside the existing ones if calculation behavior changes.
+
+---
+
+# 22. Dependencies
 
 The implementation requires:
 
@@ -862,12 +826,13 @@ Pandas
 NumPy
 PostgreSQL
 PostgreSQL Python database driver
+pytest (for running test_calculator.py)
 ```
 
 Install the Python packages with:
 
 ```bash
-pip install pandas numpy psycopg2-binary
+pip install pandas numpy psycopg2-binary pytest
 ```
 
 If the project already has a `requirements.txt`, install using:
@@ -878,7 +843,7 @@ pip install -r requirements.txt
 
 ---
 
-# 22. Calculation Summary
+# 23. Calculation Summary
 
 The complete calculation can be summarized as:
 
@@ -887,19 +852,23 @@ Author Contribution
         +
 Career Factor
         +
-Capped Adjusted Citations
+Capped Adjusted Citations (outlier-capped at 150)
         +
 Paper Fields
         +
-Field Weights
-        +
-Field Normalization
+Field Weights (applied twice: per-field and cross-field)
         ↓
-Effective Citations
+Effective Citations (field-weighted, Eq. 15)
+        ↓
+PASS 1: Per-Author-Field Effective Rank
+        (Threshold Condition, Eq. 18/19 numerator)
+        ↓
+PASS 2: Field-Average Normalization
+        (computed internally, a running value, Eq. 19 denominator)
         ↓
 Field-Specific Hm
         ↓
-Weighted Field Hm
+Weighted Field Hm (Eq. 20)
         ↓
 Final Modified Hm-index
         ↓
@@ -908,7 +877,7 @@ author.modified_hm_index
 
 ---
 
-# 23. Output
+# 24. Output
 
 The primary Python output is:
 
@@ -935,11 +904,13 @@ It:
 
 1. Loads author contribution data.
 2. Loads author career factors.
-3. Loads capped adjusted citations.
+3. Loads capped adjusted citations and applies a fixed outlier cap (150 citations).
 4. Loads paper research fields and field weights.
-5. Calculates field normalization using the 90th percentile.
-6. Calculates effective citations.
-7. Calculates field-specific Hm values.
-8. Combines multiple fields using field weights.
-9. Produces the final Modified Hm-index.
-10. Updates the calculated index in the `author` table.
+5. Calculates field-weighted effective citations and effective rank (Pass 1).
+6. Applies an h-index-style threshold condition to determine which papers count per author-field combination.
+7. Computes field normalization internally as a field-average "running value" of every author's own effective rank (Pass 2) — not a stored constant, not a percentile of citations.
+8. Calculates field-specific Hm values.
+9. Combines multiple fields using field weights (Eq. 20).
+10. Produces the final Modified Hm-index.
+11. Updates the calculated index in the `author` table.
+12. Is covered by a regression test suite (`test_calculator.py`) that validates the calculation logic — including hand-derived exact expected values — independently of the database.
