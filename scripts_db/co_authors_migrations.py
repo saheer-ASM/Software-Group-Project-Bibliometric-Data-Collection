@@ -89,72 +89,58 @@ def insert_author(cur, author_cache, author_obj):
         
         author_cache.add(author_id)
         print(f"    [NEW AUTHOR] {name} ({author_id})")
-        return author_id
+        return author_id, True
     else:
         # Author already exists, still return the ID
-        return author_id
+        return author_id, False
 
 
-# ---------------- INSERT AUTHOR CONTRIBUTION FOR MULTIPLE AUTHORS ----------------
 def insert_author_contributions(cur, pub_id, authors_data):
     """
-    Insert all authors for a publication in ONE row
-    
-    Args:
-        pub_id: Publication ID
-        authors_data: List of tuples [(author_id, author_name), ...]
-    
-    Returns:
-        True if successful, False otherwise
+    Insert only author IDs into the database, leaving existing weights untouched.
     """
     if not pub_id or not authors_data:
         return False
 
-    # Prepare author IDs (up to 10)
-    author1Id = authors_data[0][0] if len(authors_data) > 0 else None
-    author2Id = authors_data[1][0] if len(authors_data) > 1 else None
-    author3Id = authors_data[2][0] if len(authors_data) > 2 else None
-    author4Id = authors_data[3][0] if len(authors_data) > 3 else None
-    author5Id = authors_data[4][0] if len(authors_data) > 4 else None
-    author6Id = authors_data[5][0] if len(authors_data) > 5 else None
-    author7Id = authors_data[6][0] if len(authors_data) > 6 else None
-    author8Id = authors_data[7][0] if len(authors_data) > 7 else None
-    author9Id = authors_data[8][0] if len(authors_data) > 8 else None
-    author10Id = authors_data[9][0] if len(authors_data) > 9 else None
+    # Extract author IDs (up to 10)
+    author_ids = [author[0] for author in authors_data[:10]]
+    
+    # Fill remaining slots with None
+    while len(author_ids) < 10:
+        author_ids.append(None)
 
-    # Create author_ordering_nome (comma-separated author names)
-    author_names = [name for _, name in authors_data[:10]]
-    author_ordering_nome = ", ".join(author_names)
-
-    # Insert the row
+    # SQL targets only the ID columns
     sql = """
-    INSERT INTO author_contribution_weight 
-    (pub_id, author1Id, author2Id, author3Id, author4Id, author5Id, author6Id, author7Id, author8Id, author9Id, author10Id, author_ordering_nome)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    INSERT INTO author_contribution_weight
+    (
+        pub_id, 
+        author1id, author2id, author3id, author4id, author5id, 
+        author6id, author7id, author8id, author9id, author10id
+    )
+    VALUES
+    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     ON CONFLICT (pub_id) DO UPDATE SET
-        author1Id = EXCLUDED.author1Id,
-        author2Id = EXCLUDED.author2Id,
-        author3Id = EXCLUDED.author3Id,
-        author4Id = EXCLUDED.author4Id,
-        author5Id = EXCLUDED.author5Id,
-        author6Id = EXCLUDED.author6Id,
-        author7Id = EXCLUDED.author7Id,
-        author8Id = EXCLUDED.author8Id,
-        author9Id = EXCLUDED.author9Id,
-        author10Id = EXCLUDED.author10Id,
-        author_ordering_nome = EXCLUDED.author_ordering_nome
+        author1id = EXCLUDED.author1id,
+        author2id = EXCLUDED.author2id,
+        author3id = EXCLUDED.author3id,
+        author4id = EXCLUDED.author4id,
+        author5id = EXCLUDED.author5id,
+        author6id = EXCLUDED.author6id,
+        author7id = EXCLUDED.author7id,
+        author8id = EXCLUDED.author8id,
+        author9id = EXCLUDED.author9id,
+        author10id = EXCLUDED.author10id
     """
 
+    # Execute only with IDs
     cur.execute(sql, (
         pub_id,
-        author1Id, author2Id, author3Id, author4Id, author5Id, author6Id, author7Id, author8Id, author9Id, author10Id,
-        author_ordering_nome
+        author_ids[0], author_ids[1], author_ids[2], author_ids[3], author_ids[4],
+        author_ids[5], author_ids[6], author_ids[7], author_ids[8], author_ids[9]
     ))
 
     print(f"    ✅ Inserted {len(authors_data)} author(s) for publication {pub_id}")
-    print(f"       Authors: {author_ordering_nome}")
     return True
-
 
 # ---------------- MAIN PIPELINE ----------------
 def main():
@@ -227,12 +213,16 @@ def main():
                 continue
 
             # Insert author into author table if new
-            author_id = insert_author(cur, author_cache, author_obj)
-            
-            if author_id:
+            result = insert_author(cur, author_cache, author_obj)
+
+            if result:
+                author_id, is_new = result
+
                 author_name = author_obj.get("display_name", "Unknown")
                 authors_data.append((author_id, author_name))
-                new_authors_count += 1
+
+            if is_new:
+                 new_authors_count += 1
 
         # Insert all authors for this publication in ONE row
         if authors_data:
