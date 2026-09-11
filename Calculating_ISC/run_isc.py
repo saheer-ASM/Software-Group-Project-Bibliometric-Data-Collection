@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import os
 from decimal import Decimal
@@ -23,6 +25,7 @@ load_dotenv()
 
 ZERO = Decimal("0")
 ONE = Decimal("1")
+HUNDRED = Decimal("100")
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -50,6 +53,25 @@ def parse_arguments() -> argparse.Namespace:
         help=(
             "Calculate and print without "
             "saving to PostgreSQL."
+        ),
+    )
+
+    parser.add_argument(
+        "--cited-pub-id",
+        action="append",
+        dest="cited_pub_ids",
+        default=None,
+        help=(
+            "Process citation pairs for this cited publication ID. "
+            "Repeat the option for multiple publications."
+        ),
+    )
+
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        help=(
+            "Load database configuration from this dotenv file."
         ),
     )
 
@@ -84,34 +106,76 @@ def normalize_author_weights(
     pub_id: str,
     tolerance: Decimal,
 ) -> list[AuthorWeight]:
+    """
+    Normalize author contribution weights to the 0-to-1 scale.
+
+    Accepted database formats:
+        0.40, 0.30, 0.20, 0.10   -> total approximately 1
+        40, 30, 20, 10           -> total approximately 100
+
+    Values that are neither a valid decimal distribution nor a valid
+    percentage distribution are rejected.
+    """
+
+    if not weights:
+        raise RuntimeError(
+            f"No author weights found for {pub_id}."
+        )
+
     total = sum(
-        (
-            item.weight
-            for item in weights
-        ),
+        (item.weight for item in weights),
         ZERO,
     )
 
     if total <= ZERO:
         raise RuntimeError(
-            f"Author weights for {pub_id} "
+            f"Author weights for {pub_id} total zero."
+        )
+
+    if abs(total - ONE) <= tolerance:
+        scaled_weights = weights
+
+    elif (
+        abs(total - HUNDRED)
+        <= tolerance * HUNDRED
+    ):
+        scaled_weights = [
+            AuthorWeight(
+                author_id=item.author_id,
+                weight=item.weight / HUNDRED,
+            )
+            for item in weights
+        ]
+
+    else:
+        raise RuntimeError(
+            f"Author weights for {pub_id} must total "
+            "approximately 1 or 100. "
+            f"Current total: {total}."
+        )
+
+    scaled_total = sum(
+        (item.weight for item in scaled_weights),
+        ZERO,
+    )
+
+    if scaled_total <= ZERO:
+        raise RuntimeError(
+            f"Normalized author weights for {pub_id} "
             "total zero."
         )
 
-    if abs(total - ONE) > tolerance:
-        raise RuntimeError(
-            f"Author weights for {pub_id} "
-            f"must total 1. Current total: {total}."
-        )
-
-    factor = ONE / total
+    normalization_factor = ONE / scaled_total
 
     return [
         AuthorWeight(
             author_id=item.author_id,
-            weight=item.weight * factor,
+            weight=(
+                item.weight
+                * normalization_factor
+            ),
         )
-        for item in weights
+        for item in scaled_weights
     ]
 
 
@@ -121,6 +185,19 @@ def normalize_fields(
     pub_id: str,
     tolerance: Decimal,
 ) -> list[FieldData]:
+    """
+    Normalize publication field weights to the 0-to-1 scale.
+
+    Accepted database formats:
+        0.60, 0.30, 0.10
+        60, 30, 10
+    """
+
+    if not fields:
+        raise RuntimeError(
+            f"No field weights found for {pub_id}."
+        )
+
     total = sum(
         (
             field.field_weight
@@ -131,27 +208,59 @@ def normalize_fields(
 
     if total <= ZERO:
         raise RuntimeError(
-            f"Field weights for {pub_id} "
+            f"Field weights for {pub_id} total zero."
+        )
+
+    if abs(total - ONE) <= tolerance:
+        scaled_fields = fields
+
+    elif (
+        abs(total - HUNDRED)
+        <= tolerance * HUNDRED
+    ):
+        scaled_fields = [
+            FieldData(
+                field_name=field.field_name,
+                field_weight=(
+                    field.field_weight
+                    / HUNDRED
+                ),
+            )
+            for field in fields
+        ]
+
+    else:
+        raise RuntimeError(
+            f"Field weights for {pub_id} must total "
+            "approximately 1 or 100. "
+            f"Current total: {total}."
+        )
+
+    scaled_total = sum(
+        (
+            field.field_weight
+            for field in scaled_fields
+        ),
+        ZERO,
+    )
+
+    if scaled_total <= ZERO:
+        raise RuntimeError(
+            f"Normalized field weights for {pub_id} "
             "total zero."
         )
 
-    if abs(total - ONE) > tolerance:
-        raise RuntimeError(
-            f"Field weights for {pub_id} "
-            f"must total 1. Current total: {total}."
-        )
-
-    factor = ONE / total
+    normalization_factor = ONE / scaled_total
 
     return [
         FieldData(
             field_name=field.field_name,
             field_weight=(
                 field.field_weight
-                * factor
+                * normalization_factor
             ),
         )
-        for field in fields
+        for field in scaled_fields
     ]
 
 
@@ -171,6 +280,12 @@ def execute_savepoint(
 
 def main() -> None:
     arguments = parse_arguments()
+
+    if arguments.env_file:
+        load_dotenv(
+            arguments.env_file,
+            override=True,
+        )
 
     if (
         arguments.limit is not None
@@ -197,7 +312,12 @@ def main() -> None:
     try:
         citation_pairs = (
             repository.fetch_citation_pairs(
-                arguments.limit
+                arguments.limit,
+                cited_pub_ids=(
+                    sorted(set(arguments.cited_pub_ids))
+                    if arguments.cited_pub_ids
+                    else None
+                ),
             )
         )
 

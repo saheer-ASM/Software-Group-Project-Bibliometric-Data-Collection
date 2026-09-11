@@ -5,7 +5,11 @@ from .isc_calculator import (
     aggregate_equation_9,
     calculate_isc,
 )
-from .models import AuthorWeight
+from .models import AuthorWeight, FieldData
+from .run_isc import (
+    normalize_author_weights,
+    normalize_fields,
+)
 
 
 class TestISCCalculator(
@@ -297,6 +301,55 @@ class TestISCCalculator(
                 },
                 target_author="PETER",
             )
+
+
+    def test_normalize_author_percentage_weights(self):
+        normalized = normalize_author_weights(
+            [
+                AuthorWeight("A1", Decimal("50")),
+                AuthorWeight("A2", Decimal("30")),
+                AuthorWeight("A3", Decimal("20.01")),
+            ],
+            pub_id="P_PERCENT",
+            tolerance=Decimal("0.02"),
+        )
+
+        total = sum(
+            (item.weight for item in normalized),
+            Decimal("0"),
+        )
+
+        self.assert_decimal_close(total, 1.0)
+
+    def test_normalize_field_percentage_weights(self):
+        normalized = normalize_fields(
+            [
+                FieldData("F1", Decimal("60")),
+                FieldData("F2", Decimal("30")),
+                FieldData("F3", Decimal("10")),
+            ],
+            pub_id="P_PERCENT",
+            tolerance=Decimal("0.02"),
+        )
+
+        total = sum(
+            (item.field_weight for item in normalized),
+            Decimal("0"),
+        )
+
+        self.assert_decimal_close(total, 1.0)
+
+    def test_rejects_weight_total_that_is_neither_one_nor_hundred(self):
+        with self.assertRaises(RuntimeError):
+            normalize_author_weights(
+                [
+                    AuthorWeight("A1", Decimal("40")),
+                    AuthorWeight("A2", Decimal("40")),
+                ],
+                pub_id="P_INVALID",
+                tolerance=Decimal("0.02"),
+            )
+
 
 
 if __name__ == "__main__":
