@@ -14,13 +14,8 @@ const firebaseConfig = {
 const requiredConfig = ['apiKey', 'authDomain', 'projectId', 'appId'];
 const missingConfig = requiredConfig.filter((key) => !firebaseConfig[key]);
 
-if (missingConfig.length > 0) {
-  // Keep the app renderable while making Firebase setup problems obvious.
-  console.warn(`Missing Firebase config values: ${missingConfig.join(', ')}`);
-}
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const firestore = getFirestore(app);
+const app = missingConfig.length === 0 ? initializeApp(firebaseConfig) : null;
+const auth = app ? getAuth(app) : null;
+const firestore = app ? getFirestore(app) : null;
 
 export { auth, firestore, missingConfig };

@@ -1,7 +1,8 @@
 import React from 'react';
 import './AboutUs.css';
+import AppNavbar from './AppNavbar';
 
-const AboutUs = ({ onBack, onNavigateToSettings, onNavigateToProfile, onLogout, hasSearchedAuthor, onNavigateToExplorer }) => {
+const AboutUs = ({ onBack, onNavigateToSettings, onNavigateToProfile, onNavigateToLibrary, onLogout, hasSearchedAuthor, onNavigateToExplorer }) => {
   const teamMembers = [
     { name: 'Ahamed R.S.', id: 'EG/2022/4919' },
     { name: 'Ahnaf M.N.M.', id: 'EG/2022/4920' },
@@ -11,26 +12,7 @@ const AboutUs = ({ onBack, onNavigateToSettings, onNavigateToProfile, onLogout, 
 
   return (
     <div className="about-container">
-      {/* Header */}
-      <header className="about-header">
-        <div className="header-left">
-          <i className='bx bxs-graduation'></i>
-          <h1 className="logo">ScholarMetrics</h1>
-        </div>
-        <div className="header-right">
-          <nav className="header-nav">
-            <a href="#dashboard" onClick={onBack} className="nav-link">Dashboard</a>
-            {hasSearchedAuthor && (
-              <a href="#explorer" className="nav-link" onClick={(e) => { e.preventDefault(); onNavigateToExplorer(''); }}>Data Explorer</a>
-            )}
-            <a href="#about" className="nav-link active">About Us</a>
-            <a href="#logout" className="nav-link" onClick={onLogout}>Logout</a>
-          </nav>
-          <div className="user-icon" onClick={onNavigateToProfile}>
-            <i className='bx bxs-user-circle'></i>
-          </div>
-        </div>
-      </header>
+      <AppNavbar activePage="about" onDashboard={onBack} onExplorer={onNavigateToExplorer} onLibrary={onNavigateToLibrary} onAbout={() => {}} onProfile={onNavigateToProfile} onLogout={onLogout} />
 
       {/* Main Content */}
       <main className="about-main">

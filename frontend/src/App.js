@@ -4,6 +4,7 @@ import Dashboard from './Dashboard';
 import DataExplorer from './DataExplorer';
 import AboutUs from './AboutUs';
 import Profile from './Profile';
+import Library from './Library';
 import './App.css';
 
 function App() {
@@ -30,8 +31,11 @@ function App() {
   };
 
   const handleNavigateToExplorer = (searchedAuthor) => {
-    setAuthorName(searchedAuthor);
-    setHasSearchedAuthor(true);
+    const nextAuthor = typeof searchedAuthor === 'string' ? searchedAuthor.trim() : '';
+    if (nextAuthor) {
+      setAuthorName(nextAuthor);
+      setHasSearchedAuthor(true);
+    }
     setCurrentPage('explorer');
   };
 
@@ -55,6 +59,11 @@ function App() {
     setCurrentPage('profile');
   };
 
+  const handleNavigateToLibrary = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    setCurrentPage('library');
+  };
+
   const handleBackToDashboard = (e) => {
     if (e && e.preventDefault) e.preventDefault();
     setCurrentPage('dashboard');
@@ -73,6 +82,7 @@ function App() {
           onNavigateToSettings={handleNavigateToSettings}
           onNavigateToAbout={handleNavigateToAbout}
           onNavigateToProfile={handleNavigateToProfile}
+          onNavigateToLibrary={handleNavigateToLibrary}
           hasSearchedAuthor={hasSearchedAuthor}
           onResetSearch={handleResetSearch}
         />
@@ -88,6 +98,8 @@ function App() {
           hasSearchedAuthor={hasSearchedAuthor}
           onResetSearch={handleResetSearch}
           onNavigateToExplorer={handleNavigateToExplorer}
+          onNavigateToLibrary={handleNavigateToLibrary}
+          user={user}
         />
       )}
       {currentPage === 'about' && (
@@ -98,6 +110,7 @@ function App() {
           onLogout={handleLogout}
           hasSearchedAuthor={hasSearchedAuthor}
           onNavigateToExplorer={handleNavigateToExplorer}
+          onNavigateToLibrary={handleNavigateToLibrary}
         />
       )}
       {currentPage === 'profile' && (
@@ -110,6 +123,18 @@ function App() {
           onLogout={handleLogout}
           hasSearchedAuthor={hasSearchedAuthor}
           onNavigateToExplorer={handleNavigateToExplorer}
+          onNavigateToLibrary={handleNavigateToLibrary}
+        />
+      )}
+      {currentPage === 'library' && (
+        <Library
+          user={user}
+          onBack={handleBackToDashboard}
+          onOpenAuthor={handleNavigateToExplorer}
+          onNavigateToAbout={handleNavigateToAbout}
+          onNavigateToProfile={handleNavigateToProfile}
+          onLogout={handleLogout}
+          hasSearchedAuthor={hasSearchedAuthor}
         />
       )}
     </div>

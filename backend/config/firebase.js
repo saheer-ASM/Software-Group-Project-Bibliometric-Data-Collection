@@ -17,7 +17,10 @@ function getServiceAccount() {
   // Try path from env var
   if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
     try {
-      const serviceAccountPath = path.resolve(process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
+      const configuredPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+      const serviceAccountPath = path.isAbsolute(configuredPath)
+        ? configuredPath
+        : path.resolve(__dirname, '..', configuredPath);
       if (fs.existsSync(serviceAccountPath)) {
         return JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
       }
@@ -44,16 +47,13 @@ function getServiceAccount() {
 
 const serviceAccount = getServiceAccount();
 
-if (!admin.apps.length) {
-  if (!serviceAccount) {
-    throw new Error(
-      'Firebase credentials are missing. Set FIREBASE_SERVICE_ACCOUNT_BASE64 or FIREBASE_PROJECT_ID/FIREBASE_CLIENT_EMAIL/FIREBASE_PRIVATE_KEY.'
-    );
-  }
-
+if (serviceAccount && !admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
+    ...(process.env.FIREBASE_DATABASE_URL
+      ? { databaseURL: process.env.FIREBASE_DATABASE_URL }
+      : {}),
   });
 }
 
-module.exports = admin.firestore();
+module.exports = serviceAccount ? admin.firestore() : null;
