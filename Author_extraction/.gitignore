@@ -1,0 +1,47 @@
+# ---------------------------------------------------------------- secrets
+# Each teammate needs their OWN free OpenAlex key (openalex.org/settings/api).
+# A key is personal: sharing one means sharing its $1/day budget.
+.env
+.env.*
+!.env.example
+*.key
+secrets.json
+
+# ---------------------------------------------------------------- python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------- editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------- generated output
+# Everything in output/ is rebuilt from cache/ with ZERO API calls, so there is
+# no reason to version binary spreadsheets that churn on every run.
+# Regenerate with:  python run_extraction.py --general --laureates
+output/
+
+# ---------------------------------------------------------------- scratch
+_smoke.py
+*_log.txt
+smoke_out.txt
+
+# ---------------------------------------------------------------- cache: MOSTLY COMMITTED
+# Deliberately NOT ignoring cache/ as a whole -- see README "Working as a team".
+# The collected authors live in cache/*.jsonl, and the OpenAlex daily budget is
+# the bottleneck, so sharing them through git is how the team pools progress
+# instead of each person re-spending their own budget on the same fields.
+#
+# Only the transient resume state is ignored: it holds a paging cursor that is
+# meaningless on another machine and would conflict constantly.
+cache/*.partial.json
