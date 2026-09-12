@@ -1,0 +1,504 @@
+<title>Nm-index Final Stage</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper:        #fbfcfd;
+    --surface:      #f2f5f7;
+    --surface-2:    #e9eef1;
+    --ink:          #1a2b3a;
+    --ink-soft:     #4a5b69;
+    --ink-faint:    #6f7f8c;
+    --rule:         #d3dde2;
+    --rule-soft:    #e4ebee;
+    --accent:       #216576;
+    --accent-soft:  #e0edf0;
+    --flag:         #9a6a1f;
+    --flag-bg:      #fbf3e4;
+    --flag-edge:    #d8ab5c;
+    --good:         #2f6d4f;
+    --shadow:       0 1px 2px rgba(26,43,58,.06), 0 8px 24px rgba(26,43,58,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:        #0f1720;
+      --surface:      #16212c;
+      --surface-2:    #1d2a37;
+      --ink:          #dce5ec;
+      --ink-soft:     #a4b3bf;
+      --ink-faint:    #7a8894;
+      --rule:         #2a3947;
+      --rule-soft:    #212e3a;
+      --accent:       #58a7ba;
+      --accent-soft:  #17303a;
+      --flag:         #d9ab5f;
+      --flag-bg:      #241d10;
+      --flag-edge:    #6a5326;
+      --good:         #6cba8e;
+      --shadow:       0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:        #0f1720;
+    --surface:      #16212c;
+    --surface-2:    #1d2a37;
+    --ink:          #dce5ec;
+    --ink-soft:     #a4b3bf;
+    --ink-faint:    #7a8894;
+    --rule:         #2a3947;
+    --rule-soft:    #212e3a;
+    --accent:       #58a7ba;
+    --accent-soft:  #17303a;
+    --flag:         #d9ab5f;
+    --flag-bg:      #241d10;
+    --flag-edge:    #6a5326;
+    --good:         #6cba8e;
+    --shadow:       0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    font-size: 16px;
+    line-height: 1.62;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 50rem;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem 6rem;
+  }
+
+  /* ---- masthead ---- */
+  .masthead { border-bottom: 2px solid var(--ink); padding-bottom: 1.4rem; margin-bottom: 2.6rem; }
+  .kicker {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .72rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 .7rem;
+  }
+  h1 {
+    font-family: "Spectral", Georgia, serif;
+    font-weight: 600;
+    font-size: 2.35rem;
+    line-height: 1.12;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 0 0 .5rem;
+  }
+  .sub {
+    font-family: "Spectral", Georgia, serif;
+    font-style: italic;
+    font-weight: 500;
+    font-size: 1.12rem;
+    color: var(--ink-soft);
+    margin: 0 0 1rem;
+  }
+  .meta {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .78rem;
+    color: var(--ink-faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem 1rem;
+  }
+
+  /* ---- sections ---- */
+  section { margin-top: 3.2rem; }
+  h2 {
+    font-family: "Spectral", Georgia, serif;
+    font-weight: 600;
+    font-size: 1.5rem;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+    margin: 0 0 1rem;
+    padding-bottom: .45rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  h2 .n {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .85rem;
+    font-weight: 500;
+    color: var(--accent);
+    margin-right: .7rem;
+    vertical-align: .12em;
+  }
+  h3 {
+    font-family: "IBM Plex Sans", sans-serif;
+    font-weight: 600;
+    font-size: 1.02rem;
+    margin: 1.8rem 0 .5rem;
+  }
+  p { margin: 0 0 1rem; max-width: 42rem; }
+  .lead { font-size: 1.06rem; color: var(--ink-soft); }
+  strong { font-weight: 600; }
+  a { color: var(--accent); }
+
+  code, .mono {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .86em;
+    background: var(--surface);
+    padding: .08em .38em;
+    border-radius: 3px;
+    border: 1px solid var(--rule-soft);
+  }
+
+  ul.clean { margin: 0 0 1rem; padding-left: 0; list-style: none; max-width: 42rem; }
+  ul.clean li { position: relative; padding-left: 1.4rem; margin-bottom: .7rem; }
+  ul.clean li::before {
+    content: "";
+    position: absolute;
+    left: .1rem; top: .62em;
+    width: .4rem; height: .4rem;
+    background: var(--accent);
+    border-radius: 50%;
+  }
+
+  /* ---- equation blocks ---- */
+  .eq {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .92rem;
+    line-height: 1.7;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: .9rem 1.1rem;
+    margin: 0 0 1rem;
+    overflow-x: auto;
+  }
+  .eq .lbl { color: var(--ink-faint); user-select: none; }
+
+  /* ---- tables ---- */
+  .tablewrap { overflow-x: auto; margin: 0 0 1.2rem; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: .87rem;
+    font-variant-numeric: tabular-nums;
+  }
+  th, td {
+    text-align: left;
+    padding: .5rem .7rem;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  thead th {
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 500;
+    font-size: .72rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    border-bottom: 1.5px solid var(--ink-soft);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.mono, th.mono { font-family: "IBM Plex Mono", monospace; font-size: .8rem; }
+  .num { text-align: right; font-family: "IBM Plex Mono", monospace; }
+
+  /* ---- assumption cards ---- */
+  .assump {
+    border: 1px solid var(--flag-edge);
+    border-left: 4px solid var(--flag-edge);
+    background: var(--flag-bg);
+    border-radius: 4px;
+    padding: 1.1rem 1.25rem .5rem;
+    margin: 0 0 1.1rem;
+  }
+  .assump .tag {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .74rem;
+    font-weight: 500;
+    letter-spacing: .04em;
+    color: var(--flag);
+  }
+  .assump h3 { margin: .25rem 0 .7rem; font-size: 1.05rem; }
+  .assump dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: .3rem .9rem; }
+  .assump dt {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .74rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--ink-faint);
+    padding-top: .15rem;
+  }
+  .assump dd { margin: 0 0 .6rem; }
+  .assump dd .knob {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .82rem;
+    color: var(--accent);
+  }
+
+  .callout {
+    background: var(--accent-soft);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: .9rem 1.1rem;
+    margin: 0 0 1.2rem;
+    font-size: .95rem;
+    color: var(--ink-soft);
+  }
+  .verdict {
+    display: inline-block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .8rem;
+    color: var(--good);
+    border: 1px solid var(--good);
+    border-radius: 3px;
+    padding: .1rem .5rem;
+    margin-bottom: .8rem;
+  }
+
+  .foot {
+    margin-top: 4rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--rule);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .76rem;
+    color: var(--ink-faint);
+  }
+
+  @media (max-width: 33rem) {
+    h1 { font-size: 1.9rem; }
+    .assump dl { grid-template-columns: 1fr; gap: .15rem; }
+    .assump dt { padding-top: .5rem; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="kicker">Implementation summary &middot; for supervisor review</p>
+    <h1>Nm-index: the final-score stage</h1>
+    <p class="sub">How <code>final_nm_index/</code> turns six component metrics into one percentile, and the choices that need your sign-off</p>
+    <div class="meta">
+      <span>module: final_nm_index/</span>
+      <span>paper &sect;2.5, Eq. 24&ndash;27</span>
+      <span>DB checked 2026-09-04</span>
+    </div>
+  </header>
+
+  <p class="lead">This module implements <strong>only the last stage</strong> of the Nm-index model &mdash; Equations&nbsp;24&ndash;27 of the full paper (&ldquo;2.5 Final score&rdquo;; Eq.&nbsp;23&ndash;25 in the extended abstract). Everything before Eq.&nbsp;24 &mdash; the author-contribution and ordering weights (Eq.&nbsp;1&ndash;6), influential self-citation (Eq.&nbsp;7&ndash;9), the career factor (Eq.&nbsp;10), and the six component metrics themselves (Eq.&nbsp;11&ndash;23) &mdash; is produced by other pipelines in the repository and stored in PostgreSQL. This module reads those stored values; it does not recompute them.</p>
+
+  <section>
+    <h2><span class="n">1</span>What the code does</h2>
+    <p>For every author it converts six raw impact numbers &mdash; on wildly different scales and all heavily skewed &mdash; into one comparable 0&ndash;100 percentile score.</p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>#</th><th>Symbol</th><th>Meaning</th><th>Eq.</th><th>Read from (PostgreSQL)</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>x1</td><td class="mono">T&#8202;<sub>a</sub></td><td>Outlier-uncontrolled field- &amp; year-normalised total cites</td><td>11</td><td class="mono">author_total_cites.total_cites_score</td></tr>
+          <tr><td>x2</td><td class="mono">S&#8202;<sub>a</sub></td><td>Outlier-controlled field-normalised cites per paper</td><td>13</td><td class="mono">author_citations_per_paper.citations_per_paper_score</td></tr>
+          <tr><td>x3</td><td class="mono">U&#8202;<sub>a</sub></td><td>Outlier-controlled field- &amp; year-normalised citation rate</td><td>14</td><td class="mono">author_citation_rate.citation_rate_score</td></tr>
+          <tr><td>x4</td><td class="mono">Hf&#8242;<sub>a</sub></td><td>Modified hf-index</td><td>17</td><td class="mono">author_modified_hindex.modified_hindex_final</td></tr>
+          <tr><td>x5</td><td class="mono">Hm&#8242;<sub>a</sub></td><td>Modified hm-index</td><td>20</td><td class="mono">author.modified_hm_index</td></tr>
+          <tr><td>x6</td><td class="mono">G&#8242;<sub>a</sub></td><td>Modified g-index</td><td>23</td><td class="mono">author.modified_g_index</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>Processing chain</h3>
+    <ul class="clean">
+      <li><strong>Load</strong> (<code>run_calculation.py</code>) &mdash; a single <code>LEFT JOIN</code> of the six one-row-per-author tables onto the full author list, keyed on <code>author_id</code>. Only rows with a non-NULL value are taken for each metric.</li>
+      <li><strong>Calculate</strong> (<code>calculator.py</code>) &mdash; per metric: Eq.&nbsp;24 transform &rarr; Eq.&nbsp;25 normalise &rarr; Eq.&nbsp;26 percentile; then Eq.&nbsp;27 weighted average. Pure pandas / numpy / scipy, no database access.</li>
+      <li><strong>Write</strong> (<code>run_calculation.py</code>) &mdash; UPSERT one row per author into <code>author_nm_index</code> (the six percentile columns, <code>metrics_available</code>, <code>nm_index</code>, <code>calculated_at</code>). Optionally mirrors <code>nm_index</code> onto the <code>author</code> table. Re-running is idempotent.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">2</span>How it implements Equations 24&ndash;27</h2>
+    <p>The six metrics fall into two families the paper treats differently.</p>
+
+    <h3>Citation metrics &mdash; T&#8202;<sub>a</sub>, S&#8202;<sub>a</sub>, U&#8202;<sub>a</sub></h3>
+    <div class="eq">
+      <span class="lbl">Eq. 24 &nbsp;</span>L(x) = log&#8321;&#8320;(x + 1)<br>
+      <span class="lbl">Eq. 25 &nbsp;</span>hooked&nbsp;&nbsp;&nbsp;Nor(x) = &Phi;&#8315;&#185;( P(L(x)) )<br>
+      <span class="lbl">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>lognormal&nbsp;&nbsp;Nor(x) = ( L(x) &minus; mean&nbsp;L(x) ) / sd&nbsp;L(x)<br>
+      <span class="lbl">Eq. 26 &nbsp;</span>Per(x) = 100 &middot; &Phi;( Nor(x) )
+    </div>
+    <p>Here <span class="mono">P(v) = (r(v) &minus; 0.375) / (N + 0.25)</span> is the Blom plotting position on the rank <span class="mono">r</span>, and <span class="mono">&Phi;</span> / <span class="mono">&Phi;&#8315;&#185;</span> are the standard-normal CDF and its inverse.</p>
+    <div class="callout"><strong>Exact simplification in code:</strong> for the hooked branch, <span class="mono">100&middot;&Phi;(&Phi;&#8315;&#185;(P)) = 100&middot;P</span> identically, so the code computes <span class="mono">Per(x) = 100 &middot; P(L(x))</span> directly and never forms the intermediate <span class="mono">Nor</span>. Eq.&nbsp;27 only consumes <span class="mono">Per</span>, so nothing is lost.</div>
+
+    <h3>Index metrics &mdash; Hf&#8242;<sub>a</sub>, Hm&#8242;<sub>a</sub>, G&#8242;<sub>a</sub></h3>
+    <div class="eq">
+      <span class="lbl">Eq. 24 &nbsp;</span>P(x) = (r(x) &minus; 0.375) / (N + 0.25)&nbsp;&nbsp;&nbsp;<span class="lbl">// fractional rank, ties &rarr; mean</span><br>
+      <span class="lbl">Eq. 25 &nbsp;</span>Nor(x) = &Phi;&#8315;&#185;( P(x) )<br>
+      <span class="lbl">Eq. 26 &nbsp;</span>Per(x) = 100 &middot; P(x)
+    </div>
+    <p>Fractional ranking matters here because many authors have <span class="mono">Hf&#8242; = Hm&#8242; = G&#8242; = 0</span> &mdash; those ties must share a rank, not be ordered arbitrarily.</p>
+
+    <h3>Ranking method &mdash; per the Eq. 24 wording</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Family</th><th>Paper wording</th><th>Config setting</th><th>pandas</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">Hf&#8242; Hm&#8242; G&#8242;</td><td>&ldquo;fractional ranking &hellip; (many ties)&rdquo;</td><td class="mono">RANK_METHOD_RANK</td><td class="mono">"average"</td></tr>
+          <tr><td class="mono">T S U</td><td>&ldquo;normal ranking for the raw citations&rdquo;</td><td class="mono">RANK_METHOD_LOG</td><td class="mono">"min"</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Eq. 27 &mdash; the final score</h3>
+    <div class="eq">Nm<sub>a</sub> = &Sigma;<sub>i=1..6</sub> w<sub>i</sub> &middot; Per<sub>a</sub>(x<sub>i</sub>)&nbsp;&nbsp;&nbsp;&nbsp;&Sigma; w<sub>i</sub> = 1</div>
+    <p>Default <span class="mono">w<sub>i</sub> = 1/6</span> (equal weighting, the paper&rsquo;s suggestion) &rarr; a plain average of the six percentiles. When an author is missing a metric, the weights are renormalised over the subset they have (see&nbsp;C).</p>
+  </section>
+
+  <section>
+    <h2><span class="n">3</span>Alignment with the paper&rsquo;s worked example (&sect;3.3.3)</h2>
+    <p>&sect;3.3.3 &ldquo;Final Nm-Index Calculation&rdquo; is the paper&rsquo;s only end-to-end numerical example. It states exactly the recipe the code follows: <em>&ldquo;citation metrics (T<sub>a</sub>, S<sub>a</sub>, U<sub>a</sub>) follow a hooked power law, so Nor<sub>a</sub>(x) = &phi;&#8315;&#185;(P(L(x))) &hellip; normal ranking. Indices (Hf&#8242;, Hm&#8242;, G&#8242;) use fractional ranking for ties, with Nor<sub>a</sub>(x) = &phi;&#8315;&#185;(P(x))&rdquo;</em>, then <span class="mono">Nm<sub>a</sub> = (1/6) &Sigma; Per</span>.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Metric</th><th class="num">Raw</th><th class="num">L(x)</th><th class="num">P</th><th class="num">Per = 100&middot;P</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">T&#8202;<sub>a</sub></td><td class="num">1.683</td><td class="num">0.4286</td><td class="num">0.5500</td><td class="num">55.00</td></tr>
+          <tr><td class="mono">S&#8202;<sub>a</sub></td><td class="num">0.374</td><td class="num">0.1380</td><td class="num">0.3000</td><td class="num">30.00</td></tr>
+          <tr><td class="mono">U&#8202;<sub>a</sub></td><td class="num">0.629</td><td class="num">0.2119</td><td class="num">0.4500</td><td class="num">45.00</td></tr>
+          <tr><td class="mono">Hf&#8242;<sub>a</sub></td><td class="num">0.415</td><td class="num">&mdash;</td><td class="num">0.4000</td><td class="num">40.00</td></tr>
+          <tr><td class="mono">Hm&#8242;<sub>a</sub></td><td class="num">0.113</td><td class="num">&mdash;</td><td class="num">0.2500</td><td class="num">25.00</td></tr>
+          <tr><td class="mono">G&#8242;<sub>a</sub></td><td class="num">0.365</td><td class="num">&mdash;</td><td class="num">0.3500</td><td class="num">35.00</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="eq">Nm<sub>a</sub> = (55 + 30 + 45 + 40 + 25 + 35) / 6 &asymp; 38.33&nbsp;&nbsp;&nbsp;<span class="lbl">// ~38th percentile</span></div>
+    <p><strong>Not reproducible to the digit, and that is expected.</strong> The <span class="mono">P</span> values above come from ranks the paper asserts by hand (<em>&ldquo;r &asymp; 55000 (mid-range)&rdquo;</em> inside a hypothetical <span class="mono">N = 100,000</span> sample), not from a dataset. The code reproduces the <strong>formula path</strong> that generates them; the specific figures are illustrative. The test <code>test_matches_paper_section_333_mechanism</code> verifies the mechanism on a controlled input.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">4</span>Assumptions that need your sign-off</h2>
+    <p>Each of these is a point where the paper is silent, ambiguous, or assumes ideal data. All are isolated in <code>config.py</code> and switchable without touching the maths. Current defaults are stated &mdash; please confirm or redirect.</p>
+
+    <div class="assump">
+      <span class="tag">A &middot; NM_DISTRIBUTION</span>
+      <h3>Distribution assumption for T<sub>a</sub>, S<sub>a</sub>, U<sub>a</sub></h3>
+      <dl>
+        <dt>Paper</dt><dd>Eq.&nbsp;25 branches on &ldquo;follows log normal&rdquo; (Z-score) vs &ldquo;follows hooked power law&rdquo; (rank-based inverse normal). &sect;2.5 splits this by research stream &mdash; humanities / social science &asymp; log-normal, medical / natural science &asymp; hooked.</dd>
+        <dt>Assumed</dt><dd><span class="knob">"hooked"</span> for all three metrics.</dd>
+        <dt>Why</dt><dd>Matches the &sect;3.3.3 worked example. By the time these reach this module they are already cross-field per-author aggregates, so there is no single field left to branch on. Switch a metric to <span class="knob">"lognormal"</span> if that stream genuinely is.</dd>
+      </dl>
+    </div>
+
+    <div class="assump">
+      <span class="tag">B &middot; NM_REFERENCE_N</span>
+      <h3>Reference population N in P(x) = (r &minus; 0.375)/(N + 0.25)</h3>
+      <dl>
+        <dt>Paper</dt><dd>&sect;3.3.3 uses <span class="mono">N = 100,000</span> &mdash; it ranks one profile inside a global 100k-profile sample.</dd>
+        <dt>Assumed</dt><dd><span class="knob">None</span> &rarr; N = number of authors actually scored for that metric (currently ~2,300).</dd>
+        <dt>Why</dt><dd>A fixed 100,000 on a 2,300-author cohort pushes every percentile toward 0. Cohort-N is correct at this data scale &mdash; but the output must be read as <strong>&ldquo;percentile within this dataset&rdquo;</strong>, not a global figure.</dd>
+      </dl>
+    </div>
+
+    <div class="assump">
+      <span class="tag">C &middot; NM_REQUIRE_ALL_METRICS</span>
+      <h3>Missing / NULL component metric</h3>
+      <dl>
+        <dt>Paper</dt><dd>Assumes all six metrics exist for every author.</dd>
+        <dt>Assumed</dt><dd><span class="knob">False</span> &mdash; an author missing <em>k</em> of the six is scored on the remaining <span class="mono">6&minus;k</span>, weights renormalised to sum to 1 over the available subset.</dd>
+        <dt>Why</dt><dd>A NULL is <strong>never</strong> treated as a zero &mdash; it is dropped from both the ranking population and the average, so incomplete data is not punished as poor performance. <code>metrics_available</code> (0&ndash;6) records how many were used. Set <span class="knob">True</span> to instead output NULL for any author without all six.</dd>
+      </dl>
+    </div>
+
+    <div class="assump">
+      <span class="tag">D &middot; RANK_METHOD_LOG</span>
+      <h3>Rank tie method for T<sub>a</sub>, S<sub>a</sub>, U<sub>a</sub></h3>
+      <dl>
+        <dt>Paper</dt><dd>Eq.&nbsp;24: &ldquo;normal ranking for the raw citations&rdquo;.</dd>
+        <dt>Assumed</dt><dd><span class="knob">"min"</span> (competition ranking).</dd>
+        <dt>Why</dt><dd>Consequence on real data: the citation metrics also carry a large block of exact <span class="mono">0.0</span>; under <span class="knob">"min"</span> that whole block shares rank&nbsp;1 and lands near the 0th percentile. Switch to <span class="knob">"average"</span> to spread the zero-block to mid-scale instead.</dd>
+      </dl>
+    </div>
+
+    <div class="assump">
+      <span class="tag">E &middot; minor, low-risk</span>
+      <h3>Smaller choices</h3>
+      <dl>
+        <dt>sd</dt><dd>Population standard deviation (<span class="mono">ddof = 0</span>) in the log-normal branch &mdash; the natural reading of &ldquo;standard deviation&rdquo;.</dd>
+        <dt>source</dt><dd><code>total_cites</code> is read from <code>author_total_cites</code> (identical twin of <code>equation_11_total_cites</code>); switchable in <code>config.METRIC_SOURCES</code>.</dd>
+        <dt>status</dt><dd>The unreliable <code>calculation_complete</code> / <code>calculation_status</code> flags are ignored by default (filter on <span class="mono">value IS NOT NULL</span> only); <span class="knob">NM_FILTER_STATUS = True</span> re-enables them.</dd>
+        <dt>g-index</dt><dd>Read from <code>author.modified_g_index</code> &mdash; the <code>modified_g_index_results</code> table exists but is empty.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">5</span>Current data state <span style="font-family:'IBM Plex Mono',monospace;font-size:.7rem;font-weight:400;color:var(--ink-faint);letter-spacing:.05em;">DB READ-ONLY, 2026-09-04</span></h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Component metric</th><th class="num">Authors with a value</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">total_cites &nbsp;(T<sub>a</sub>)</td><td class="num">1561 / 2507</td><td>rest still NULL upstream</td></tr>
+          <tr><td class="mono">citations_per_paper &nbsp;(S<sub>a</sub>)</td><td class="num">2321 / 2507</td><td></td></tr>
+          <tr><td class="mono">citation_rate &nbsp;(U<sub>a</sub>)</td><td class="num">2321 / 2507</td><td></td></tr>
+          <tr><td class="mono">modified_hf_index &nbsp;(Hf&#8242;<sub>a</sub>)</td><td class="num">2143 / 2507</td><td>197 authors NO_ELIGIBLE_FIELDS</td></tr>
+          <tr><td class="mono">modified_hm_index &nbsp;(Hm&#8242;<sub>a</sub>)</td><td class="num">2254 / 2507</td><td></td></tr>
+          <tr><td class="mono">modified_g_index &nbsp;(G&#8242;<sub>a</sub>)</td><td class="num">2143 / 2507</td><td>on author.modified_g_index</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>Dry run &mdash; calculation only, nothing written</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>metrics_available</th><th class="num">6</th><th class="num">5</th><th class="num">4</th><th class="num">3</th><th class="num">2</th><th class="num">0</th></tr></thead>
+        <tbody><tr><td>authors</td><td class="num">1537</td><td class="num">606</td><td class="num">24</td><td class="num">87</td><td class="num">67</td><td class="num">186</td></tr></tbody>
+      </table>
+    </div>
+    <p>Scored: <strong>2321 / 2507</strong> authors. <span class="mono">nm_index</span> &mdash; median &asymp; 24.6, mean &asymp; 27.1, max &asymp; 99.95. The low median is a direct symptom of the <strong>upstream component metrics being ~96% exact zero</strong>: most authors tie at the bottom of each ranking, with a thin tail of genuine achievers near 100. This is mathematically consistent with the model, not a code defect &mdash; but the distribution shape is worth discussing.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">6</span>Output</h2>
+    <p>Table <code>author_nm_index</code> (created by <code>schema.sql</code>), one row per author:</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Column</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">author_id</td><td>PK, FK &rarr; author</td></tr>
+          <tr><td class="mono">per_total_cites &hellip; per_modified_g_index</td><td>the six Per<sub>a</sub>(x<sub>i</sub>) values, 0&ndash;100, NULL if that component is unavailable</td></tr>
+          <tr><td class="mono">metrics_available</td><td>SMALLINT 0&ndash;6 &mdash; how many components fed nm_index</td></tr>
+          <tr><td class="mono">nm_index</td><td>final Eq.&nbsp;27 score; NULL if 0 components (or &lt;6 when NM_REQUIRE_ALL_METRICS)</td></tr>
+          <tr><td class="mono">calculated_at</td><td>run timestamp</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Optionally (<span class="mono">NM_UPDATE_AUTHOR_TABLE = True</span>) the final score is also mirrored onto <code>author.nm_index</code>, the same way <code>author.modified_hm_index</code> is populated.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">7</span>Verification status</h2>
+    <span class="verdict">Eq. 24&ndash;27 implemented faithfully</span>
+    <ul class="clean">
+      <li><strong>13 unit tests pass</strong> (<code>test_calculator.py</code>, pure in-memory, no DB). Every expected value is hand-derived in the test comments; <span class="mono">&Phi;</span> is taken from <code>scipy.stats.norm</code> exactly as Eq.&nbsp;25/26 intend.</li>
+      <li>Tests cover: Blom plotting position on fractional ranks; the log + Z-score branch; the log + hooked branch; the &sect;3.3.3 mechanism on a controlled 5-author input; weight renormalisation over missing metrics; <code>NM_REQUIRE_ALL_METRICS</code>; all-NULL author &rarr; NULL; custom weights; and the <code>NM_REFERENCE_N</code> override.</li>
+      <li>The <strong>DB-to-calculator path</strong> was validated by read-only dry runs against the live database. No automated test exercises <code>run_calculation.py</code> / <code>database.py</code> &mdash; the same known gap as the <code>modified_hm_index</code> module.</li>
+      <li>The three items <strong>A&ndash;C</strong> in section 4 are modelling choices, not bugs: documented, defaulted sensibly, configurable.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="n">8</span>Appendix &mdash; config.py knobs</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Setting</th><th>Default</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">NM_WEIGHTS</td><td class="mono">1/6 each</td><td>Eq.&nbsp;27 weights w<sub>i</sub> (must sum to 1)</td></tr>
+          <tr><td class="mono">NM_DISTRIBUTION</td><td class="mono">"hooked" &times;3</td><td>per citation metric: "hooked" or "lognormal"</td></tr>
+          <tr><td class="mono">NM_REFERENCE_N</td><td class="mono">None</td><td>None = cohort size; int = fixed N in P(x)</td></tr>
+          <tr><td class="mono">RANK_METHOD_LOG</td><td class="mono">"min"</td><td>tie handling for T / S / U ranking</td></tr>
+          <tr><td class="mono">RANK_METHOD_RANK</td><td class="mono">"average"</td><td>tie handling for Hf&#8242; / Hm&#8242; / G&#8242; (fractional)</td></tr>
+          <tr><td class="mono">NM_REQUIRE_ALL_METRICS</td><td class="mono">False</td><td>False = score on available subset; True = NULL unless all 6</td></tr>
+          <tr><td class="mono">NM_FILTER_STATUS</td><td class="mono">False</td><td>also require calculation_complete / status = READY</td></tr>
+          <tr><td class="mono">NM_UPDATE_AUTHOR_TABLE</td><td class="mono">False</td><td>also write author.nm_index</td></tr>
+          <tr><td class="mono">BLOM_A</td><td class="mono">0.375</td><td>Blom constant a in (r &minus; a)/(N + 1 &minus; 2a)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="foot">final_nm_index &middot; implements paper Eq. 24&ndash;27 &middot; generated for supervisor review &middot; 2026-09-04</p>
+
+</div>
