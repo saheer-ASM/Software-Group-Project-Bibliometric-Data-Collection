@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
+import { API_BASE_URL } from './config/api';
 import './Profile.css';
+import AppNavbar from './AppNavbar';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
-
-const Profile = ({ user = {}, onUserUpdate, onBack, onNavigateToAbout, onNavigateToSettings, onLogout, hasSearchedAuthor, onNavigateToExplorer }) => {
+const Profile = ({ user = {}, onUserUpdate, onBack, onNavigateToAbout, onNavigateToSettings, onNavigateToLibrary, onLogout, hasSearchedAuthor, onNavigateToExplorer }) => {
   const [fullName, setFullName] = useState(user.username || '');
   const [email, setEmail] = useState(user.email || '');
   const [designation, setDesignation] = useState(user.designation || '');
@@ -75,26 +75,7 @@ const Profile = ({ user = {}, onUserUpdate, onBack, onNavigateToAbout, onNavigat
 
   return (
     <div className="profile-container">
-      {/* Header */}
-      <header className="dashboard-header">
-        <div className="header-left">
-          <i className='bx bxs-graduation'></i>
-          <h1 className="logo">ScholarMetrics</h1>
-        </div>
-        <div className="header-right">
-          <nav className="header-nav">
-            <a href="#dashboard" onClick={onBack} className="nav-link">Dashboard</a>
-            {hasSearchedAuthor && (
-              <a href="#explorer" className="nav-link" onClick={(e) => { e.preventDefault(); onNavigateToExplorer(''); }}>Data Explorer</a>
-            )}
-            <a href="#about" className="nav-link" onClick={onNavigateToAbout}>About Us</a>
-            <button className="nav-link logout-btn" onClick={onLogout}>Logout</button>
-          </nav>
-          <div className="user-icon active">
-            <i className='bx bxs-user-circle'></i>
-          </div>
-        </div>
-      </header>
+      <AppNavbar activePage="profile" onDashboard={onBack} onExplorer={onNavigateToExplorer} onLibrary={onNavigateToLibrary} onAbout={onNavigateToAbout} onProfile={() => {}} onLogout={onLogout} />
 
       {/* Main Content */}
       <main className="dashboard-main">

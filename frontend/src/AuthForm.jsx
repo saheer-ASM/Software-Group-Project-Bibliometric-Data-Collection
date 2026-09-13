@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { auth, missingConfig } from './firebase';
+import { API_BASE_URL } from './config/api';
 import { auth } from './firebase';
 import './AuthForm.css';
 
@@ -20,6 +22,115 @@ const AuthForm = ({ onLogin }) => {
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
 
+  const ensureFirebaseConfig = () => {
+    if (missingConfig.length === 0) return true;
+    setError('Firebase web config is missing. Fill frontend/.env from Firebase Project settings.');
+    return false;
+  };
+
+  const exchangeFirebaseToken = async (firebaseUser, profile = {}) => {
+    const idToken = await firebaseUser.getIdToken();
+    const response = await fetch(`${API_BASE_URL}/api/auth/firebase-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken, ...profile }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || 'Unable to complete account setup');
+    localStorage.setItem('token', payload.token);
+    return payload.user;
+  };
+
+  const handleSocialLogin = async (providerName) => {
+    setError('');
+    if (!ensureFirebaseConfig()) return;
+    setLoading(true);
+
+    let userCredential;
+    try {
+      if (providerName === 'google') {
+        const { GoogleAuthProvider, signInWithPopup } = await import('firebase/auth');
+        const provider = new GoogleAuthProvider();
+        userCredential = await signInWithPopup(auth, provider);
+
+        const idToken = await userCredential.user.getIdToken();
+        const response = await fetch(`${API_BASE_URL}/api/auth/firebase-login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ idToken }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.message || 'Google sign-in failed');
+        }
+
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('authProvider', providerName);
+
+        onLogin({
+          id: data.user.id,
+          username: data.user.username || userCredential.user.displayName || userCredential.user.email?.split('@')[0] || 'User',
+          email: data.user.email || userCredential.user.email || '',
+          designation: data.user.designation || 'Researcher',
+          photoURL: userCredential.user.photoURL || '',
+        });
+        return;
+      } else if (providerName === 'github') {
+        const { GithubAuthProvider, signInWithPopup } = await import('firebase/auth');
+        const provider = new GithubAuthProvider();
+        userCredential = await signInWithPopup(auth, provider);
+      } else {
+        setError(`${providerName} sign-in is not connected in the app yet.`);
+        return;
+      }
+
+      const token = await userCredential.user.getIdToken();
+      localStorage.setItem('token', token);
+      localStorage.setItem('authProvider', providerName);
+
+      const appUser = {
+        id: userCredential.user.uid,
+        username: userCredential.user.displayName || userCredential.user.email?.split('@')[0] || 'User',
+        email: userCredential.user.email || '',
+        designation: 'Researcher',
+        photoURL: userCredential.user.photoURL || '',
+      };
+
+      onLogin(appUser);
+    } catch (err) {
+      if (providerName === 'google' && userCredential?.user) {
+        try {
+          const idToken = await userCredential.user.getIdToken();
+          localStorage.setItem('token', idToken);
+          localStorage.setItem('authProvider', providerName);
+
+          onLogin({
+            id: userCredential.user.uid,
+            username: userCredential.user.displayName || userCredential.user.email?.split('@')[0] || 'User',
+            email: userCredential.user.email || '',
+            designation: 'Researcher',
+            photoURL: userCredential.user.photoURL || '',
+          });
+          return;
+        } catch {
+          // Fall through to the error handling below.
+        }
+      }
+
+      if (err.code === 'auth/popup-closed-by-user') {
+        setError('Sign-in popup was closed before completing login.');
+      } else if (err.code === 'auth/account-exists-with-different-credential') {
+        setError('An account already exists with this email using another sign-in method.');
+      } else {
+        setError(err.message || `${providerName} sign-in failed`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
   const handleRegisterClick = () => setIsActive(true);
   const handleLoginClick = () => setIsActive(false);
 
@@ -90,8 +201,16 @@ const AuthForm = ({ onLogin }) => {
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    if (!ensureFirebaseConfig()) return;
     setLoading(true);
     try {
+      const { signInWithEmailAndPassword } = await import('firebase/auth');
+      const userCredential = await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
+      const appUser = await exchangeFirebaseToken(userCredential.user);
+
+      onLogin({
+        ...appUser,
+        photoURL: userCredential.user.photoURL || '',
       const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -124,6 +243,37 @@ const AuthForm = ({ onLogin }) => {
     }
     setLoading(true);
     try {
+      const { createUserWithEmailAndPassword, updateProfile, deleteUser } = await import('firebase/auth');
+      
+      const userCredential = await createUserWithEmailAndPassword(auth, registerEmail, registerPassword);
+      
+      await updateProfile(userCredential.user, {
+        displayName: registerUsername,
+      });
+
+      let appUser;
+      try {
+        appUser = await exchangeFirebaseToken(userCredential.user, {
+          username: registerUsername,
+          designation: registerDesignation,
+        });
+      } catch (setupError) {
+        await deleteUser(userCredential.user).catch(() => {});
+        throw setupError;
+      }
+      
+      onLogin({
+        ...appUser,
+        photoURL: '',
+      });
+    } catch (err) {
+      if (err.code === 'auth/email-already-in-use') {
+        setError('An account already exists with this email address.');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('Please enter a valid email address.');
+      } else {
+        setError(err.message || 'Registration failed');
+      }
       const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

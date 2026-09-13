@@ -1,10 +1,117 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
+import { API_BASE_URL } from './config/api';
 import './Dashboard.css';
+import AppNavbar from './AppNavbar';
 
-const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNavigateToSettings, onNavigateToAbout, onNavigateToProfile, hasSearchedAuthor, onResetSearch }) => {
+const EMPTY_STATS = { publications: null, authors: null, fields: null };
+
+function getCachedStats() {
+  try {
+    const cached = JSON.parse(localStorage.getItem('dashboardStats'));
+    return cached && ['publications', 'authors', 'fields'].every((key) => Number.isFinite(Number(cached[key])))
+      ? cached
+      : EMPTY_STATS;
+  } catch (_error) {
+    return EMPTY_STATS;
+  }
+}
+
+const AnimatedCounter = ({ value, loading }) => {
+  const target = Number(value ?? 0);
+  const [displayed, setDisplayed] = useState(0);
+  const currentValue = useRef(0);
+
+  useEffect(() => {
+    const start = currentValue.current;
+    const difference = target - start;
+    if (!difference || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      currentValue.current = target;
+      setDisplayed(target);
+      return undefined;
+    }
+
+    const startedAt = performance.now();
+    let frameId;
+    const animate = (time) => {
+      const progress = Math.min((time - startedAt) / 1400, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const next = Math.round(start + difference * eased);
+      currentValue.current = next;
+      setDisplayed(next);
+      if (progress < 1) frameId = requestAnimationFrame(animate);
+    };
+    frameId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frameId);
+  }, [target]);
+
+  return <span className={loading ? 'stat-number-loading' : ''}>{displayed.toLocaleString()}</span>;
+};
+
+const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNavigateToSettings, onNavigateToAbout, onNavigateToProfile, onNavigateToLibrary, hasSearchedAuthor, onResetSearch }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [authorSuggestions, setAuthorSuggestions] = useState([]);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(-1);
+  const [stats, setStats] = useState(getCachedStats);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState('');
   const scrollContainerRef = useRef(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadStats() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/stats`, { signal: controller.signal });
+        if (!response.ok) throw new Error('Stats request failed');
+        const freshStats = await response.json();
+        setStats(freshStats);
+        localStorage.setItem('dashboardStats', JSON.stringify(freshStats));
+        setStatsError('');
+      } catch (error) {
+        if (error.name !== 'AbortError') setStatsError('Live statistics are temporarily unavailable');
+      } finally {
+        setStatsLoading(false);
+      }
+    }
+
+    loadStats();
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!suggestionsOpen || query.length < 2) {
+      setAuthorSuggestions([]);
+      setSuggestionsLoading(false);
+      setActiveSuggestion(-1);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setSuggestionsLoading(true);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/authors?q=${encodeURIComponent(query)}`, {
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error('Author lookup failed');
+        setAuthorSuggestions(await response.json());
+        setActiveSuggestion(-1);
+      } catch (error) {
+        if (error.name !== 'AbortError') setAuthorSuggestions([]);
+      } finally {
+        if (!controller.signal.aborted) setSuggestionsLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchQuery, suggestionsOpen]);
 
   const handleScroll = (direction) => {
     if (scrollContainerRef.current) {
@@ -15,13 +122,6 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
         behavior: 'smooth'
       });
     }
-  };
-
-  // Sample data
-  const stats = {
-    publications: '1025828',
-    authors: '24852+',
-    fields: '341'
   };
 
   const popularFields = [
@@ -45,8 +145,37 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
   const handleSearch = (e) => {
     e.preventDefault();
     if (searchQuery.trim()) {
+      if (activeSuggestion >= 0 && authorSuggestions[activeSuggestion]) {
+        selectAuthor(authorSuggestions[activeSuggestion]);
+        return;
+      }
+      setSuggestionsOpen(false);
       // Navigate to Data Explorer with author name
-      onNavigateToExplorer(searchQuery);
+      onNavigateToExplorer(searchQuery.trim());
+    }
+  };
+
+  const selectAuthor = (author) => {
+    setSearchQuery(author.name);
+    setSuggestionsOpen(false);
+    setAuthorSuggestions([]);
+    setActiveSuggestion(-1);
+    onNavigateToExplorer(author.name);
+  };
+
+  const handleSearchKeyDown = (event) => {
+    if (!suggestionsOpen || !authorSuggestions.length) {
+      if (event.key === 'Escape') setSuggestionsOpen(false);
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveSuggestion((current) => (current + 1) % authorSuggestions.length);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveSuggestion((current) => current <= 0 ? authorSuggestions.length - 1 : current - 1);
+    } else if (event.key === 'Escape') {
+      setSuggestionsOpen(false);
     }
   };
 
@@ -57,26 +186,7 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
 
   return (
     <div className="dashboard-container">
-      {/* Header */}
-      <header className="dashboard-header">
-        <div className="header-left">
-          <i className='bx bxs-graduation'></i>
-          <h1 className="logo">ScholarMetrics</h1>
-        </div>
-        <div className="header-right">
-          <nav className="header-nav">
-            <a href="#dashboard" className="nav-link active">Dashboard</a>
-            {hasSearchedAuthor && (
-              <a href="#explorer" className="nav-link" onClick={(e) => { e.preventDefault(); onNavigateToExplorer(searchQuery || 'Researcher'); }}>Data Explorer</a>
-            )}
-            <a href="#about" className="nav-link" onClick={onNavigateToAbout}>About Us</a>
-            <button className="nav-link logout-btn" onClick={onLogout}>Logout</button>
-          </nav>
-          <div className="user-icon" onClick={onNavigateToProfile}>
-            <i className='bx bxs-user-circle'></i>
-          </div>
-        </div>
-      </header>
+      <AppNavbar activePage="dashboard" onDashboard={() => {}} onExplorer={onNavigateToExplorer} onLibrary={onNavigateToLibrary} onAbout={onNavigateToAbout} onProfile={onNavigateToProfile} onLogout={onLogout} />
 
       {/* Main Content */}
       <main className="dashboard-main">
@@ -87,21 +197,22 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
 
         {/* Quick Stats */}
         <section className="stats-section">
-          <h2 className="section-title">Quick States</h2>
+          <h2 className="section-title">Quick Stats</h2>
           <div className="stats-grid">
             <div className="stat-card">
-              <div className="stat-number">{stats.publications}</div>
+              <div className="stat-number"><AnimatedCounter value={stats.publications} loading={statsLoading} /></div>
               <div className="stat-label">Publications</div>
             </div>
             <div className="stat-card highlight">
-              <div className="stat-number">{stats.authors}</div>
+              <div className="stat-number"><AnimatedCounter value={stats.authors} loading={statsLoading} /></div>
               <div className="stat-label">Authors</div>
             </div>
             <div className="stat-card">
-              <div className="stat-number">{stats.fields}</div>
+              <div className="stat-number"><AnimatedCounter value={stats.fields} loading={statsLoading} /></div>
               <div className="stat-label">Fields</div>
             </div>
           </div>
+          {statsError && <p role="status" className="stats-error">{statsError}</p>}
         </section>
 
         {/* Author Search */}
@@ -112,12 +223,51 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
               type="text"
               placeholder="Enter Author's Name"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setSuggestionsOpen(true);
+              }}
+              onFocus={() => setSuggestionsOpen(true)}
+              onKeyDown={handleSearchKeyDown}
               className="search-input"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={suggestionsOpen && searchQuery.trim().length >= 2}
+              aria-controls="dashboard-author-suggestions"
+              aria-activedescendant={activeSuggestion >= 0 ? `dashboard-author-${activeSuggestion}` : undefined}
             />
             <button type="submit" className="search-btn">
               <i className='bx bx-search'></i>
             </button>
+            {suggestionsOpen && searchQuery.trim().length >= 2 && (
+              <div id="dashboard-author-suggestions" className="dashboard-author-suggestions" role="listbox">
+                {suggestionsLoading ? (
+                  <div className="dashboard-suggestion-message">Searching authors…</div>
+                ) : authorSuggestions.length ? authorSuggestions.map((author, index) => (
+                  <button
+                    id={`dashboard-author-${index}`}
+                    key={author.id}
+                    type="button"
+                    role="option"
+                    aria-selected={index === activeSuggestion}
+                    className={`dashboard-author-option${index === activeSuggestion ? ' active' : ''}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setActiveSuggestion(index)}
+                    onClick={() => selectAuthor(author)}
+                  >
+                    <span className="dashboard-author-avatar"><i className="bx bxs-user" /></span>
+                    <span className="dashboard-author-details">
+                      <strong>{author.name}</strong>
+                      <small>{author.id}</small>
+                    </span>
+                    <i className="bx bx-right-arrow-alt" />
+                  </button>
+                )) : (
+                  <div className="dashboard-suggestion-message">No matching authors found</div>
+                )}
+              </div>
+            )}
+            <a href="#library" className="nav-link" onClick={onNavigateToLibrary}>My Library</a>
           </form>
         </section>
 

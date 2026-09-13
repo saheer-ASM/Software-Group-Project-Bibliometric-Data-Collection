@@ -2,7 +2,9 @@ const bcrypt = require('bcryptjs');
 const admin = require('firebase-admin');
 const db = require('../config/firebase');
 
-const usersCollection = db.collection('users');
+const usersCollection = db ? db.collection('users') : null;
+const memoryUsers = new Map();
+let memoryUserCounter = 1;
 
 function normalizeEmail(email) {
   return email.trim().toLowerCase();
@@ -38,12 +40,38 @@ function publicUser(user) {
   };
 }
 
+function cloneUser(user) {
+  return user ? { ...user } : null;
+}
+
+function nextMemoryId() {
+  return String(memoryUserCounter++);
+}
+
+function findMemoryByUsername(username) {
+  const normalized = normalizeUsername(username).toLowerCase();
+  return [...memoryUsers.values()].find((user) => user.usernameLower === normalized) || null;
+}
+
+function findMemoryByEmail(email) {
+  const normalized = normalizeEmail(email);
+  return [...memoryUsers.values()].find((user) => user.email === normalized) || null;
+}
+
 async function findById(id) {
+  if (!usersCollection) {
+    return cloneUser(memoryUsers.get(String(id)));
+  }
+
   const doc = await usersCollection.doc(id).get();
   return userFromDoc(doc);
 }
 
 async function findByUsername(username) {
+  if (!usersCollection) {
+    return cloneUser(findMemoryByUsername(username));
+  }
+
   const snapshot = await usersCollection
     .where('usernameLower', '==', normalizeUsername(username).toLowerCase())
     .limit(1)
@@ -54,6 +82,10 @@ async function findByUsername(username) {
 }
 
 async function findByEmail(email) {
+  if (!usersCollection) {
+    return cloneUser(findMemoryByEmail(email));
+  }
+
   const snapshot = await usersCollection.where('email', '==', normalizeEmail(email)).limit(1).get();
 
   if (snapshot.empty) return null;
@@ -61,6 +93,13 @@ async function findByEmail(email) {
 }
 
 async function findConflict({ username, email, excludeId }) {
+  if (!usersCollection) {
+    const usernameMatch = username ? findMemoryByUsername(username) : null;
+    const emailMatch = email ? findMemoryByEmail(email) : null;
+
+    return [usernameMatch, emailMatch].find((user) => user && user.id !== excludeId) || null;
+  }
+
   const [usernameMatch, emailMatch] = await Promise.all([
     username ? findByUsername(username) : null,
     email ? findByEmail(email) : null,
@@ -90,11 +129,29 @@ async function createUser({ username, email, designation, password }) {
   const now = new Date().toISOString();
   const normalizedEmail = normalizeEmail(email);
   const hashedPassword = await bcrypt.hash(password, 12);
+  if (!usersCollection) {
+    const id = nextMemoryId();
+    const user = {
+      id,
+      username: normalizeUsername(username),
+      usernameLower: normalizeUsername(username).toLowerCase(),
+      email: normalizedEmail,
+      designation: designation.trim(),
+      password: hashedPassword,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    memoryUsers.set(id, user);
+    return cloneUser(user);
+  }
+
   const firebaseUid = await ensureFirebaseAuthUser({
     email: normalizedEmail,
     password,
     displayName: normalizeUsername(username),
   });
+
   const docRef = usersCollection.doc();
   const user = {
     username: normalizeUsername(username),
@@ -130,12 +187,38 @@ async function updateUser(id, updates) {
     cleanUpdates.designation = cleanUpdates.designation.trim();
   }
 
+  if (!usersCollection) {
+    const existing = memoryUsers.get(String(id));
+    if (!existing) return null;
+
+    const updated = {
+      ...existing,
+      ...cleanUpdates,
+    };
+
+    memoryUsers.set(String(id), updated);
+    return cloneUser(updated);
+  }
+
   await usersCollection.doc(id).update(cleanUpdates);
   return findById(id);
 }
 
 async function updatePassword(id, newPassword, { syncFirebase = true } = {}) {
   const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+  if (!usersCollection) {
+    const existing = memoryUsers.get(String(id));
+    if (!existing) return;
+
+    memoryUsers.set(String(id), {
+      ...existing,
+      password: hashedPassword,
+      updatedAt: new Date().toISOString(),
+    });
+    return;
+  }
+
   await usersCollection.doc(id).update({
     password: hashedPassword,
     updatedAt: new Date().toISOString(),

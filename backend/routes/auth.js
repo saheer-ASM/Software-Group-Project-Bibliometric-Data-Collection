@@ -1,16 +1,60 @@
 const express = require('express');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin');
 const authMiddleware = require('../middleware/auth');
 const userStore = require('../services/firebaseUserStore');
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
 const router = express.Router();
 
 function signToken(id) {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
+  return jwt.sign({ id }, JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   });
 }
+
+// POST /api/auth/firebase-login
+router.post('/firebase-login', async (req, res) => {
+  try {
+    const { idToken, username: requestedUsername, designation: requestedDesignation } = req.body;
+
+    if (!idToken) {
+      return res.status(400).json({ message: 'Firebase token is required' });
+    }
+
+    if (!admin.apps.length) {
+      return res.status(503).json({ message: 'Firebase admin is not configured on the backend' });
+    }
+
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const email = decoded.email || '';
+    const username = requestedUsername?.trim() || decoded.name || email.split('@')[0] || 'User';
+    const designation = requestedDesignation?.trim() || 'Researcher';
+
+    let user = await userStore.findByEmail(email);
+
+    if (!user) {
+      user = await userStore.createUser({
+        username,
+        email,
+        designation,
+        password: crypto.randomBytes(32).toString('hex'),
+      });
+    } else if (requestedUsername || requestedDesignation) {
+      user = await userStore.updateUser(user.id, { username, designation });
+    }
+
+    const token = signToken(user.id);
+
+    res.json({
+      token,
+      user: userStore.publicUser(user),
+    });
+  } catch (err) {
+    res.status(401).json({ message: 'Google sign-in failed', error: err.message });
+  }
+});
 
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
