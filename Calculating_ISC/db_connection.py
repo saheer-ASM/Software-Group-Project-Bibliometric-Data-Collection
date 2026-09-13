@@ -1,15 +1,48 @@
+from __future__ import annotations
+
 import os
+from pathlib import Path
 
 import psycopg2
 from dotenv import load_dotenv
 
 
-load_dotenv()
+MODULE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = MODULE_DIR.parent
+
+
+def load_default_environment() -> None:
+    """
+    Load database variables without overriding values that are already
+    present in the operating-system environment.
+
+    Supported locations:
+        1. project-root/.env
+        2. Calculating_ISC/.env
+
+    Keeping both locations supported makes the ISC module usable in the
+    collaborative repository without requiring credentials in source code.
+    """
+
+    candidate_files = (
+        PROJECT_ROOT / ".env",
+        MODULE_DIR / ".env",
+    )
+
+    for env_file in candidate_files:
+        if env_file.exists():
+            load_dotenv(
+                dotenv_path=env_file,
+                override=False,
+            )
+
+
+load_default_environment()
 
 
 def get_connection():
     """
-    Create and return a PostgreSQL connection using the root .env file.
+    Create and return a PostgreSQL connection.
     """
 
     required_variables = [
@@ -26,9 +59,16 @@ def get_connection():
     ]
 
     if missing_variables:
+        searched_locations = (
+            f"{PROJECT_ROOT / '.env'}, "
+            f"{MODULE_DIR / '.env'}"
+        )
+
         raise RuntimeError(
             "Missing database environment variables: "
             + ", ".join(missing_variables)
+            + ". Checked: "
+            + searched_locations
         )
 
     return psycopg2.connect(

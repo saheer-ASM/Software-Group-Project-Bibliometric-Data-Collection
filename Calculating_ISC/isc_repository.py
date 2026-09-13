@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from decimal import Decimal
 
 from psycopg2 import sql
@@ -47,9 +49,7 @@ class ISCRepository:
             citing publication column.
         """
 
-        columns = self._table_columns(
-            "citation"
-        )
+        columns = self._table_columns("citation")
 
         if {
             "cited_pub_id",
@@ -85,7 +85,21 @@ class ISCRepository:
     def fetch_citation_pairs(
         self,
         limit: int | None = None,
+        cited_pub_ids: list[str] | None = None,
     ) -> list[CitationPair]:
+        """
+        Fetch citation pairs for ISC calculation.
+
+        Rules:
+            1. Only citing publications (q) with
+               author_contribution_weight are selected.
+
+            2. Maximum 200 citing publications are selected
+               for each cited publication (p).
+
+            3. Selection is random.
+        """
+
         (
             cited_column,
             citing_column,
@@ -93,41 +107,71 @@ class ISCRepository:
 
         query = sql.SQL(
             """
-            SELECT DISTINCT
-                {cited},
-                {citing}
-            FROM public.citation
-            WHERE {cited} IS NOT NULL
-              AND {citing} IS NOT NULL
-              AND {cited} <> {citing}
-            ORDER BY
-                {cited},
-                {citing}
+            WITH valid_citations AS (
+                SELECT DISTINCT
+                    c.{cited} AS cited_pub_id,
+                    c.{citing} AS citing_pub_id
+                FROM public.citation c
+                WHERE c.{cited} IS NOT NULL
+                  AND c.{citing} IS NOT NULL
+                  AND c.{cited} <> c.{citing}
+                  AND EXISTS (
+                      SELECT 1
+                      FROM public.author_contribution_weight acw
+                      WHERE acw.pub_id = c.{citing}
+                  )
+            ),
+            ranked_citations AS (
+                SELECT
+                    cited_pub_id,
+                    citing_pub_id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY cited_pub_id
+                        ORDER BY RANDOM()
+                    ) AS row_number
+                FROM valid_citations
+            )
+            SELECT
+                cited_pub_id,
+                citing_pub_id
+            FROM ranked_citations
+            WHERE row_number <= 200
             """
         ).format(
-            cited=sql.Identifier(
-                cited_column
-            ),
-            citing=sql.Identifier(
-                citing_column
-            ),
+            cited=sql.Identifier(cited_column),
+            citing=sql.Identifier(citing_column),
         )
 
-        parameters: tuple = ()
+        parameters: list = []
+
+        if cited_pub_ids:
+            query += sql.SQL(
+                """
+                AND cited_pub_id = ANY(%s)
+                """
+            )
+            parameters.append(cited_pub_ids)
+
+        query += sql.SQL(
+            """
+            ORDER BY
+                cited_pub_id,
+                citing_pub_id
+            """
+        )
 
         if limit is not None:
             query += sql.SQL(
-                " LIMIT %s"
+                """
+                LIMIT %s
+                """
             )
-
-            parameters = (
-                limit,
-            )
+            parameters.append(limit)
 
         with self.connection.cursor() as cursor:
             cursor.execute(
                 query,
-                parameters,
+                tuple(parameters),
             )
 
             return [
@@ -166,9 +210,7 @@ class ISCRepository:
             "author_contribution_weight"
         )
 
-        slots = (
-            self._available_author_slots()
-        )
+        slots = self._available_author_slots()
 
         if not slots:
             raise RuntimeError(
@@ -179,18 +221,13 @@ class ISCRepository:
         missing_weight_columns = [
             f"author{index}id_weight"
             for index in slots
-            if (
-                f"author{index}id_weight"
-                not in columns
-            )
+            if f"author{index}id_weight" not in columns
         ]
 
         if missing_weight_columns:
             raise RuntimeError(
                 "Missing author weight columns: "
-                + ", ".join(
-                    missing_weight_columns
-                )
+                + ", ".join(missing_weight_columns)
             )
 
         selected_columns = []
@@ -258,9 +295,7 @@ class ISCRepository:
             results.append(
                 AuthorWeight(
                     author_id=author_id,
-                    weight=Decimal(
-                        str(weight)
-                    ),
+                    weight=Decimal(str(weight)),
                 )
             )
 
@@ -290,9 +325,7 @@ class ISCRepository:
             "field_classification"
         )
 
-        if not required_columns.issubset(
-            columns
-        ):
+        if not required_columns.issubset(columns):
             missing = sorted(
                 required_columns - columns
             )
@@ -323,16 +356,9 @@ class ISCRepository:
         if row is None:
             return []
 
-        fields_by_name: dict[
-            str,
-            Decimal,
-        ] = {}
+        fields_by_name: dict[str, Decimal] = {}
 
-        for offset in range(
-            0,
-            6,
-            2,
-        ):
+        for offset in range(0, 6, 2):
             field_name = row[offset]
             field_weight = row[offset + 1]
 
@@ -373,8 +399,7 @@ class ISCRepository:
                 field_name=name,
                 field_weight=weight,
             )
-            for name, weight
-            in fields_by_name.items()
+            for name, weight in fields_by_name.items()
         ]
 
     def delete_results_for_pair(
@@ -408,36 +433,36 @@ class ISCRepository:
             cursor.execute(
                 """
                 INSERT INTO
-                public.influential_self_citations (
-                    cited_pub_id,
-                    citing_pub_id,
-                    target_author_id,
+                    public.influential_self_citations (
+                        cited_pub_id,
+                        citing_pub_id,
+                        target_author_id,
 
-                    field_name,
-                    field_weight,
-                    target_author_overall_weight,
+                        field_name,
+                        field_weight,
+                        target_author_overall_weight,
 
-                    self_author_ids,
-                    core_author_ids,
-                    non_overlap_author_ids,
+                        self_author_ids,
+                        core_author_ids,
+                        non_overlap_author_ids,
 
-                    self_influence_sum,
-                    core_influence_sum,
-                    non_overlap_influence_sum,
+                        self_influence_sum,
+                        core_influence_sum,
+                        non_overlap_influence_sum,
 
-                    core_author_count,
-                    epsilon_zero,
-                    epsilon_value,
+                        core_author_count,
+                        epsilon_zero,
+                        epsilon_value,
 
-                    isc_numerator,
-                    isc_denominator,
-                    isc_value,
+                        isc_numerator,
+                        isc_denominator,
+                        isc_value,
 
-                    raw_citation,
-                    adjusted_citation,
+                        raw_citation,
+                        adjusted_citation,
 
-                    calculated_at
-                )
+                        calculated_at
+                    )
                 VALUES (
                     %s, %s, %s,
                     %s, %s, %s,
@@ -538,58 +563,99 @@ class ISCRepository:
 
     def refresh_equation_9_results(
         self,
+        cited_pub_ids: list[str] | None = None,
     ) -> None:
         """
-        Calculate Equation 9 using every stored
-        Equation 8 row.
+        Calculate Equation 9 from stored Equation 8 rows.
 
-        TC_adjusted(p, i)
-            =
-        SUM over q and f of
-        TC_adjusted(p, i, q, f)
+        When cited_pub_ids is provided, only those cited publications
+        are refreshed. This prevents a selected-publication run from
+        deleting and rebuilding unrelated collaborators' Equation 9 rows.
         """
 
+        selected_ids = (
+            sorted(set(cited_pub_ids))
+            if cited_pub_ids
+            else None
+        )
+
         with self.connection.cursor() as cursor:
-            cursor.execute(
-                """
-                DELETE FROM
-                public.author_paper_adjusted_citations;
-                """
-            )
-
-            cursor.execute(
-                """
-                INSERT INTO
-                public.author_paper_adjusted_citations (
-                    cited_pub_id,
-                    target_author_id,
-                    citing_paper_count,
-                    field_row_count,
-                    total_raw_citation,
-                    total_adjusted_citation,
-                    calculated_at
+            if selected_ids:
+                cursor.execute(
+                    """
+                    DELETE FROM
+                        public.author_paper_adjusted_citations
+                    WHERE cited_pub_id = ANY(%s);
+                    """,
+                    (selected_ids,),
                 )
-                SELECT
-                    cited_pub_id,
-                    target_author_id,
 
-                    COUNT(
-                        DISTINCT citing_pub_id
-                    )::INTEGER,
+                cursor.execute(
+                    """
+                    INSERT INTO
+                        public.author_paper_adjusted_citations (
+                            cited_pub_id,
+                            target_author_id,
+                            citing_paper_count,
+                            field_row_count,
+                            total_raw_citation,
+                            total_adjusted_citation,
+                            calculated_at
+                        )
+                    SELECT
+                        cited_pub_id,
+                        target_author_id,
+                        COUNT(
+                            DISTINCT citing_pub_id
+                        )::INTEGER,
+                        COUNT(*)::INTEGER,
+                        SUM(raw_citation),
+                        SUM(adjusted_citation),
+                        CURRENT_TIMESTAMP
+                    FROM
+                        public.influential_self_citations
+                    WHERE cited_pub_id = ANY(%s)
+                    GROUP BY
+                        cited_pub_id,
+                        target_author_id;
+                    """,
+                    (selected_ids,),
+                )
 
-                    COUNT(*)::INTEGER,
+            else:
+                cursor.execute(
+                    """
+                    DELETE FROM
+                        public.author_paper_adjusted_citations;
+                    """
+                )
 
-                    SUM(raw_citation),
-
-                    SUM(adjusted_citation),
-
-                    CURRENT_TIMESTAMP
-
-                FROM
-                    public.influential_self_citations
-
-                GROUP BY
-                    cited_pub_id,
-                    target_author_id;
-                """
-            )
+                cursor.execute(
+                    """
+                    INSERT INTO
+                        public.author_paper_adjusted_citations (
+                            cited_pub_id,
+                            target_author_id,
+                            citing_paper_count,
+                            field_row_count,
+                            total_raw_citation,
+                            total_adjusted_citation,
+                            calculated_at
+                        )
+                    SELECT
+                        cited_pub_id,
+                        target_author_id,
+                        COUNT(
+                            DISTINCT citing_pub_id
+                        )::INTEGER,
+                        COUNT(*)::INTEGER,
+                        SUM(raw_citation),
+                        SUM(adjusted_citation),
+                        CURRENT_TIMESTAMP
+                    FROM
+                        public.influential_self_citations
+                    GROUP BY
+                        cited_pub_id,
+                        target_author_id;
+                    """
+                )
