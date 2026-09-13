@@ -1,34 +1,40 @@
-const express = require('express');
-const pool = require('../config/database');
+const express       = require('express');
+const authMiddleware = require('../middleware/auth');
+const authorService  = require('../services/authorSearchService');
 
 const router = express.Router();
 
-// GET /api/authors?q=partial-name
-router.get('/', async (req, res) => {
-  const query = String(req.query.q || '').trim();
-  if (query.length < 2) return res.json([]);
+// GET /api/authors/search?name=<name>
+router.get('/search', authMiddleware, async (req, res) => {
+  const { name } = req.query;
+  if (!name || name.trim().length < 2) {
+    return res.status(400).json({ message: 'Query must be at least 2 characters' });
+  }
 
   try {
-    const result = await pool.query(
-      `SELECT author_id AS id, author_name AS name
-       FROM public.author
-       WHERE author_name ILIKE $1
-       ORDER BY
-         CASE WHEN author_name ILIKE $2 THEN 0 ELSE 1 END,
-         author_name ASC
-       LIMIT 8`,
-      [`%${query}%`, `${query}%`]
-    );
-    return res.json(result.rows);
-  } catch (error) {
-    console.error('Author suggestions query failed:', error);
-    const unavailable = ['ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET'].includes(error.code)
-      || /timeout|connection terminated/i.test(error.message);
-    return res.status(unavailable ? 503 : 500).json({
-      message: unavailable
-        ? 'Author suggestions are temporarily unavailable.'
-        : 'Unable to retrieve author suggestions.',
+    const authors = await authorService.searchByName(name.trim());
+    res.json({ authors });
+  } catch (err) {
+    res.status(500).json({ message: 'Search failed', error: err.message });
+  }
+});
+
+// GET /api/authors/:id?field=<field>&year=<year>
+router.get('/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { field, year } = req.query;
+
+  try {
+    const result = await authorService.getAuthorDetails(id, {
+      field: field || null,
+      year:  year  ? parseInt(year, 10) : null,
     });
+
+    if (!result) return res.status(404).json({ message: 'Author not found' });
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to load author', error: err.message });
   }
 });
 

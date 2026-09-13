@@ -72,7 +72,7 @@ TABLES = [
         author8Id                               TEXT,
         author9Id                               TEXT, 
         author10Id                               TEXT,
-        author_ordering_nome                    TEXT,
+        author_ordering_norm                    TEXT,
         field1_author_contribution_weight       DECIMAL(6,4),
         field2_author_contribution_weight       DECIMAL(6,4),
         field3_author_contribution_weight       DECIMAL(6,4),

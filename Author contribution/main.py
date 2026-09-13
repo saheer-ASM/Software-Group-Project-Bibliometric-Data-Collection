@@ -3,7 +3,7 @@ from author_contribution_calculator import AuthorContributionCalculator
 
 
 
-def get_publications():
+def get_publications(offset=0, limit=204):
 
     conn = get_connection()
     cur = conn.cursor()
@@ -22,9 +22,11 @@ def get_publications():
             author9id,
             author10id
         FROM public.author_contribution_weight
+        ORDER BY pub_id ASC
+        LIMIT %s OFFSET %s
     """
 
-    cur.execute(query)
+    cur.execute(query, (limit, offset))
 
     rows = cur.fetchall()
 
@@ -242,13 +244,16 @@ def update_author_weights(pub_id, result, author_ids):
 
 
 
-def process_publications():
+def process_publications(offset=0, limit=204):
 
 
     calculator = AuthorContributionCalculator()
 
 
-    publications = get_publications()
+    publications = get_publications(offset, limit)
+
+    print(f"Processing {len(publications)} publications")
+    print(f"Offset: {offset}, Limit: {limit}")
 
 
 
@@ -290,7 +295,6 @@ def process_publications():
             print("No authors found")
 
             continue
-
 
 
 
@@ -404,4 +408,11 @@ def process_publications():
 
 if __name__ == "__main__":
 
-    process_publications()
+    import sys
+
+    offset = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+    limit = int(sys.argv[2]) if len(sys.argv) > 2 else 204
+
+    process_publications(offset, limit)
+
+
