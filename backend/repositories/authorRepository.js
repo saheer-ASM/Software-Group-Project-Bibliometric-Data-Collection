@@ -7,8 +7,11 @@ async function findByName(name) {
             m.total_citations, m.total_self_citations, m.total_publications
      FROM   authors a
      LEFT JOIN author_metrics m ON m.author_id = a.author_id
-     WHERE  to_tsvector('english', a.name) @@ plainto_tsquery('english', $1)
-     ORDER  BY ts_rank(to_tsvector('english', a.name), plainto_tsquery('english', $1)) DESC
+     WHERE  a.name ILIKE '%' || $1 || '%'
+     ORDER  BY
+       CASE WHEN a.name ILIKE $1 || '%' THEN 0 ELSE 1 END,
+       POSITION(LOWER($1) IN LOWER(a.name)),
+       a.name
      LIMIT  20`,
     [name]
   );
