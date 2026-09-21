@@ -2,16 +2,13 @@ const pool = require('../config/database');
 
 async function findByName(name) {
   const { rows } = await pool.query(
-    `SELECT a.author_id, a.name, a.affiliation, a.email,
-            m.h_index, m.c_index, m.nm_index,
-            m.total_citations, m.total_self_citations, m.total_publications
-     FROM   authors a
-     LEFT JOIN author_metrics m ON m.author_id = a.author_id
-     WHERE  a.name ILIKE '%' || $1 || '%'
+    `SELECT a.author_id AS id, a.author_name AS name
+     FROM   public.author a
+     WHERE  POSITION(LOWER($1) IN LOWER(a.author_name)) > 0
      ORDER  BY
-       CASE WHEN a.name ILIKE $1 || '%' THEN 0 ELSE 1 END,
-       POSITION(LOWER($1) IN LOWER(a.name)),
-       a.name
+       CASE WHEN LOWER(a.author_name) = LOWER($1) THEN 0 ELSE 1 END,
+       POSITION(LOWER($1) IN LOWER(a.author_name)),
+       a.author_name, a.author_id
      LIMIT  20`,
     [name]
   );
