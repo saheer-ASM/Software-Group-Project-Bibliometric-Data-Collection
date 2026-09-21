@@ -4,6 +4,21 @@ const authorService  = require('../services/authorSearchService');
 
 const router = express.Router();
 
+// GET /api/authors?q=<name>
+router.get('/', async (req, res) => {
+  const { q } = req.query;
+  if (!q || q.trim().length < 2) {
+    return res.status(400).json({ message: 'Query must be at least 2 characters' });
+  }
+
+  try {
+    const authors = await authorService.searchByName(q.trim());
+    res.json(authors);
+  } catch (err) {
+    res.status(500).json({ message: 'Search failed', error: err.message });
+  }
+});
+
 // GET /api/authors/search?name=<name>
 router.get('/search', authMiddleware, async (req, res) => {
   const { name } = req.query;
