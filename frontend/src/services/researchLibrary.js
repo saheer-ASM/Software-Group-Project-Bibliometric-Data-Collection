@@ -1,4 +1,7 @@
+import { API_BASE_URL } from '../config/api';
+
 const keyFor = (userId) => `scholarMetricsLibrary:${userId || 'guest'}`;
+const syncWriteQueues = new Map();
 
 const emptyLibrary = () => ({ savedAuthors: [], savedPapers: [], recentAuthors: [], collections: [] });
 
@@ -13,7 +16,69 @@ export function getLibrary(userId) {
 export function saveLibrary(userId, library) {
   localStorage.setItem(keyFor(userId), JSON.stringify(library));
   window.dispatchEvent(new CustomEvent('research-library-changed', { detail: library }));
+  if (userId && localStorage.getItem('token')) {
+    queueRemoteLibrarySave(userId, library).catch(() => {});
+  }
   return library;
+}
+
+function queueRemoteLibrarySave(userId, library) {
+  const previous = syncWriteQueues.get(userId) || Promise.resolve();
+  const next = previous.catch(() => {}).then(() => fetch(`${API_BASE_URL}/api/library`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('token')}`,
+      },
+      body: JSON.stringify(library),
+    }).then((response) => {
+      if (!response.ok) throw new Error('Unable to save your library.');
+      return response.json();
+    }));
+  syncWriteQueues.set(userId, next);
+  return next.finally(() => {
+    if (syncWriteQueues.get(userId) === next) syncWriteQueues.delete(userId);
+  });
+}
+
+const mergeById = (remoteItems = [], localItems = []) => {
+  const items = new Map();
+  [...localItems, ...remoteItems].forEach((item) => item?.id && items.set(item.id, item));
+  return [...items.values()];
+};
+
+function mergeLibraries(remote, local) {
+  const collections = new Map();
+  [...(local.collections || []), ...(remote.collections || [])].forEach((collection) => {
+    if (!collection?.id) return;
+    const existing = collections.get(collection.id);
+    collections.set(collection.id, {
+      ...collection,
+      paperIds: [...new Set([...(existing?.paperIds || []), ...(collection.paperIds || [])])],
+    });
+  });
+  return {
+    savedAuthors: mergeById(remote.savedAuthors, local.savedAuthors),
+    savedPapers: mergeById(remote.savedPapers, local.savedPapers),
+    recentAuthors: mergeById(remote.recentAuthors, local.recentAuthors)
+      .sort((a, b) => String(b.viewedAt || '').localeCompare(String(a.viewedAt || ''))).slice(0, 10),
+    collections: [...collections.values()],
+  };
+}
+
+export async function syncLibraryFromServer(userId) {
+  const token = localStorage.getItem('token');
+  if (!userId || !token) return getLibrary(userId);
+  const response = await fetch(`${API_BASE_URL}/api/library`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('Unable to synchronize your library.');
+  const remote = await response.json();
+  const merged = mergeLibraries(remote, getLibrary(userId));
+  localStorage.setItem(keyFor(userId), JSON.stringify(merged));
+  window.dispatchEvent(new CustomEvent('research-library-changed', { detail: merged }));
+  await queueRemoteLibrarySave(userId, merged);
+  return merged;
 }
 
 export function updateLibrary(userId, updater) {

@@ -4,11 +4,6 @@ const pool = require('../config/database');
 const router = express.Router();
 const numeric = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
-function hIndex(values) {
-  return [...values].sort((a, b) => b - a)
-    .reduce((result, value, index) => (value >= index + 1 ? index + 1 : result), 0);
-}
-
 function trendData(publications, citationImpactByYear = []) {
   const years = new Map();
   publications.forEach((publication) => {
@@ -171,6 +166,44 @@ async function fetchAuthorData(authorName, authorId) {
       author.author_id
     );
 
+    const metricsResult = await client.query(
+      `WITH author_publications AS (
+         SELECT p.pub_id, COALESCE(p.total_citation, 0)::numeric AS total_citation
+         FROM public.publication p
+         JOIN public.author_contribution_weight acw ON acw.pub_id = p.pub_id
+         WHERE $1 = ANY(ARRAY[acw.author1id, acw.author2id, acw.author3id, acw.author4id,
+           acw.author5id, acw.author6id, acw.author7id, acw.author8id, acw.author9id, acw.author10id])
+       ),
+       ranked_publications AS (
+         SELECT total_citation,
+           ROW_NUMBER() OVER (ORDER BY total_citation DESC)::int AS citation_rank
+         FROM author_publications
+       )
+       SELECT
+         (SELECT COUNT(*)::int FROM author_publications) AS total_publications,
+         (SELECT COALESCE(SUM(total_citation), 0) FROM author_publications) AS total_citations,
+         (SELECT COALESCE(SUM(apac.total_adjusted_citation), 0)
+            FROM author_publications ap
+            LEFT JOIN public.author_paper_adjusted_citations apac
+              ON apac.cited_pub_id = ap.pub_id AND apac.target_author_id = $1
+         ) AS total_adjusted_citations,
+         (SELECT COALESCE(SUM(self_citation_count), 0)
+            FROM author_publications ap
+            LEFT JOIN LATERAL (
+              SELECT COUNT(DISTINCT citing_pub_id)::int AS self_citation_count
+              FROM public.influential_self_citations
+              WHERE cited_pub_id = ap.pub_id AND target_author_id = $1 AND isc_value > 0
+            ) isc ON TRUE
+         ) AS total_self_citations,
+         (SELECT COALESCE(MAX(citation_rank), 0)
+            FROM ranked_publications
+            WHERE total_citation >= citation_rank
+         ) AS h_index,
+         (SELECT nm_index FROM public.author_nm_index WHERE author_id = $1) AS nm_index`,
+      [author.author_id]
+    );
+    const metrics = metricsResult.rows[0];
+
     const scoreResult = await client.query(
       `SELECT first_publication_year, as_of_year, career_time_years, career_factor,
         included_publication_count, total_cites_score, calculation_complete, calculated_at
@@ -179,12 +212,12 @@ async function fetchAuthorData(authorName, authorId) {
     const score = scoreResult.rows[0];
     return {
       authorId: author.author_id, author: author.author_name,
-      totalPublications: publications.length,
-      totalCitations: publications.reduce((sum, item) => sum + item.totalCitations, 0),
-      totalSelfCitations: publications.reduce((sum, item) => sum + item.selfCitations, 0),
-      totalAdjustedCitations: publications.reduce((sum, item) => sum + item.adjustedCitations, 0),
-      nmIndex: publications.filter((item) => item.totalCitations >= 10).length,
-      hIndex: hIndex(publications.map((item) => item.totalCitations)),
+      totalPublications: Number(metrics.total_publications),
+      totalCitations: numeric(metrics.total_citations),
+      totalSelfCitations: numeric(metrics.total_self_citations),
+      totalAdjustedCitations: numeric(metrics.total_adjusted_citations),
+      nmIndex: numeric(metrics.nm_index),
+      hIndex: Number(metrics.h_index),
       cScore: score ? numeric(score.total_cites_score) : 0,
       careerCompensation: numeric(author.career_compensation),
       scoreDetails: score ? {

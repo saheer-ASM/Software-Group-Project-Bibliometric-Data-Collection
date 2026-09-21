@@ -6,11 +6,11 @@ const cors = require('cors');
 const admin = require('firebase-admin');
 const pool = require('./config/database');
 const authRoutes = require('./routes/auth');
-const authRoutes   = require('./routes/auth');
 const authorRoutes = require('./routes/authors');
 const searchRoutes = require('./routes/search');
 const statsRoutes = require('./routes/stats');
-const authorRoutes = require('./routes/authors');
+const compareRoutes = require('./routes/compare');
+const libraryRoutes = require('./routes/library');
 
 const app = express();
 
@@ -32,9 +32,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/authors', authorRoutes);
-app.use('/api/auth',    authRoutes);
-app.use('/api/authors', authorRoutes);
-app.use('/api/search',  searchRoutes);
+app.use('/api/compare', compareRoutes);
+app.use('/api/library', libraryRoutes);
 
 app.get('/api/health', async (_req, res) => {
   let database = 'connected';
