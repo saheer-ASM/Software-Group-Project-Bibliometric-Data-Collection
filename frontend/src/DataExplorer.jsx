@@ -4,6 +4,9 @@ import { API_BASE_URL } from './config/api';
 import { downloadAuthorPdf, getLibrary, recordRecentAuthor, savePaperToCollection, toggleSavedAuthor, toggleSavedPaper } from './services/researchLibrary';
 import './DataExplorer.css';
 import AppNavbar from './AppNavbar';
+import PublicationFilterHelp from './components/PublicationFilterHelp';
+import PublicationYearRange from './components/PublicationYearRange';
+import { publicationYears, filterPublications } from './services/publicationFilters';
 import ComparisonDashboard from './components/comparison/ComparisonDashboard';
 
 const MetricCard = ({ title, value, tooltip }) => {
@@ -75,9 +78,10 @@ const DataExplorer = ({
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState(authorName || '');
   const [selectedField, setSelectedField] = useState('');
-  const [selectedYear, setSelectedYear] = useState('');
-  const [selectedHIndex, setSelectedHIndex] = useState('');
-  const [selectedNmIndex, setSelectedNmIndex] = useState('');
+  const [selectedYear, setSelectedYear] = useState(null);
+  const [citationType, setCitationType] = useState('');
+  const [impactLevel, setImpactLevel] = useState('');
+  const [selectedContribution, setSelectedContribution] = useState('');
   const [paperQuery, setPaperQuery] = useState('');
   const [paperSuggestionsOpen, setPaperSuggestionsOpen] = useState(false);
   const [activePaperSuggestion, setActivePaperSuggestion] = useState(-1);
@@ -142,9 +146,10 @@ const DataExplorer = ({
     setLoading(true);
     setError('');
     setSelectedField('');
-    setSelectedYear('');
-    setSelectedHIndex('');
-    setSelectedNmIndex('');
+    setSelectedYear(null);
+    setCitationType('');
+    setImpactLevel('');
+    setSelectedContribution('');
     setPaperQuery('');
     setPaperSuggestionsOpen(false);
 
@@ -279,9 +284,10 @@ const DataExplorer = ({
     setError('');
     setSearchQuery('');
     setSelectedField('');
-    setSelectedYear('');
-    setSelectedHIndex('');
-    setSelectedNmIndex('');
+    setSelectedYear(null);
+    setCitationType('');
+    setImpactLevel('');
+    setSelectedContribution('');
     setPaperQuery('');
     setPaperSuggestionsOpen(false);
     setAuthorHistory([]);
@@ -340,9 +346,7 @@ const DataExplorer = ({
   const availableFields = useMemo(() => [...new Set(
     (data?.publications || []).flatMap((publication) => publication.fields || [])
   )].sort((a, b) => a.localeCompare(b)), [data]);
-  const availableYears = useMemo(() => [...new Set(
-    (data?.publications || []).map((publication) => publication.publishedYear).filter(Boolean)
-  )].sort((a, b) => b - a), [data]);
+  const availableYears = useMemo(() => publicationYears(data?.publications || []), [data]);
   const paperSuggestions = useMemo(() => {
     const query = paperQuery.trim().toLocaleLowerCase();
     if (query.length < 2) return [];
@@ -350,22 +354,11 @@ const DataExplorer = ({
       .filter((publication) => publication.title?.toLocaleLowerCase().includes(query))
       .slice(0, 8);
   }, [data, paperQuery]);
-  const filteredPublications = useMemo(() => (data?.publications || []).filter((publication) => {
-    const paperMatches = !paperQuery.trim()
-      || publication.title?.toLocaleLowerCase().includes(paperQuery.trim().toLocaleLowerCase());
-    const fieldMatches = !selectedField || publication.fields?.includes(selectedField);
-    const yearMatches = !selectedYear || String(publication.publishedYear) === selectedYear;
-    const citationMatches = !selectedHIndex
-      || (selectedHIndex === 'uncited' && publication.totalCitations === 0)
-      || (selectedHIndex === 'cited' && publication.totalCitations > 0)
-      || (selectedHIndex === 'high' && publication.totalCitations >= 10);
-    const contributionAvailable = publication.authors?.some((author) => Number(author.weight) > 0);
-    const contributionMatches = !selectedNmIndex
-      || (selectedNmIndex === 'calculated' && contributionAvailable)
-      || (selectedNmIndex === 'pending' && !contributionAvailable)
-      || (selectedNmIndex === 'major' && Number(publication.authorContributionWeight) >= 25);
-    return paperMatches && fieldMatches && yearMatches && citationMatches && contributionMatches;
-  }), [data, paperQuery, selectedField, selectedYear, selectedHIndex, selectedNmIndex]);
+  const filteredPublications = useMemo(() => filterPublications(data?.publications || [], {
+    query: paperQuery, field: selectedField, years: selectedYear,
+    contribution: selectedContribution,
+    citationType, impact: impactLevel,
+  }, data?.authorId), [data, paperQuery, selectedField, selectedYear, selectedContribution, citationType, impactLevel]);
 
   const selectPaperSuggestion = (publication) => {
     setPaperQuery(publication.title);
@@ -414,12 +407,13 @@ const DataExplorer = ({
     setPaperSuggestionsOpen(false);
     setActivePaperSuggestion(-1);
     setSelectedField('');
-    setSelectedYear('');
-    setSelectedHIndex('');
-    setSelectedNmIndex('');
+    setSelectedYear(null);
+    setCitationType('');
+    setImpactLevel('');
+    setSelectedContribution('');
   };
 
-  const activeFilterCount = [paperQuery.trim(), selectedField, selectedYear, selectedHIndex, selectedNmIndex]
+  const activeFilterCount = [paperQuery.trim(), selectedField, selectedYear, selectedContribution, citationType, impactLevel]
     .filter(Boolean).length;
 
   return (
@@ -667,22 +661,7 @@ const DataExplorer = ({
             <span className="de-portfolio-count">{data?.publications?.length || 0} publications</span>
           </div>
 
-        {/* Filter Section */}
-        <section className="de-filter-section">
-          <div className="de-filter-header">
-            <div className="de-filter-heading">
-              <i className='bx bx-filter-alt'></i>
-              <div>
-                <span>Filter publications</span>
-                <small>Narrow results using publication-level information</small>
-              </div>
-            </div>
-            <div className="de-filter-actions">
-              {activeFilterCount > 0 && <span>{activeFilterCount} active</span>}
-              <button type="button" className="de-clear-filters" onClick={clearFilters}>Clear filters</button>
-            </div>
-          </div>
-          <div className="de-filter-controls">
+        <div className="de-publication-search">
             <div className="de-filter-group de-paper-search-group">
               <label htmlFor="publication-search">Publication title</label>
               <div className="de-paper-search-box">
@@ -734,39 +713,61 @@ const DataExplorer = ({
                 )}
               </div>
             </div>
+        </div>
+
+        {/* Filter Section */}
+        <section className="de-filter-section">
+          <div className="de-filter-header">
+            <div className="de-filter-heading">
+              <i className='bx bx-filter-alt'></i>
+              <div>
+                <span>Filter publications</span>
+                <small>Narrow results using publication-level information</small>
+              </div>
+            </div>
+            <div className="de-filter-actions">
+              {activeFilterCount > 0 && <span>{activeFilterCount} active</span>}
+              <button type="button" className="de-clear-filters" onClick={clearFilters}>Clear filters</button>
+            </div>
+          </div>
+          <div className="de-filter-controls">
             <div className="de-filter-group">
-              <label>Field</label>
-              <select value={selectedField} onChange={(e) => setSelectedField(e.target.value)}>
+              <label htmlFor="publication-field">FIELD</label>
+              <select id="publication-field" value={selectedField} onChange={(e) => setSelectedField(e.target.value)}>
                 <option value="">All fields</option>
                 {availableFields.map((field) => <option key={field} value={field}>{field}</option>)}
               </select>
             </div>
+            <PublicationYearRange years={availableYears} value={selectedYear} onChange={setSelectedYear} />
             <div className="de-filter-group">
-              <label>Year</label>
-              <select value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)}>
-                <option value="">All years</option>
-                {availableYears.map((year) => <option key={year} value={String(year)}>{year}</option>)}
+              <label htmlFor="publication-impact">PUBLICATION IMPACT</label>
+              <select id="publication-impact" value={impactLevel} onChange={e => setImpactLevel(e.target.value)}>
+                <option value="">All impact levels</option>
+                <option value="high">High Impact Papers</option>
+                <option value="medium">Medium Impact Papers</option>
+                <option value="low">Low Impact Papers</option>
+                <option value="uncited">Uncited Papers</option>
               </select>
             </div>
             <div className="de-filter-group">
-              <label>Citation status</label>
-              <select value={selectedHIndex} onChange={(e) => setSelectedHIndex(e.target.value)}>
-                <option value="">All citation levels</option>
-                <option value="cited">Cited publications</option>
-                <option value="uncited">Not yet cited</option>
-                <option value="high">10+ citations</option>
-              </select>
-            </div>
-            <div className="de-filter-group">
-              <label>Contribution</label>
-              <select value={selectedNmIndex} onChange={(e) => setSelectedNmIndex(e.target.value)}>
+              <label htmlFor="author-contribution">AUTHOR CONTRIBUTION</label>
+              <select id="author-contribution" value={selectedContribution} onChange={(e) => setSelectedContribution(e.target.value)}>
                 <option value="">All contribution states</option>
-                <option value="calculated">Calculated</option>
-                <option value="pending">Not calculated</option>
-                <option value="major">Author contribution 25%+</option>
+                <option value="primary">Primary Author</option>
+                <option value="major">Major Contributor</option>
+                <option value="minor">Minor Contributor</option>
+                <option value="coauthor">Co-author</option>
+              </select>
+            </div>
+            <div className="de-filter-group">
+              <label htmlFor="citation-type">CITATION TYPE</label>
+              <select id="citation-type" value={citationType} onChange={e => setCitationType(e.target.value)}>
+                <option value="">All citations</option><option value="external">External Citations</option>
+                <option value="self">Self Citations</option><option value="adjusted">Adjusted Citations</option>
               </select>
             </div>
           </div>
+          <PublicationFilterHelp />
           <div className="de-filter-summary" aria-live="polite">
             <i className='bx bx-list-ul'></i>
             <span>Showing <strong>{filteredPublications.length}</strong> of <strong>{data?.publications?.length || 0}</strong> publications</span>
@@ -845,7 +846,7 @@ const DataExplorer = ({
                   </div>
                   <div className="de-pub-stat">
                     <i className='bx bx-quote-left'></i>
-                    <span className="de-pub-stat-label">Citations</span>
+                    <span className="de-pub-stat-label">Normal citations</span>
                     <span className="de-pub-stat-value">{pub.totalCitations}</span>
                   </div>
                   <div className="de-pub-stat">
