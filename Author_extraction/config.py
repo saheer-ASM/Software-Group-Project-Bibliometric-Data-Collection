@@ -17,7 +17,7 @@ except ImportError:
     pass
 
 # ---------------------------------------------------------------- cohort sizes
-TARGET_GENERAL_AUTHORS = 1000       # full scale: 95_000
+TARGET_GENERAL_AUTHORS = 250        # full scale: 95_000
 TARGET_LAUREATE_AUTHORS = 50        # full scale: 5_000  ("special case")
 
 # The two cohorts are collected separately, mirroring the sheet, which lists the
