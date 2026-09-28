@@ -17,7 +17,7 @@ except ImportError:
     pass
 
 # ---------------------------------------------------------------- cohort sizes
-TARGET_GENERAL_AUTHORS = 250        # full scale: 95_000
+TARGET_GENERAL_AUTHORS = 1000       # full scale: 95_000
 TARGET_LAUREATE_AUTHORS = 50        # full scale: 5_000  ("special case")
 
 # The two cohorts are collected separately, mirroring the sheet, which lists the
@@ -46,7 +46,7 @@ MAX_RETRIES = 4
 REQUEST_TIMEOUT = 60
 
 # --------------------------------------------------------------- field sampling
-FIELDS = ASJC_FIELDS                # 333 ASJC subject areas
+FIELDS = ASJC_FIELDS                # 296 ASJC subject areas
 RANDOM_SEED = 20260910              # makes the whole run reproducible
 
 MIN_WORKS_COUNT = 5                 # skip near-empty author records

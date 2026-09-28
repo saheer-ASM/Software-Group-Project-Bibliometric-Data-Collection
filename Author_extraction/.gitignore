@@ -31,6 +31,10 @@ desktop.ini
 # Regenerate with:  python run_extraction.py --general --laureates
 output/
 
+# Local safety copy of a cleared cache -- not shared, so it does not look like
+# live data to a teammate who pulls.
+cache_archive_*/
+
 # ---------------------------------------------------------------- scratch
 _smoke.py
 *_log.txt

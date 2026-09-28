@@ -20,7 +20,7 @@ the sheet needs at once:
 
 - **field classification** — a `domain → field → subfield → topic` hierarchy
   whose 252 subfields are themselves derived from Scopus ASJC, so the project's
-  existing 333-field list maps onto it directly;
+  existing ASJC field list maps onto it directly;
 - **career age** — earliest publication year per author, giving the `t` in
   `CF_com = C * (t + 1) ** -λ` (C = 1.25, λ = 0.0601) on the sheet;
 - **impact** — `works_count`, `cited_by_count`, `h_index`, `i10_index`;
@@ -103,29 +103,90 @@ append-only JSON Lines, so the fix is always "keep both sides": delete the
 conflict markers, keep every line. Duplicate authors are harmless -- the loader
 de-duplicates by `openalex_id`.
 
-## Install & run
+## How to run
+
+### One-time setup
 
 ```bash
 pip install -r requirements.txt
+```
+
+Get a **free** OpenAlex API key (no payment method needed): create an account at
+<https://openalex.org>, copy the key from <https://openalex.org/settings/api>.
+Then either copy `.env.example` to `.env` and paste it in, or set it in the
+shell:
+
+```bash
+setx OPENALEX_API_KEY "paste-your-key-here"
+```
+
+`setx` only affects **new** terminals -- close PowerShell and open a fresh one
+after running it. Without a key your daily allowance is $0.10 (~1,000 requests);
+with one it is $1.00 (~10,000 requests), which is ten times as many authors
+per day.
+
+### Collect the prize winners (50) -- do this first, it is cheap
+
+```bash
+python run_extraction.py --laureates
+```
+
+About 200 requests and it finishes in one go.
+
+### Collect the field-distributed authors (1,000)
+
+```bash
+python run_extraction.py --general
+```
+
+Run it, let it stop when the daily budget runs out, then **run the exact same
+command again** the next day -- it resumes from the checkpoint and reports how
+many hours until the budget resets. Repeat until it reports the full target.
+
+### Both at once
+
+```bash
 python run_extraction.py --all
 ```
 
+Safe to use once the laureates are done -- anything already collected is skipped.
+
+### Rebuild the spreadsheets without collecting anything
+
+Costs **zero** API requests; everything is regenerated from `cache/`:
+
 ```bash
-python run_extraction.py --all --general-target 60 --laureate-target 12 --fresh
+python run_extraction.py --all
 ```
 
-The second form is a fast smoke run. Other flags: `--general`, `--laureates`,
-`--fresh` (ignore checkpoints).
+### A quick smoke test before committing a day's budget
 
-Set `OPENALEX_MAILTO` in the environment to your own address — it is what puts
-requests in OpenAlex's fast "polite pool".
+```bash
+python run_extraction.py --all --general-target 30 --laureate-target 13 --fresh
+```
 
-To re-report an existing run under a different self-citation cut — no API calls,
-it reclassifies straight from the checkpoint:
+### Re-report under a different self-citation threshold
+
+Also zero API requests -- it reclassifies straight from the checkpoint:
 
 ```bash
 python run_extraction.py --all --self-citation-threshold 0.03
 ```
+
+### All flags
+
+| Flag | Effect |
+|---|---|
+| `--general` | collect the field-distributed cohort only |
+| `--laureates` | collect the prize-winner cohort only |
+| `--all` | both (default if no cohort flag is given is `--general`) |
+| `--general-target N` | override the 1,000 target for this run |
+| `--laureate-target N` | override the 50 target for this run |
+| `--fresh` | ignore checkpoints and start over |
+| `--self-citation-threshold X` | reclassify "high self-citer" at cut X |
+
+Optionally set `OPENALEX_MAILTO` to your own address -- it puts requests in
+OpenAlex's faster "polite pool".
 
 ## What it produces
 
@@ -142,11 +203,11 @@ plus the same two cohorts as CSV.
 
 Three strata are satisfied at once (`quotas.py`):
 
-1. **Field** — hard constraint. 1000 ÷ 333 = 3 per field, with the 1-author
-   remainder given to a seeded-random field so it is not always the same one.
+1. **Field** — hard constraint. 1000 ÷ 296 = 3 per field, with the 112-author
+   remainder given to seeded-random fields so it is not always the same ones.
 2. **Career age** — one cursor walks `young → moderately_matured → matured`
-   across all fields, so the global mix comes out 334/333/333 even though each
-   field only holds three authors. Buckets (`config.CAREER_BUCKETS`):
+   across all fields, so the global mix comes out near-exactly one third each
+   even though most fields only hold three authors. Buckets (`config.CAREER_BUCKETS`):
    `t ≤ 7`, `8–20`, `> 20` years since first publication, where
 
    ```
@@ -244,7 +305,7 @@ corner of a broad category does not stand in for the whole thing.
 | File | Role |
 |---|---|
 | `config.py` | every tunable: targets, buckets, thresholds, prize Q-ids |
-| `asjc_fields.py` | the 333 ASJC subject areas (generated from `data-collection-for-tunning/main.py`) |
+| `asjc_fields.py` | the 296 ASJC subject areas the sample is stratified over |
 | `openalex.py` | polite OpenAlex client with retry/backoff and cursor paging |
 | `wikidata.py` | SPARQL laureate queries + prize-label → Q-id helper |
 | `topic_index.py` | bulk download of OpenAlex's fields/subfields/topics, resumable |
@@ -342,9 +403,21 @@ Pick the cut with the supervisor, then re-report with
 
 ## Notes / open points
 
-- The sheet says "334 fields"; the project's existing list has **333** entries.
-  Same list is reused here so both collectors stratify identically — worth
-  confirming which one the 334th is.
+- The field list is **296** ASJC names (`asjc_fields.py`). The sheet says 334
+  and an older copy of the project list had 333 — worth confirming which
+  vocabulary is authoritative before the final run.
+- **25 of the 296 do not exist in OpenAlex** and will collect nothing, so a
+  1,000 target actually finishes at about **917**. They are mostly nursing and
+  allied-health *education* categories, which OpenAlex does not model as
+  research topics: Multidisciplinary, Colloid and Surface Chemistry, Computers
+  in Earth Sciences, Economic Geology, Geotechnical Engineering and Engineering
+  Geology, Analysis, Control and Optimization, Logic, Embryology, Health Policy,
+  Histology, Assessment and Diagnosis, Community and Home Care, Critical Care
+  Nursing, Emergency Nursing, Maternity and Midwifery, Medical and Surgical
+  Nursing, Pediatrics, Surfaces and Interfaces, Food Animals, Dental Assisting,
+  Dental Hygiene, Chiropractics, Optometry, Podiatry.
+  Remove them from `asjc_fields.py` and the same 1,000 target spreads over the
+  271 that work, giving a genuine 1,000.
 - `data-collection-for-tunning/main.py` has a **Cyrillic І (U+0406)** at the
   start of "Issues, Ethics and Legal Aspects". It is corrected in
   `asjc_fields.py` (with an assertion to catch any recurrence), but the original
