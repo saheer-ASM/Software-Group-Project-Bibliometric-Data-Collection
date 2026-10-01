@@ -25,12 +25,12 @@ transform -> normalize -> percentile -> weighted-average steps.
 # Each entry: logical metric name -> (table, id column, value column)
 #
 # NOTE (verified against the live DB on 2026-08-31):
-#   * total_cites has ~1561/2321 non-null rows; the rest are still
+#   * total_cites has ~1561/2507 non-null rows; the rest are still
 #     NULL upstream and are treated as "metric not available".
-#   * modified_g_index_results is currently EMPTY (0 rows). Until the
-#     modified g-index pipeline is run, G'_a is unavailable for every
-#     author and the Nm-index falls back to a 5-metric weighted
-#     average (see NM_REQUIRE_ALL_METRICS below).
+#   * G'_a (modified g-index) is stored as author.modified_g_index
+#     (~2143/2507 non-null), NOT in modified_g_index_results -- that
+#     table exists but is empty. Mapped to the author table below,
+#     exactly like modified_hm_index.
 #   * The `calculation_complete` / `calculation_status` flags on these
 #     tables are unreliable (mostly False/!READY even for rows that
 #     hold a valid score), so we filter on "value IS NOT NULL" only.
@@ -73,11 +73,13 @@ METRIC_SOURCES = {
         "status_ok": (),
     },
     "modified_g_index": {
-        "table": "modified_g_index_results",
+        # Stored on the author table (like modified_hm_index), NOT in
+        # the empty modified_g_index_results table.
+        "table": "author",
         "author_id": "author_id",
         "value": "modified_g_index",
-        "status": "calculation_complete",
-        "status_ok": (True,),
+        "status": None,
+        "status_ok": (),
     },
 }
 

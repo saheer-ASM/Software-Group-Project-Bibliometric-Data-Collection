@@ -67,7 +67,10 @@ Run from the **repo root** so `final_nm_index` is importable as a package.
 | x3 | `U_a`   | outlier-controlled WFYN citation rate (Eq. 14)     | `author_citation_rate` | `citation_rate_score` |
 | x4 | `Hf'_a` | modified hf-index (Eq. 17)                         | `author_modified_hindex` | `modified_hindex_final` |
 | x5 | `Hm'_a` | modified hm-index (Eq. 20)                         | `author` | `modified_hm_index` |
-| x6 | `G'_a`  | modified g-index (Eq. 23)                          | `modified_g_index_results` | `modified_g_index` |
+| x6 | `G'_a`  | modified g-index (Eq. 23)                          | `author` | `modified_g_index` |
+
+> `G'_a` lives on the `author` table (like `Hm'_a`), **not** in
+> `modified_g_index_results` — that table exists but is empty.
 
 All six are keyed on `author_id`, one row per author. The full author
 universe is taken from the `author` table.
@@ -76,22 +79,21 @@ These mappings live in `config.METRIC_SOURCES` — change them there if a
 table/column is renamed, or to point `total_cites` at the equivalent
 `equation_11_total_cites` table instead.
 
-### ⚠️ Current DB state (checked 2026-08-31)
+### ⚠️ Current DB state (checked 2026-09-04)
 
 | Metric | Authors with a value | Note |
 |---|---|---|
-| `total_cites` | 1561 / 2507 | ~760 rows still `NULL` upstream |
+| `total_cites` | 1561 / 2507 | ~950 rows still `NULL` upstream |
 | `citations_per_paper` | 2321 / 2507 | |
 | `citation_rate` | 2321 / 2507 | |
 | `modified_hf_index` | 2143 / 2507 | 197 authors `NO_ELIGIBLE_FIELDS` |
 | `modified_hm_index` | 2254 / 2507 | |
-| **`modified_g_index`** | **0 / 2507** | **table is empty — the modified g-index pipeline has not been run** |
+| `modified_g_index` | 2143 / 2507 | on `author.modified_g_index` |
 
-Because `modified_g_index_results` is empty, **every author currently
-scores on ≤ 5 of the 6 metrics.** The Nm-index is still produced (see
-"Missing-metric policy" below); once the g-index pipeline populates its
-table, re-running this module picks it up automatically with no code
-change.
+All six components are now populated. Authors are scored on however
+many of the six they have (see "Missing-metric policy" below);
+`total_cites` is the sparsest, so many authors score on 5 rather than
+6.
 
 The per-table `calculation_complete` / `calculation_status` flags were
 found to be unreliable (mostly `False` / not `READY` even for rows
@@ -205,8 +207,7 @@ mostly a symptom of the upstream component metrics being ~96% zero.
 * `False` (default): an author missing *k* of the 6 metrics is scored on
   the remaining `6 − k`, with `NM_WEIGHTS` renormalised to sum to 1
   over the available subset. `metrics_available` records how many were
-  used. This is what keeps the pipeline producing output while the
-  g-index table is empty.
+  used (e.g. authors with no `total_cites` row score on 5).
 * `True`: authors without all 6 metrics get `nm_index = NULL`.
 
 ---
@@ -242,9 +243,10 @@ Nothing for **inputs** — every source table already exists. You only need:
 2. *(optional)* **`author.nm_index` column** — also in `schema.sql`
    (`ALTER TABLE author ADD COLUMN IF NOT EXISTS nm_index NUMERIC`),
    only needed if you enable `NM_UPDATE_AUTHOR_TABLE`.
-3. **Populate `modified_g_index_results`** by running the modified
-   g-index pipeline — otherwise `G'_a` stays unavailable and every
-   `nm_index` is a 5-metric average.
+
+All six input metrics are already populated. `total_cites` is the only
+partially-filled one (~1561/2507); the rest of those authors just score
+on the 5 metrics they have.
 
 ---
 
@@ -268,3 +270,44 @@ pip install -r "final_nm_index/requirements.txt"
 psql "<your DB>" -f "final_nm_index/schema.sql"
 python -m pytest "final_nm_index/test_calculator.py" -v
 python -m final_nm_index.run_calculation
+
+
+
+
+
+
+
+
+
+if the one metrices is missing or null what it will do, will it take as zero or what
+=====================================================================================
+
+
+Not zero. Missing/NULL is dropped from that author's average, not counted as a 0.
+
+What actually happens
+
+Present but 0.0 and missing/NULL are treated completely differently:
+
+Case	Treatment
+value is 0.0	a real data point — gets a real (low) percentile, ranked against everyone, full weight
+value is NULL / missing	excluded from that metric's ranking population and excluded from the author's weighted average
+The Eq. 27 step, concretely (calculator.py:118-145)
+
+For each author:
+
+Percentiles for metrics they have are computed normally (per_...).
+Missing metric → per_... = NaN.
+Weights are masked: weights_broadcast = where(available, weight, 0.0)
+nm_index = Σ(per · weight) / Σ(available weights) — the denominator is the sum of only the available weights, so it renormalises to 1 across the subset.
+
+So with the default equal 1/6 weights and an author missing total_cites:
+
+nm_index = (per_S + per_U + per_Hf + per_Hm + per_G) / 5      ← plain mean of the 5
+
+not (0 + per_S + per_U + per_Hf + per_Hm + per_G) / 6 (which is what "treat as zero" would give, and would unfairly tank them).
+
+Edge cases
+All 6 missing → nm_index = NULL, metrics_available = 0. (186 authors — no metric rows at all.)
+The metrics_available column (0–6) records exactly how many fed each score, so it's auditable — e.g. your 606 authors with metrics_available = 5 are all missing only total_cites.
+If you set config.NM_REQUIRE_ALL_METRICS = True, any author without all 6 gets nm_index = NULL instead of a partial score.
