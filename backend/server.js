@@ -14,10 +14,22 @@ const libraryRoutes = require('./routes/library');
 
 const app = express();
 
+// Extra origins allowed in deployed environments, comma-separated, e.g.
+// CORS_ALLOWED_ORIGINS=https://scholarmetrics.example.com
+// Unset (the default) leaves the original localhost-only behaviour untouched.
+const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || /^http:\/\/localhost:\d+$/.test(origin)) {
+      if (
+        !origin ||
+        /^http:\/\/localhost:\d+$/.test(origin) ||
+        allowedOrigins.includes(origin)
+      ) {
         return callback(null, true);
       }
 
@@ -57,4 +69,9 @@ app.get('/api/health', async (_req, res) => {
 });
 
 const PORT = process.env.PORT || 5005;
-app.listen(PORT, 'localhost', () => console.log(`Server running on http://localhost:${PORT}`));
+// Defaults to localhost so local development is unchanged. In a container this
+// MUST be 0.0.0.0 (set in production/compose.yaml): binding to 'localhost'
+// inside a container binds the container's own loopback, so nginx on the Docker
+// network would never be able to reach it.
+const HOST = process.env.HOST || 'localhost';
+app.listen(PORT, HOST, () => console.log(`Server running on http://${HOST}:${PORT}`));
