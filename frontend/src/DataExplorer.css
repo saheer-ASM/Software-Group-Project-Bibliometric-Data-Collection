@@ -1549,7 +1549,7 @@
   max-width: 1280px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
+  grid-template-columns: 2fr 1fr 1fr;
   gap: 3rem;
   box-sizing: border-box;
 }
@@ -1634,6 +1634,10 @@
 
   .de-footer-content {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .de-footer-content > :first-child {
+    grid-column: 1 / -1;
   }
 }
 

@@ -4,7 +4,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon --watch server.js --watch routes --watch middleware --watch config --watch services server.js"
+    "dev": "nodemon --watch server.js --watch routes --watch middleware --watch config --watch services server.js",
+    "set-admin": "node scripts/set-admin.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

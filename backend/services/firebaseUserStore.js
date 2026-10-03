@@ -26,6 +26,7 @@ function userFromDoc(doc) {
     designation: data.designation,
     password: data.password,
     firebaseUid: data.firebaseUid,
+    emailVerified: data.emailVerified === true,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
   };
@@ -168,6 +169,54 @@ async function createUser({ username, email, designation, password }) {
   return { id: docRef.id, ...user };
 }
 
+// Profile for an account whose password is managed by Firebase Authentication.
+// No password (or password hash) is stored here — Firebase owns the credential.
+async function createFirebaseUser({ username, email, designation, firebaseUid, emailVerified = false }) {
+  const now = new Date().toISOString();
+  const user = {
+    username: normalizeUsername(username),
+    usernameLower: normalizeUsername(username).toLowerCase(),
+    email: normalizeEmail(email),
+    designation: (designation || '').trim(),
+    password: null,
+    firebaseUid,
+    emailVerified,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  if (!usersCollection) {
+    const existing = [...memoryUsers.values()].find((u) => u.firebaseUid === firebaseUid);
+    if (existing) return cloneUser(existing);
+    const id = nextMemoryId();
+    memoryUsers.set(id, { id, ...user });
+    return cloneUser(memoryUsers.get(id));
+  }
+
+  // The document ID is the Firebase uid, and create() fails if it already
+  // exists, so two simultaneous first logins can never produce two profiles
+  // for the same Firebase account.
+  const docRef = usersCollection.doc(firebaseUid);
+  try {
+    await docRef.create(user);
+  } catch (err) {
+    if (err.code !== 6) throw err; // 6 = ALREADY_EXISTS
+    return findById(firebaseUid);
+  }
+  return { id: docRef.id, ...user };
+}
+
+async function findByFirebaseUid(firebaseUid) {
+  if (!firebaseUid) return null;
+  if (!usersCollection) {
+    return cloneUser([...memoryUsers.values()].find((u) => u.firebaseUid === firebaseUid) || null);
+  }
+
+  const snapshot = await usersCollection.where('firebaseUid', '==', firebaseUid).limit(1).get();
+  if (snapshot.empty) return null;
+  return userFromDoc(snapshot.docs[0]);
+}
+
 async function updateUser(id, updates) {
   const cleanUpdates = {
     ...updates,
@@ -205,6 +254,19 @@ async function updateUser(id, updates) {
 }
 
 async function updatePassword(id, newPassword, { syncFirebase = true } = {}) {
+  const user = await findById(id);
+  if (!user) return;
+
+  // Firebase-managed account: the password lives only in Firebase Authentication.
+  // Clear any hash left over from older versions instead of storing a new one.
+  if (user.firebaseUid) {
+    if (syncFirebase) {
+      await admin.auth().updateUser(user.firebaseUid, { password: newPassword });
+    }
+    await updateUser(id, { password: null });
+    return;
+  }
+
   const hashedPassword = await bcrypt.hash(newPassword, 12);
 
   if (!usersCollection) {
@@ -224,19 +286,10 @@ async function updatePassword(id, newPassword, { syncFirebase = true } = {}) {
     updatedAt: new Date().toISOString(),
   });
 
-  if (syncFirebase) {
-    const user = await findById(id);
-    if (user.firebaseUid) {
-      try {
-        await admin.auth().updateUser(user.firebaseUid, { password: newPassword });
-      } catch (err) {
-        console.warn('Could not sync password to Firebase Auth:', err.message);
-      }
-    }
-  }
 }
 
 async function comparePassword(user, candidatePassword) {
+  if (!user.password) return false;
   return bcrypt.compare(candidatePassword, user.password);
 }
 
@@ -271,7 +324,9 @@ async function findOrCreateSocialUser({ email, displayName, photoURL, firebaseUi
 
 module.exports = {
   comparePassword,
+  createFirebaseUser,
   createUser,
+  findByFirebaseUid,
   findById,
   findByEmail,
   findByUsername,

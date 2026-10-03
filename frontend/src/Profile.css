@@ -371,6 +371,88 @@
   box-shadow: 0 0 0 3px rgba(26, 95, 122, 0.15);
 }
 
+/* Read-only registered email (cannot be changed) */
+.form-group input.readonly-input,
+.form-group input.readonly-input:focus {
+  background: var(--background);
+  border-style: dashed;
+  color: var(--text-secondary);
+  box-shadow: none;
+  cursor: not-allowed;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.readonly-note {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+/* Password inputs with show/hide eye button */
+.password-input-wrap {
+  position: relative;
+  display: flex;
+}
+
+.password-input-wrap input {
+  flex: 1;
+  min-width: 0;
+  padding-right: 3rem;
+}
+
+.password-eye {
+  position: absolute;
+  top: 50%;
+  right: 0.6rem;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.password-eye:hover,
+.password-eye:focus-visible {
+  color: var(--secondary-color);
+}
+
+/* Live new-password requirement checklist */
+.profile-password-rules {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.3rem 0.75rem;
+  margin: 0.25rem 0 0;
+  padding: 0;
+}
+
+.profile-password-rules li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  transition: color var(--transition-fast);
+}
+
+.profile-password-rules li i {
+  font-size: 1rem;
+}
+
+.profile-password-rules li.met {
+  color: #16a34a;
+  font-weight: 500;
+}
+
 /* Buttons and Action Groups styling */
 .form-actions {
   display: flex;

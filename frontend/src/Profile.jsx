@@ -1,20 +1,58 @@
 import React, { useState } from 'react';
 import { API_BASE_URL } from './config/api';
+import { auth, changeAccountPassword } from './firebase';
+import { checkPassword } from './authValidation';
+import { authErrorMessage } from './authErrors';
 import './Profile.css';
 import AppNavbar from './AppNavbar';
+import { FooterQuickLinks, FooterContactLinks, FooterCopyright } from './FooterParts';
+
+const PasswordField = ({ id, label, icon, value, onChange, show, onToggle, placeholder, autoComplete, describedBy, children }) => (
+  <div className="form-group">
+    <label htmlFor={id}><i className={`bx ${icon}`}></i> {label}</label>
+    <div className="password-input-wrap">
+      <input
+        id={id}
+        type={show ? 'text' : 'password'}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete={autoComplete}
+        aria-describedby={describedBy}
+      />
+      <button
+        type="button"
+        className="password-eye"
+        onClick={onToggle}
+        aria-label={show ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+      >
+        <i className={`bx ${show ? 'bx-hide' : 'bx-show'}`} aria-hidden="true"></i>
+      </button>
+    </div>
+    {children}
+  </div>
+);
+
+const CURRENT_PASSWORD_WRONG = ['auth/wrong-password', 'auth/invalid-credential', 'auth/invalid-login-credentials'];
 
 const Profile = ({ user = {}, onUserUpdate, onBack, onNavigateToAbout, onNavigateToSettings, onNavigateToLibrary, onLogout, hasSearchedAuthor, onNavigateToExplorer }) => {
   const [fullName, setFullName] = useState(user.username || '');
-  const [email, setEmail] = useState(user.email || '');
+  // The registered email is the account's identity and cannot be changed:
+  // show the Firebase Authentication email (falling back to the profile copy).
+  const email = auth?.currentUser?.email || user.email || '';
   const [designation, setDesignation] = useState(user.designation || '');
   const [isEditing, setIsEditing] = useState(false);
   const [profileMsg, setProfileMsg] = useState('');
 
   // Password change
-  const [emailAddress, setEmailAddress] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordMsg, setPasswordMsg] = useState('');
+  const [showPassword, setShowPassword] = useState({ current: false, next: false, confirm: false });
+  const [passwordMsg, setPasswordMsg] = useState({ type: '', text: '' });
+  const [changingPassword, setChangingPassword] = useState(false);
+  const { rules: newPasswordRules, strong: newPasswordStrong } = checkPassword(newPassword);
+  const toggleShow = (field) => setShowPassword((prev) => ({ ...prev, [field]: !prev[field] }));
 
   const token = localStorage.getItem('token');
 
@@ -28,14 +66,14 @@ const Profile = ({ user = {}, onUserUpdate, onBack, onNavigateToAbout, onNavigat
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ username: fullName, email, designation }),
+        body: JSON.stringify({ username: fullName, designation }),
       });
       const data = await res.json();
       if (!res.ok) {
         setProfileMsg(data.message || 'Failed to update profile');
         return;
       }
-      onUserUpdate({ username: data.username, email: data.email, designation: data.designation });
+      onUserUpdate({ username: data.username, designation: data.designation });
       setProfileMsg('Profile updated successfully!');
       setIsEditing(false);
     } catch {
@@ -45,31 +83,32 @@ const Profile = ({ user = {}, onUserUpdate, onBack, onNavigateToAbout, onNavigat
 
   const handlePasswordChange = async (e) => {
     e.preventDefault();
-    setPasswordMsg('');
-    if (newPassword !== confirmPassword) {
-      setPasswordMsg('Passwords do not match!');
-      return;
-    }
+    const fail = (text) => setPasswordMsg({ type: 'error', text });
+    setPasswordMsg({ type: '', text: '' });
+
+    if (!currentPassword || !newPassword || !confirmPassword) return fail('Please fill in all password fields.');
+    if (!newPasswordStrong) return fail('Your new password does not meet all the requirements.');
+    if (newPassword !== confirmPassword) return fail('New password and confirmation do not match.');
+    if (newPassword === currentPassword) return fail('Your new password must be different from your current password.');
+
+    setChangingPassword(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ email: emailAddress, newPassword, confirmPassword }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setPasswordMsg(data.message || 'Failed to change password');
-        return;
-      }
-      setPasswordMsg('Password changed successfully!');
-      setEmailAddress('');
+      await changeAccountPassword(user.email, currentPassword, newPassword);
+      setPasswordMsg({ type: 'success', text: 'Password changed successfully!' });
+      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-    } catch {
-      setPasswordMsg('Network error. Is the server running?');
+      setShowPassword({ current: false, next: false, confirm: false });
+    } catch (err) {
+      if (CURRENT_PASSWORD_WRONG.includes(err.code)) {
+        fail('Your current password is incorrect.');
+      } else if (err.code === 'app/no-password-provider') {
+        fail('This account signs in with Google and has no password yet. To set one, log out and use "Forgot Password?" on the login page.');
+      } else {
+        fail(authErrorMessage(err, 'Could not change your password. Please try again.'));
+      }
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -82,31 +121,6 @@ const Profile = ({ user = {}, onUserUpdate, onBack, onNavigateToAbout, onNavigat
         <div className="welcome-section">
           <h2>Profile Settings</h2>
         </div>
-
-        {/* Profile Stats Cards */}
-        <section className="profile-stats">
-          <div className="stat-card profile-stat">
-            <div className="stat-icon"><i className='bx bxs-user-circle'></i></div>
-            <div className="stat-info">
-              <div className="stat-label">Full Name</div>
-              <div className="stat-value">{fullName}</div>
-            </div>
-          </div>
-          <div className="stat-card profile-stat">
-            <div className="stat-icon"><i className='bx bxs-envelope'></i></div>
-            <div className="stat-info">
-              <div className="stat-label">Email Address</div>
-              <div className="stat-value">{email}</div>
-            </div>
-          </div>
-          <div className="stat-card profile-stat">
-            <div className="stat-icon"><i className='bx bxs-briefcase'></i></div>
-            <div className="stat-info">
-              <div className="stat-label">Designation</div>
-              <div className="stat-value">{designation}</div>
-            </div>
-          </div>
-        </section>
 
         {/* Account Information Section */}
         <section className="section-box">
@@ -131,8 +145,18 @@ const Profile = ({ user = {}, onUserUpdate, onBack, onNavigateToAbout, onNavigat
                     <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Enter your full name" required />
                   </div>
                   <div className="form-group">
-                    <label><i className='bx bx-envelope'></i> Email Address</label>
-                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Enter your email" required />
+                    <label htmlFor="profile-email"><i className='bx bx-envelope'></i> Email Address</label>
+                    <input
+                      id="profile-email"
+                      type="email"
+                      className="readonly-input"
+                      value={email}
+                      readOnly
+                      tabIndex={-1}
+                      aria-readonly="true"
+                      aria-describedby="profile-email-note"
+                    />
+                    <small id="profile-email-note" className="readonly-note">Your registered email address cannot be changed.</small>
                   </div>
                 </div>
                 <div className="form-row">
@@ -170,31 +194,69 @@ const Profile = ({ user = {}, onUserUpdate, onBack, onNavigateToAbout, onNavigat
           <div className="section-header">
             <h2 className="section-title">Change Password</h2>
           </div>
-          {passwordMsg && (
-            <p style={{ padding: '0 24px', color: passwordMsg.includes('success') ? '#52c41a' : '#ff4d4f', fontWeight: 500 }}>
-              {passwordMsg}
+          {passwordMsg.text && (
+            <p
+              style={{ padding: '0 24px', color: passwordMsg.type === 'success' ? '#52c41a' : '#ff4d4f', fontWeight: 500 }}
+              role={passwordMsg.type === 'success' ? 'status' : 'alert'}
+            >
+              {passwordMsg.text}
             </p>
           )}
           <div className="section-content">
-            <form className="password-form" onSubmit={handlePasswordChange}>
+            <form className="password-form" onSubmit={handlePasswordChange} noValidate>
               <div className="form-row">
-                <div className="form-group">
-                  <label><i className='bx bx-envelope'></i> Email Address</label>
-                  <input type="email" placeholder="Enter your account email" value={emailAddress} onChange={(e) => setEmailAddress(e.target.value)} required />
-                </div>
+                <PasswordField
+                  id="current-password"
+                  label="Current Password"
+                  icon="bx-lock-open"
+                  placeholder="Enter current password"
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={setCurrentPassword}
+                  show={showPassword.current}
+                  onToggle={() => toggleShow('current')}
+                />
               </div>
               <div className="form-row">
-                <div className="form-group">
-                  <label><i className='bx bx-lock'></i> New Password</label>
-                  <input type="password" placeholder="Enter new password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required minLength="8" />
-                </div>
-                <div className="form-group">
-                  <label><i className='bx bx-lock-alt'></i> Confirm Password</label>
-                  <input type="password" placeholder="Confirm new password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required minLength="8" />
-                </div>
+                <PasswordField
+                  id="new-password"
+                  label="New Password"
+                  icon="bx-lock"
+                  placeholder="Enter new password"
+                  autoComplete="new-password"
+                  describedBy="new-password-rules"
+                  value={newPassword}
+                  onChange={setNewPassword}
+                  show={showPassword.next}
+                  onToggle={() => toggleShow('next')}
+                >
+                  {newPassword && (
+                    <ul id="new-password-rules" className="profile-password-rules">
+                      {newPasswordRules.map((rule) => (
+                        <li key={rule.id} className={rule.met ? 'met' : ''}>
+                          <i className={`bx ${rule.met ? 'bx-check-circle' : 'bx-circle'}`} aria-hidden="true"></i>
+                          {rule.label}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </PasswordField>
+                <PasswordField
+                  id="confirm-new-password"
+                  label="Confirm New Password"
+                  icon="bx-lock-alt"
+                  placeholder="Confirm new password"
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={setConfirmPassword}
+                  show={showPassword.confirm}
+                  onToggle={() => toggleShow('confirm')}
+                />
               </div>
               <div className="form-actions">
-                <button type="submit" className="change-password-btn"><i className='bx bx-key'></i> Update Password</button>
+                <button type="submit" className="change-password-btn" disabled={changingPassword}>
+                  <i className='bx bx-key'></i> {changingPassword ? 'Updating…' : 'Update Password'}
+                </button>
               </div>
             </form>
           </div>
@@ -214,31 +276,17 @@ const Profile = ({ user = {}, onUserUpdate, onBack, onNavigateToAbout, onNavigat
           <div className="footer-section">
             <h4>Quick Links</h4>
             <ul>
-              <li><a href="#dashboard" onClick={onBack}>Dashboard</a></li>
-              <li><a href="#explorer">Data Explorer</a></li>
-              <li><a href="#profile">Profile</a></li>
-              <li><a href="#about" onClick={onNavigateToAbout}>About Us</a></li>
-            </ul>
-          </div>
-          <div className="footer-section">
-            <h4>Resources</h4>
-            <ul>
-              <li><a href="#docs">Documentation</a></li>
-              <li><a href="#api">API Reference</a></li>
-              <li><a href="#tutorials">Tutorials</a></li>
-              <li><a href="#faq">FAQ</a></li>
+              <FooterQuickLinks />
             </ul>
           </div>
           <div className="footer-section">
             <h4>Contact</h4>
             <ul>
-              <li><a href="#support">Support Center</a></li>
-              <li><a href="mailto:info@academine.edu">info@academine.edu</a></li>
-              <li><a href="#feedback">Send Feedback</a></li>
-              <li><a href="#report">Report an Issue</a></li>
+              <FooterContactLinks />
             </ul>
           </div>
         </div>
+        <FooterCopyright />
       </footer>
     </div>
   );

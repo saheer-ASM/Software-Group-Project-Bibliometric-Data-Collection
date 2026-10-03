@@ -8,6 +8,7 @@ import PublicationFilterHelp from './components/PublicationFilterHelp';
 import PublicationYearRange from './components/PublicationYearRange';
 import { publicationYears, filterPublications } from './services/publicationFilters';
 import ComparisonDashboard from './components/comparison/ComparisonDashboard';
+import { FooterQuickLinks, FooterContactLinks, FooterCopyright } from './FooterParts';
 
 const MetricCard = ({ title, value, tooltip }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -919,31 +920,17 @@ const DataExplorer = ({
           <div className="de-footer-section">
             <h4>Quick Links</h4>
             <ul>
-              <li><a href="#dashboard" onClick={onBack}>Dashboard</a></li>
-              <li><a href="#explorer">Data Explorer</a></li>
-              <li><a href="#settings" onClick={onNavigateToSettings}>Settings</a></li>
-              <li><a href="#about" onClick={onNavigateToAbout}>About Us</a></li>
-            </ul>
-          </div>
-          <div className="de-footer-section">
-            <h4>Resources</h4>
-            <ul>
-              <li><a href="#docs">Documentation</a></li>
-              <li><a href="#api">API Reference</a></li>
-              <li><a href="#tutorials">Tutorials</a></li>
-              <li><a href="#faq">FAQ</a></li>
+              <FooterQuickLinks />
             </ul>
           </div>
           <div className="de-footer-section">
             <h4>Contact</h4>
             <ul>
-              <li><a href="#support">Support Center</a></li>
-              <li><a href="mailto:info@academine.edu">info@academine.edu</a></li>
-              <li><a href="#feedback">Send Feedback</a></li>
-              <li><a href="#report">Report an Issue</a></li>
+              <FooterContactLinks />
             </ul>
           </div>
         </div>
+        <FooterCopyright />
       </footer>
     </div>
   );

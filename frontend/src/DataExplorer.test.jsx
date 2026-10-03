@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import DataExplorer from './DataExplorer';
 
 jest.mock('recharts', () => ({
@@ -25,7 +26,7 @@ afterEach(() => { delete global.fetch; localStorage.clear(); });
 
 test('loads the profile, combines filters and clears filters without changing metrics or refetching', async () => {
   global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => profile });
-  render(<DataExplorer authorName="Researcher" />);
+  render(<MemoryRouter initialEntries={['/data-explorer']}><DataExplorer authorName="Researcher" /></MemoryRouter>);
   await screen.findByRole('heading', { name: 'Publication A' });
   expect(screen.getByRole('heading', { name: 'Publication B' })).toBeInTheDocument();
   expect(screen.getByRole('slider', { name: /Start Year/ })).toHaveAttribute('min', '2020');

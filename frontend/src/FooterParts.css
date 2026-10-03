@@ -1,0 +1,11 @@
+/* Copyright line at the bottom of every page footer. */
+.footer-copyright {
+  max-width: 1280px;
+  margin: 2.5rem auto 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.85rem;
+  text-align: center;
+  box-sizing: border-box;
+}

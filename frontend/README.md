@@ -1,4 +1,40 @@
-# Getting Started with Create React App
+# ScholarMetrics frontend
+
+## Routes
+
+| URL | Page | Access |
+|---|---|---|
+| `/login` | Sign in | signed-out only |
+| `/register` | Registration | signed-out only |
+| `/forgot-password` | Request a password-reset email | signed-out only |
+| `/verify-email` | Waiting for email verification | signed-out only |
+| `/reset-password` | Firebase email links (reset password / verify email) | anyone |
+| `/dashboard` | Dashboard | signed in |
+| `/data-explorer` | Data Explorer (`?author=Name` opens that author) | signed in |
+| `/settings` | Profile settings | signed in |
+| `/about` | About Us | signed in |
+| `/library` | My Library | signed in |
+| `/admin` | Feedback & issues admin | signed in, with the admin claim |
+
+Routing uses React Router (`src/App.js`). A signed-out visit to a protected page
+redirects to `/login` and returns to that page after logging in. `/` and unknown
+paths go to `/dashboard` when signed in, otherwise to `/login`.
+
+## Deploying (single-page app)
+
+The web server must answer every app route with `index.html`; otherwise
+refreshing `/dashboard` returns 404. `npm start` already does this in development.
+
+For Nginx, use [deploy/nginx.conf](deploy/nginx.conf). It serves the build, falls
+back to `index.html` for app routes, and proxies `/api/` to the backend without
+rewriting it. Other hosts need the same rule, for example:
+
+* Netlify `_redirects`: `/* /index.html 200`
+* Firebase Hosting: `"rewrites": [{ "source": "**", "destination": "/index.html" }]`
+
+---
+
+## Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 

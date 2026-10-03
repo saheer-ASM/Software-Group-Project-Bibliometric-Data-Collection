@@ -45,7 +45,13 @@ function getServiceAccount() {
   return null;
 }
 
-const serviceAccount = getServiceAccount();
+// Local testing against the Firebase Auth emulator
+// (FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 + FIREBASE_EMULATOR_PROJECT_ID).
+// No credentials are used, and profiles go to the in-memory user store unless
+// FIRESTORE_EMULATOR_HOST is also set. Unset in normal use.
+const emulatorProjectId = process.env.FIREBASE_AUTH_EMULATOR_HOST && process.env.FIREBASE_EMULATOR_PROJECT_ID;
+
+const serviceAccount = emulatorProjectId ? null : getServiceAccount();
 
 if (serviceAccount && !admin.apps.length) {
   admin.initializeApp({
@@ -54,6 +60,9 @@ if (serviceAccount && !admin.apps.length) {
       ? { databaseURL: process.env.FIREBASE_DATABASE_URL }
       : {}),
   });
+} else if (emulatorProjectId && !admin.apps.length) {
+  admin.initializeApp({ projectId: emulatorProjectId });
 }
 
-module.exports = serviceAccount ? admin.firestore() : null;
+const useFirestore = serviceAccount || (emulatorProjectId && process.env.FIRESTORE_EMULATOR_HOST);
+module.exports = useFirestore ? admin.firestore() : null;

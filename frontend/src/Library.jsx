@@ -3,6 +3,7 @@ import { getLibrary, saveLibrary } from './services/researchLibrary';
 import './Dashboard.css';
 import './Library.css';
 import AppNavbar from './AppNavbar';
+import { FooterQuickLinks, FooterContactLinks, FooterCopyright } from './FooterParts';
 
 export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout, onNavigateToProfile, onLogout, hasSearchedAuthor }) {
   const userId = user?.id || user?.email;
@@ -64,5 +65,30 @@ export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout,
         <div className="library-paper-list">{visiblePapers.length ? visiblePapers.map((paper) => <article key={paper.id}><div><span>{paper.publishedYear || 'Year unavailable'}</span><h3>{paper.title}</h3><p>{paper.authorName}</p></div><select value={library.collections.find((item) => item.paperIds.includes(paper.id))?.id || ''} onChange={(e) => assignPaper(paper.id, e.target.value)}><option value="">No collection</option>{library.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></article>) : <p className="library-empty">{library.savedPapers.length ? 'No publications are assigned to this collection yet.' : 'Bookmark publications to organize them here.'}</p>}</div>
       </section>
     </main>
+
+    <footer className="dashboard-footer">
+      <div className="footer-content">
+        <div className="footer-section">
+          <div className="footer-title">
+            <i className="bx bx-file"></i>
+            <h3>ScholarMetrics</h3>
+          </div>
+          <p>Revolutionizing research evaluation through intelligent automation and comprehensive data collection across global scholarly databases.</p>
+        </div>
+        <div className="footer-section">
+          <h4>Quick Links</h4>
+          <ul>
+            <FooterQuickLinks />
+          </ul>
+        </div>
+        <div className="footer-section">
+          <h4>Contact</h4>
+          <ul>
+            <FooterContactLinks />
+          </ul>
+        </div>
+      </div>
+      <FooterCopyright />
+    </footer>
   </div>;
 }

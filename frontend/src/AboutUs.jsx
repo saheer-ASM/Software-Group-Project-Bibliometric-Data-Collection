@@ -1,13 +1,41 @@
 import React from 'react';
 import './AboutUs.css';
 import AppNavbar from './AppNavbar';
+import { FooterQuickLinks, FooterContactLinks, FooterCopyright } from './FooterParts';
 
 const AboutUs = ({ onBack, onNavigateToSettings, onNavigateToProfile, onNavigateToLibrary, onLogout, hasSearchedAuthor, onNavigateToExplorer }) => {
   const teamMembers = [
-    { name: 'Ahamed R.S.', id: 'EG/2022/4919' },
-    { name: 'Ahnaf M.N.M.', id: 'EG/2022/4920' },
-    { name: 'Saheer A.S.M', id: 'EG/2022/5304' },
-    { name: 'Thurga R.', id: 'EG/2022/5374' }
+    {
+      name: 'Ahamed R.S.',
+      github: 'https://github.com/Shaith-Ahamed',
+      linkedin: 'https://www.linkedin.com/in/r-shaith-ahamed-5273b1240',
+      email: 'shaith1208@gmail.com',
+    },
+    {
+      name: 'Ahnaf M.N.M.',
+      github: 'https://github.com/mohomad-ahnaf',
+      linkedin: 'https://www.linkedin.com/in/mohomad-ahnaf',
+      email: 'ahnafmnm01@gmail.com',
+    },
+    {
+      name: 'Saheer A.S.M',
+      github: 'https://github.com/saheer-ASM',
+      linkedin: 'https://www.linkedin.com/in/mohomed-saheer-5ba903278',
+      email: 'mohamedshaheer637@gmail.com',
+    },
+    {
+      name: 'Thurga R.',
+      github: 'https://github.com/Thurga1125',
+      linkedin: 'https://www.linkedin.com/in/thurgarajinathan25',
+      email: 'thurga11252001@gmail.com',
+    },
+  ];
+
+  // Same for every member
+  const memberDetails = [
+    'B.Sc.Eng. (Hons) in Computer Engineering (Reading)',
+    'Department of Electrical and Information Engineering',
+    'University of Ruhuna',
   ];
 
   return (
@@ -69,13 +97,13 @@ const AboutUs = ({ onBack, onNavigateToSettings, onNavigateToProfile, onNavigate
               Lecturer, Department of Electrical and Information Engineering,
               Faculty of Engineering, University of Ruhuna.
             </p>
-            <div className="advisor-links">
-              <a href="#dbie" className="link-item">DBIE</a>
-              <a href="#researchgate" className="link-item">ResearchGate</a>
-              <a href="#scholar" className="link-item">Google_Scholar</a>
-              <a href="#scopus" className="link-item">Scopus</a>
-              <a href="#wos" className="link-item">WoS</a>
-              <a href="#orcid" className="link-item">ORCID</a>
+            <div className="member-socials advisor-socials">
+              <a href="https://www.linkedin.com/in/shehan-nilmantha-wijesekara-86a9931a3" target="_blank" rel="noopener noreferrer" aria-label="Dr. P.A.D.S. Nilmantha Wijesekara on LinkedIn" title="LinkedIn">
+                <i className="bx bxl-linkedin" aria-hidden="true"></i>
+              </a>
+              <a href="mailto:nilmantha@eie.ruh.ac.lk" aria-label="Email Dr. P.A.D.S. Nilmantha Wijesekara" title="nilmantha@eie.ruh.ac.lk">
+                <i className="bx bx-envelope" aria-hidden="true"></i>
+              </a>
             </div>
           </div>
 
@@ -87,7 +115,22 @@ const AboutUs = ({ onBack, onNavigateToSettings, onNavigateToProfile, onNavigate
                   <i className='bx bxs-user'></i>
                 </div>
                 <h3 className="member-name">{member.name}</h3>
-                <p className="member-id">{member.id}</p>
+                <div className="member-socials">
+                  <a href={member.github} target="_blank" rel="noopener noreferrer" aria-label={`${member.name} on GitHub`} title="GitHub">
+                    <i className="bx bxl-github" aria-hidden="true"></i>
+                  </a>
+                  <a href={member.linkedin} target="_blank" rel="noopener noreferrer" aria-label={`${member.name} on LinkedIn`} title="LinkedIn">
+                    <i className="bx bxl-linkedin" aria-hidden="true"></i>
+                  </a>
+                  <a href={`mailto:${member.email}`} aria-label={`Email ${member.name}`} title={member.email}>
+                    <i className="bx bx-envelope" aria-hidden="true"></i>
+                  </a>
+                </div>
+                <div className="member-details">
+                  {memberDetails.map((line) => (
+                    <p key={line}>{line}</p>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
@@ -108,33 +151,19 @@ const AboutUs = ({ onBack, onNavigateToSettings, onNavigateToProfile, onNavigate
           <div className="footer-section">
             <h4>Quick Links</h4>
             <ul>
-              <li><a href="#dashboard">Dashboard</a></li>
-              <li><a href="#explorer">Data Explorer</a></li>
-              <li><a href="#settings">Settings</a></li>
-              <li><a href="#about">About Us</a></li>
+              <FooterQuickLinks />
             </ul>
           </div>
 
-          <div className="footer-section">
-            <h4>Resources</h4>
-            <ul>
-              <li><a href="#docs">Documentation</a></li>
-              <li><a href="#api">API Reference</a></li>
-              <li><a href="#tutorials">Tutorials</a></li>
-              <li><a href="#faq">FAQ</a></li>
-            </ul>
-          </div>
 
           <div className="footer-section">
             <h4>Contact</h4>
             <ul>
-              <li><a href="#support">Support Center</a></li>
-              <li><a href="mailto:info@academine.edu">info@academine.edu</a></li>
-              <li><a href="#feedback">Send Feedback</a></li>
-              <li><a href="#report">Report an Issue</a></li>
+              <FooterContactLinks />
             </ul>
           </div>
         </div>
+        <FooterCopyright />
       </footer>
     </div>
   );

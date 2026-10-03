@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import './Settings.css';
+import { FooterQuickLinks, FooterContactLinks, FooterCopyright } from './FooterParts';
 
 const Settings = ({ username = "Jone Smith", userEmail = "researcher@university.edu", onBack, onNavigateToAbout, onNavigateToProfile, onLogout }) => {
   const [fullName, setFullName] = useState(username);
-  const [email, setEmail] = useState(userEmail);
+  const email = userEmail; // registered email is fixed
   const [designation, setDesignation] = useState("Prof");
   const [isEditing, setIsEditing] = useState(false);
 
@@ -75,11 +76,8 @@ const Settings = ({ username = "Jone Smith", userEmail = "researcher@university.
                 </div>
                 <div className="form-group">
                   <label>Email:</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
+                  <input type="email" value={email} readOnly aria-readonly="true" />
+                  <small>Your registered email address cannot be changed.</small>
                 </div>
                 <div className="form-group">
                   <label>Designation:</label>
@@ -168,33 +166,19 @@ const Settings = ({ username = "Jone Smith", userEmail = "researcher@university.
           <div className="footer-section">
             <h4>Quick Links</h4>
             <ul>
-              <li><a href="#dashboard">Dashboard</a></li>
-              <li><a href="#explorer">Data Explorer</a></li>
-              <li><a href="#settings">Settings</a></li>
-              <li><a href="#about">About Us</a></li>
+              <FooterQuickLinks />
             </ul>
           </div>
 
-          <div className="footer-section">
-            <h4>Resources</h4>
-            <ul>
-              <li><a href="#docs">Documentation</a></li>
-              <li><a href="#api">API Reference</a></li>
-              <li><a href="#tutorials">Tutorials</a></li>
-              <li><a href="#faq">FAQ</a></li>
-            </ul>
-          </div>
 
           <div className="footer-section">
             <h4>Contact</h4>
             <ul>
-              <li><a href="#support">Support Center</a></li>
-              <li><a href="mailto:info@academine.edu">info@academine.edu</a></li>
-              <li><a href="#feedback">Send Feedback</a></li>
-              <li><a href="#report">Report an Issue</a></li>
+              <FooterContactLinks />
             </ul>
           </div>
         </div>
+        <FooterCopyright />
       </footer>
     </div>
   );

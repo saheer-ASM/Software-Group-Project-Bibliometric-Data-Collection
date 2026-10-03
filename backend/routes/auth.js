@@ -1,5 +1,4 @@
 const express = require('express');
-const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin');
 const authMiddleware = require('../middleware/auth');
@@ -14,36 +13,130 @@ function signToken(id) {
   });
 }
 
+function httpError(status, message, code) {
+  const err = new Error(message);
+  err.status = status;
+  if (code) err.code = code;
+  return err;
+}
+
+function sendError(res, err, fallbackMessage) {
+  if (err.status) {
+    return res.status(err.status).json({ message: err.message, ...(err.code ? { code: err.code } : {}) });
+  }
+  return res.status(401).json({ message: fallbackMessage, error: err.message });
+}
+
+// Verifies a Firebase ID token with the Admin SDK (signature, expiry, audience).
+// Whether the email is verified comes from the token's own `email_verified`
+// claim, never from a value the client sends in the request body.
+// Email/password accounts must be verified; federated providers (Google, GitHub)
+// are unchanged, since their email is vouched for by the provider.
+async function verifyFirebaseToken(idToken, { requireVerifiedEmail = true } = {}) {
+  if (!idToken) throw httpError(400, 'Firebase token is required');
+  if (!admin.apps.length) throw httpError(503, 'Firebase admin is not configured on the backend');
+
+  const decoded = await admin.auth().verifyIdToken(idToken);
+  if (!decoded.email) throw httpError(400, 'No email in token');
+
+  // Google sign-ins always carry email_verified: true (Google owns the address),
+  // so they pass straight through; email/password accounts pass only after the
+  // verification link has been clicked.
+  if (requireVerifiedEmail && decoded.email_verified !== true) {
+    throw httpError(403, 'Please verify your email address before signing in.', 'EMAIL_NOT_VERIFIED');
+  }
+  return decoded;
+}
+
+// One profile per Firebase account. Firebase links Google and email/password
+// for the same email into ONE uid, so look the profile up by uid first, then by
+// email (accounts created before uids were stored). A verified Google-first
+// user without a profile gets one created here.
+async function findOrCreateProfile(decoded) {
+  let user = await userStore.findByFirebaseUid(decoded.uid);
+  if (!user) user = await userStore.findByEmail(decoded.email);
+
+  if (!user) {
+    return userStore.createFirebaseUser({
+      username: decoded.name || decoded.email.split('@')[0] || 'User',
+      email: decoded.email,
+      designation: 'Researcher',
+      firebaseUid: decoded.uid,
+      emailVerified: decoded.email_verified === true,
+    });
+  }
+
+  const updates = {};
+  // The token proves ownership of this verified email, so it is safe to point
+  // the profile at the current Firebase uid.
+  if (user.firebaseUid !== decoded.uid) updates.firebaseUid = decoded.uid;
+  // Keep the stored email equal to the verified Firebase email (repairs profiles
+  // edited before the email became read-only).
+  if (user.email !== decoded.email.toLowerCase()) updates.email = decoded.email;
+  if (user.emailVerified !== (decoded.email_verified === true)) {
+    updates.emailVerified = decoded.email_verified === true;
+  }
+  return Object.keys(updates).length ? userStore.updateUser(user.id, updates) : user;
+}
+
+// POST /api/auth/register-profile
+// Called right after the frontend creates the Firebase email/password account.
+// Saves Full Name + Designation for the new (still unverified) account. It does
+// NOT issue a session token; that only happens in /firebase-login once the
+// email is verified.
+router.post('/register-profile', async (req, res) => {
+  try {
+    const { idToken, username, designation } = req.body;
+    const decoded = await verifyFirebaseToken(idToken, { requireVerifiedEmail: false });
+
+    if (decoded.firebase?.sign_in_provider !== 'password') {
+      return res.status(400).json({ message: 'Only email/password registrations use this endpoint' });
+    }
+    if (!username?.trim() || !designation?.trim()) {
+      return res.status(400).json({ message: 'Full name and designation are required' });
+    }
+    if (username.trim().length > 100 || designation.trim().length > 100) {
+      return res.status(400).json({ message: 'Full name and designation must be at most 100 characters' });
+    }
+
+    const existing = await userStore.findByEmail(decoded.email);
+    if (existing && existing.firebaseUid !== decoded.uid) {
+      // Never let a new, unverified account overwrite somebody else's profile.
+      return res.status(409).json({ message: 'An account already exists with this email address.' });
+    }
+
+    if (existing) {
+      await userStore.updateUser(existing.id, { username, designation });
+    } else {
+      await userStore.createFirebaseUser({
+        username,
+        email: decoded.email,
+        designation,
+        firebaseUid: decoded.uid,
+        emailVerified: decoded.email_verified === true,
+      });
+    }
+
+    res.status(201).json({ message: 'Profile saved. Please verify your email address.' });
+  } catch (err) {
+    sendError(res, err, 'Could not save registration');
+  }
+});
+
 // POST /api/auth/firebase-login
+// Exchanges a verified Firebase ID token (email/password OR Google, same
+// Firebase account) for this backend's session JWT.
 router.post('/firebase-login', async (req, res) => {
   try {
     const { idToken, username: requestedUsername, designation: requestedDesignation } = req.body;
+    const decoded = await verifyFirebaseToken(idToken);
 
-    if (!idToken) {
-      return res.status(400).json({ message: 'Firebase token is required' });
-    }
+    let user = await findOrCreateProfile(decoded);
 
-    if (!admin.apps.length) {
-      return res.status(503).json({ message: 'Firebase admin is not configured on the backend' });
-    }
-
-    const decoded = await admin.auth().verifyIdToken(idToken);
-    const email = decoded.email || '';
-    const username = requestedUsername?.trim() || decoded.name || email.split('@')[0] || 'User';
-    const designation = requestedDesignation?.trim() || 'Researcher';
-
-    let user = await userStore.findByEmail(email);
-
-    if (!user) {
-      user = await userStore.createUser({
-        username,
-        email,
-        designation,
-        password: crypto.randomBytes(32).toString('hex'),
-      });
-    } else if (requestedUsername || requestedDesignation) {
-      user = await userStore.updateUser(user.id, { username, designation });
-    }
+    const updates = {};
+    if (requestedUsername?.trim()) updates.username = requestedUsername;
+    if (requestedDesignation?.trim()) updates.designation = requestedDesignation;
+    if (Object.keys(updates).length) user = await userStore.updateUser(user.id, updates);
 
     const token = signToken(user.id);
 
@@ -52,41 +145,18 @@ router.post('/firebase-login', async (req, res) => {
       user: userStore.publicUser(user),
     });
   } catch (err) {
-    res.status(401).json({ message: 'Google sign-in failed', error: err.message });
+    sendError(res, err, 'Sign-in failed');
   }
 });
 
-// POST /api/auth/register
-router.post('/register', async (req, res) => {
-  try {
-    const { username, email, designation, password } = req.body;
-
-    if (!username || !email || !designation || !password) {
-      return res.status(400).json({ message: 'All fields are required' });
-    }
-    if (username.trim().length < 3) {
-      return res.status(400).json({ message: 'Username must be at least 3 characters' });
-    }
-    if (password.length < 8) {
-      return res.status(400).json({ message: 'Password must be at least 8 characters' });
-    }
-
-    const existingUser = await userStore.findConflict({ username, email });
-    if (existingUser) {
-      const field = existingUser.email === email.trim().toLowerCase() ? 'Email' : 'Username';
-      return res.status(409).json({ message: `${field} already in use` });
-    }
-
-    const user = await userStore.createUser({ username, email, designation, password });
-    const token = signToken(user.id);
-
-    res.status(201).json({
-      token,
-      user: userStore.publicUser(user),
-    });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
+// POST /api/auth/register  (legacy, disabled)
+// It created accounts and issued a session with no email verification, and
+// stored a password hash. Registration now goes through Firebase Authentication:
+// /register-profile, then email verification, then /firebase-login.
+router.post('/register', (_req, res) => {
+  res.status(410).json({
+    message: 'This registration endpoint is no longer available. Please register through the website.',
+  });
 });
 
 // POST /api/auth/login
@@ -102,6 +172,16 @@ router.post('/login', async (req, res) => {
     if (!user || !(await userStore.comparePassword(user, password))) {
       return res.status(401).json({ message: 'Invalid username or password' });
     }
+    if (user.firebaseUid && admin.apps.length) {
+      const firebaseUser = await admin.auth().getUser(user.firebaseUid).catch(() => null);
+      const isPasswordAccount = firebaseUser?.providerData.some((p) => p.providerId === 'password');
+      if (isPasswordAccount && !firebaseUser.emailVerified) {
+        return res.status(403).json({
+          message: 'Please verify your email address before signing in.',
+          code: 'EMAIL_NOT_VERIFIED',
+        });
+      }
+    }
 
     const token = signToken(user.id);
     res.json({
@@ -116,48 +196,32 @@ router.post('/login', async (req, res) => {
 // POST /api/auth/social  (Google / GitHub sign-in)
 router.post('/social', async (req, res) => {
   try {
-    const { idToken } = req.body;
-    if (!idToken) return res.status(400).json({ message: 'ID token required' });
-
-    const decoded = await admin.auth().verifyIdToken(idToken);
-    const { email, name, picture, uid } = decoded;
-
-    if (!email) return res.status(400).json({ message: 'No email in token' });
-
-    const user = await userStore.findOrCreateSocialUser({ email, displayName: name, photoURL: picture, firebaseUid: uid });
+    const decoded = await verifyFirebaseToken(req.body.idToken);
+    const user = await findOrCreateProfile(decoded);
     const token = signToken(user.id);
     res.json({ token, user: userStore.publicUser(user) });
   } catch (err) {
-    res.status(401).json({ message: 'Social sign-in failed', error: err.message });
+    sendError(res, err, 'Social sign-in failed');
   }
 });
 
 // POST /api/auth/reset-password
 // Called after the user completes Firebase's "forgot password" email flow
-// (confirmPasswordReset + sign-in on the frontend). Keeps our own bcrypt
-// password store in sync with the password the user just set in Firebase.
+// (confirmPasswordReset + sign-in on the frontend). Firebase already holds the
+// new password, so this only clears any legacy password hash and starts a session.
 router.post('/reset-password', async (req, res) => {
   try {
-    const { idToken, newPassword } = req.body;
-    if (!idToken || !newPassword) {
-      return res.status(400).json({ message: 'ID token and new password are required' });
-    }
-    if (newPassword.length < 8) {
-      return res.status(400).json({ message: 'Password must be at least 8 characters' });
-    }
-
-    const decoded = await admin.auth().verifyIdToken(idToken);
-    if (!decoded.email) return res.status(400).json({ message: 'No email in token' });
+    const decoded = await verifyFirebaseToken(req.body.idToken);
 
     const user = await userStore.findByEmail(decoded.email);
     if (!user) return res.status(404).json({ message: 'No account found for this email' });
 
-    await userStore.updatePassword(user.id, newPassword, { syncFirebase: false });
+    if (user.password) await userStore.updateUser(user.id, { password: null });
 
     const token = signToken(user.id);
     res.json({ token, user: userStore.publicUser(user) });
   } catch (err) {
-    res.status(401).json({ message: 'Password reset failed', error: err.message });
+    sendError(res, err, 'Password reset failed');
   }
 });
 
@@ -170,23 +234,28 @@ router.get('/profile', authMiddleware, (req, res) => {
 router.put('/profile', authMiddleware, async (req, res) => {
   try {
     const { username, email, designation } = req.body;
+
+    // The registered email is the account's identity (it comes from the verified
+    // Firebase account) and cannot be changed through the profile.
+    if (email !== undefined && String(email).trim().toLowerCase() !== req.user.email) {
+      return res.status(400).json({ message: 'Your registered email address cannot be changed.' });
+    }
+
     const updates = {};
     if (username) updates.username = username;
-    if (email) updates.email = email;
     if (designation) updates.designation = designation;
 
     if (updates.username && updates.username.trim().length < 3) {
       return res.status(400).json({ message: 'Username must be at least 3 characters' });
     }
 
-    if (updates.username || updates.email) {
+    if (updates.username) {
       const conflict = await userStore.findConflict({
         username: updates.username,
-        email: updates.email,
         excludeId: req.user.id,
       });
       if (conflict) {
-        return res.status(409).json({ message: 'Username or email already taken' });
+        return res.status(409).json({ message: 'Username already taken' });
       }
     }
 
@@ -198,30 +267,16 @@ router.put('/profile', authMiddleware, async (req, res) => {
   }
 });
 
-// PUT /api/auth/change-password  (protected)
-router.put('/change-password', authMiddleware, async (req, res) => {
-  try {
-    const { email, newPassword, confirmPassword } = req.body;
-
-    if (!email || !newPassword || !confirmPassword) {
-      return res.status(400).json({ message: 'All fields are required' });
-    }
-    if (newPassword !== confirmPassword) {
-      return res.status(400).json({ message: 'Passwords do not match' });
-    }
-    if (newPassword.length < 8) {
-      return res.status(400).json({ message: 'Password must be at least 8 characters' });
-    }
-    if (req.user.email !== email.trim().toLowerCase()) {
-      return res.status(400).json({ message: 'Email does not match your account' });
-    }
-
-    await userStore.updatePassword(req.user.id, newPassword);
-
-    res.json({ message: 'Password updated successfully' });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
+// PUT /api/auth/change-password  (retired)
+// It set a new password with Admin rights after only an email match, so a
+// stolen session token was enough to change the password. Password changes
+// now happen in the browser through Firebase (re-authenticate with the current
+// password, then updatePassword), where Firebase itself checks the current
+// password.
+router.put('/change-password', authMiddleware, (_req, res) => {
+  res.status(410).json({
+    message: 'Password changes are now made from the Profile page using your current password.',
+  });
 });
 
 module.exports = router;

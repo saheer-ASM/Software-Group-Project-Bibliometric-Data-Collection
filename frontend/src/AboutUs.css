@@ -255,28 +255,7 @@
   color: var(--text-primary);
   line-height: 1.7;
   max-width: 720px;
-  margin: 1rem auto 2rem;
-}
-
-.advisor-links {
-  display: flex;
-  justify-content: center;
-  gap: 1.5rem;
-  flex-wrap: wrap;
-}
-
-.link-item {
-  color: var(--secondary-color);
-  text-decoration: none;
-  font-size: 0.88rem;
-  font-weight: 600;
-  transition: color var(--transition-fast);
-  border-bottom: 1.5px solid transparent;
-}
-
-.link-item:hover {
-  color: var(--accent-hover);
-  border-color: var(--accent-hover);
+  margin: 1rem auto 0;
 }
 
 /* Undergraduate team members grid styling details */
@@ -334,14 +313,56 @@
   letter-spacing: -0.01em;
 }
 
-.member-id {
-  font-size: 0.9rem;
+.member-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 0.5rem;
+}
+
+.member-details p {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
   color: var(--text-secondary);
-  font-family: monospace;
-  background: var(--background);
-  padding: 0.15rem 0.5rem;
-  border-radius: var(--border-radius-sm);
-  display: inline-block;
+}
+
+.member-details p:first-child {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* GitHub / LinkedIn / Email icon links under each name */
+.member-socials {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin: 0.6rem 0 0.4rem;
+}
+
+.member-socials a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--primary-dark);
+  color: #e2e8f0;
+  font-size: 1.25rem;
+  text-decoration: none;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+.advisor-socials {
+  margin: 1.25rem 0 0;
+}
+
+.member-socials a:hover,
+.member-socials a:focus-visible {
+  background: var(--secondary-color);
+  color: #fff;
+  transform: translateY(-2px);
 }
 
 /* Dark slate footer matching Dashboard/Explorer footer layout */
@@ -357,7 +378,7 @@
   max-width: 1100px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
+  grid-template-columns: 2fr 1fr 1fr;
   gap: 3rem;
   box-sizing: border-box;
 }
@@ -420,6 +441,10 @@
 
   .about-footer .footer-content {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .about-footer .footer-content > :first-child {
+    grid-column: 1 / -1;
   }
 }
 
