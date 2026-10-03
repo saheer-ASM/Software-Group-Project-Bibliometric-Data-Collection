@@ -1,0 +1,57 @@
+# Build-context filter for production/compose.yaml.
+#
+# The Docker build context is the repository ROOT (so the Dockerfiles in
+# production/ can reach backend/ and frontend/). Without this file the context
+# would include .venv, .git, every node_modules tree and all the research data
+# folders -- gigabytes shipped to the daemon on every build.
+
+# --- never ship secrets into an image ---
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+**/serviceAccountKey.json
+.firebaserc
+
+# --- dependencies and build output (reinstalled/rebuilt inside the image) ---
+**/node_modules
+frontend/build
+**/__pycache__
+**/*.pyc
+.venv
+.pytest_cache
+
+# --- version control / editors ---
+.git
+.gitignore
+.claude
+.vscode
+.idea
+
+# --- research pipeline: Python modules and data, not part of the web app ---
+3_fileds_using_api/
+Author contribution/
+Author_extraction/
+Calculating_ISC/
+Calculating_Total_Cites/
+Citation-Analysis/
+Equations_12_13_14/
+Modified_G_Index/
+Nm_index_step_by_step/
+asjc fine tunned/
+career-compentation/
+crossref_api/
+data-collection-for-tunning/
+eq16_field_hindex/
+eq17_modified_hindex/
+final_nm_index/
+modified_hf_index/
+modified_hm_index/
+scripts_db/
+web_scrappping/
+web_scrappping Author_contribution/
+*.ipynb
+*.png
+*.xlsx
+*.pdf
