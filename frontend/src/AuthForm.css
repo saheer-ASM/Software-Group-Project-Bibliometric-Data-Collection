@@ -233,6 +233,79 @@
   transform: none;
 }
 
+/* Sign In: account not found / registration incomplete / verification pending */
+.account-notice {
+  margin: 0.25rem 0 1.25rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--border-radius-md);
+  border: 1px solid rgba(26, 95, 122, 0.25);
+  background: rgba(26, 95, 122, 0.07);
+  text-align: left;
+}
+
+.account-notice-not-registered {
+  border-color: rgba(220, 38, 38, 0.3);
+  background: rgba(220, 38, 38, 0.06);
+}
+
+.account-notice-incomplete,
+.account-notice-verify {
+  border-color: rgba(196, 153, 62, 0.45);
+  background: rgba(196, 153, 62, 0.09);
+}
+
+.form-box .account-notice p {
+  margin: 0 0 0.35rem;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  text-align: left;
+  color: var(--text-primary);
+}
+
+.form-box .account-notice p.account-notice-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.form-box .account-notice p.account-notice-message {
+  color: #15803d;
+  font-weight: 600;
+}
+
+.account-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.account-notice-actions button {
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  font: 600 0.82rem 'Inter', sans-serif;
+  cursor: pointer;
+}
+
+.account-notice-primary {
+  border: 1px solid var(--secondary-color);
+  background: var(--secondary-color);
+  color: #fff;
+}
+
+.account-notice-secondary {
+  border: 1px solid var(--secondary-color);
+  background: var(--surface);
+  color: var(--secondary-color);
+}
+
+.account-notice-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* "Enter your password to link Google" prompt on the login form */
 .link-prompt {
   display: flex;

@@ -10,6 +10,8 @@ import {
   signInWithPopup,
   signInWithEmailAndPassword,
   reauthenticateWithCredential,
+  reauthenticateWithPopup,
+  linkWithCredential,
   updatePassword,
 } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
@@ -64,13 +66,15 @@ const googleProvider = () => {
 // Where the link in the verification email sends the user after Firebase marks
 // the address as verified. The domain must be listed under
 // Firebase Console > Authentication > Settings > Authorized domains.
-const verificationActionSettings = () => ({
-  url: `${window.location.origin}/login?verified=1`,
+const verificationActionSettings = (returnPath = '/login?verified=1') => ({
+  url: `${window.location.origin}${returnPath}`,
 });
 
 const registerWithEmail = (email, password) => createUserWithEmailAndPassword(auth, email, password);
 
-const sendVerificationEmail = (user) => sendEmailVerification(user, verificationActionSettings());
+// returnPath: where the link's Continue button leads (Google registration
+// returns to /complete-profile; email/password registration to /login).
+const sendVerificationEmail = (user, returnPath) => sendEmailVerification(user, verificationActionSettings(returnPath));
 
 // Re-fetches the user record from Firebase so `emailVerified` reflects the
 // latest state, then forces a new ID token so its `email_verified` claim
@@ -106,6 +110,26 @@ const changeAccountPassword = async (email, currentPassword, newPassword) => {
   await updatePassword(user, newPassword);
 };
 
+const hasPasswordSignIn = (user) =>
+  Boolean(user?.providerData.some((p) => p.providerId === EmailAuthProvider.PROVIDER_ID));
+
+// Adds an email/password sign-in to the signed-in (Google) user. This links a
+// credential to the SAME Firebase account (same uid); it never creates a second
+// user. Firebase may ask for a fresh sign-in first, in which case the user
+// re-confirms with Google once and the link is retried.
+const linkPasswordCredential = async (user, password) => {
+  const credential = EmailAuthProvider.credential(user.email, password);
+  try {
+    await linkWithCredential(user, credential);
+  } catch (err) {
+    if (err.code !== 'auth/requires-recent-login') throw err;
+    await reauthenticateWithPopup(user, googleProvider());
+    await linkWithCredential(user, credential);
+  }
+  await user.getIdToken(true); // fresh token, so the backend sees the new provider
+  return user;
+};
+
 export {
   auth,
   firestore,
@@ -117,4 +141,6 @@ export {
   signInWithGoogle,
   googleCredentialFromError,
   changeAccountPassword,
+  hasPasswordSignIn,
+  linkPasswordCredential,
 };

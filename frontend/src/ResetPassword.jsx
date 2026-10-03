@@ -105,6 +105,9 @@ const ResetPassword = ({ onLogin, onNavigate }) => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message);
+      // Unfinished Google registration: no session yet. The next sign-in
+      // continues on Complete Your Profile.
+      if (data.profileCompleted === false || !data.token) throw new Error('profile incomplete');
       localStorage.setItem('token', data.token);
       onLogin(data.user); // App navigates to the dashboard
     } catch {

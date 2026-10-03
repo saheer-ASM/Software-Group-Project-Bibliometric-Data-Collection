@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } fr
 import AuthForm from './AuthForm';
 import ResetPassword from './ResetPassword';
 import VerifyEmail from './VerifyEmail';
+import CompleteProfile from './CompleteProfile';
 import Dashboard from './Dashboard';
 import DataExplorer from './DataExplorer';
 import AboutUs from './AboutUs';
@@ -25,6 +26,7 @@ export const PATHS = {
   forgotPassword: '/forgot-password',
   verifyEmail: '/verify-email',
   resetPassword: '/reset-password',
+  completeProfile: '/complete-profile', // new Google accounts: designation + password
   dashboard: '/dashboard',
   explorer: '/data-explorer',
   settings: '/settings', // the Profile Settings page
@@ -235,6 +237,17 @@ function App() {
                   initialError={location.state?.error || ''}
                 />
               </GuestOnly>
+            )}
+          />
+          {/* New Google account: finish the profile before getting a session. */}
+          <Route
+            path={PATHS.completeProfile}
+            element={user ? <Navigate to={PATHS.dashboard} replace /> : (
+              <CompleteProfile
+                onLogin={handleLogin}
+                onNavigate={handleAuthNavigate}
+                initialState={location.state?.registration}
+              />
             )}
           />
           {/* Firebase email-action links; works signed in or out. */}

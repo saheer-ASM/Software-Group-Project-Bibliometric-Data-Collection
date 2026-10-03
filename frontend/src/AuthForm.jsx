@@ -10,6 +10,7 @@ import {
 import { API_BASE_URL } from './config/api';
 import { sanitizeEmail, isValidEmail, checkPassword } from './authValidation';
 import { authErrorMessage } from './authErrors';
+import { RESEND_COOLDOWN_S, getRegistrationState } from './services/registrationService';
 import './AuthForm.css';
 
 // mode: 'login' | 'register' | 'forgot' (the /login, /register and /forgot-password URLs in App.js)
@@ -40,6 +41,23 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
   // that SAME Firebase user (no second account).
   const [pendingGoogleLink, setPendingGoogleLink] = useState(null); // { email, credential }
 
+  // Sign In result that needs explaining instead of a session:
+  // { kind: 'not-registered' } | { kind: 'incomplete' | 'verify', email, registration }
+  const [accountNotice, setAccountNotice] = useState(null);
+  const [noticeMessage, setNoticeMessage] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return undefined;
+    const id = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(id);
+  }, [resendCooldown]);
+
+  // Leaving the Sign In panel clears its notice.
+  useEffect(() => {
+    if (mode !== 'login') setAccountNotice(null);
+  }, [mode]);
+
   // Forgot Password lives inside the login panel at /forgot-password (mode 'forgot'):
   // null = Sign In form, 'form' = enter email, 'sent' = "Check your email".
   const [resetSent, setResetSent] = useState(false);
@@ -62,21 +80,62 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
     return false;
   };
 
-  const exchangeFirebaseToken = async (firebaseUser, profile = {}) => {
-    const idToken = await firebaseUser.getIdToken();
-    const response = await fetch(`${API_BASE_URL}/api/auth/firebase-login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken, ...profile }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const err = new Error(payload.message || 'Unable to complete account setup');
-      err.code = payload.code;
-      throw err;
+  // What a successful Firebase sign-in means for ScholarMetrics. Firebase
+  // Authentication and ScholarMetrics registration are separate: the backend
+  // checks the profile + Firebase state and answers with a status.
+  //   intent 'register' (Register page): may start / resume a registration.
+  //   intent 'signin'   (Sign In page):  never starts one; explains instead.
+  const resolveAccount = async (firebaseUser, intent, viaGoogle = false) => {
+    const { signOut } = await import('firebase/auth');
+    const data = await getRegistrationState(firebaseUser, intent);
+    switch (data.status) {
+      case 'COMPLETED':
+        localStorage.setItem('token', data.token);
+        onLogin({ ...data.user, photoURL: firebaseUser.photoURL || '' });
+        return;
+      case 'COMPLETED_UNVERIFIED':
+        // Finished email/password registration waiting for its verification link.
+        onNavigate('/verify-email', { notice: 'Please verify your email address before logging in.' });
+        return;
+      case 'NOT_REGISTERED':
+        await signOut(auth).catch(() => {});
+        setAccountNotice({ kind: 'not-registered', viaGoogle });
+        return;
+      default: // INCOMPLETE | VERIFICATION_PENDING
+        if (intent === 'register') {
+          onNavigate('/complete-profile', { registration: data });
+          return;
+        }
+        // Keep the Firebase session so "Continue Registration" can resume.
+        setAccountNotice({
+          kind: data.status === 'VERIFICATION_PENDING' ? 'verify' : 'incomplete',
+          email: firebaseUser.email,
+          registration: data,
+        });
     }
-    localStorage.setItem('token', payload.token);
-    return payload.user;
+  };
+
+  const continueRegistration = () => {
+    onNavigate('/complete-profile', { registration: accountNotice?.registration });
+  };
+
+  const resendFromNotice = async () => {
+    const user = auth.currentUser;
+    if (!user || resendCooldown > 0) return;
+    setNoticeMessage('');
+    try {
+      const { reload } = await import('firebase/auth');
+      await reload(user);
+      if (user.emailVerified) {
+        setNoticeMessage('Your email is already verified. Continue your registration to finish.');
+        return;
+      }
+      await sendVerificationEmail(user, '/complete-profile');
+      setResendCooldown(RESEND_COOLDOWN_S);
+      setNoticeMessage('Verification email sent again. Please check your inbox and Spam/Junk folder.');
+    } catch (err) {
+      setNoticeMessage(authErrorMessage(err, 'Could not send the verification email. Please try again.'));
+    }
   };
 
   // Stores Full Name + Designation for a newly created (unverified) Firebase
@@ -100,8 +159,10 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
   //  - Existing account Firebase will not auto-link
   //    (auth/account-exists-with-different-credential): keep the Google credential,
   //    ask for the account password, then link it with linkWithCredential().
-  const handleGoogleLogin = async () => {
+  const handleGoogleLogin = async (intent) => {
     setError('');
+    setAccountNotice(null);
+    setNoticeMessage('');
     if (!ensureFirebaseConfig()) return;
     setLoading(true);
 
@@ -109,9 +170,7 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
     let userCredential;
     try {
       userCredential = await signInWithGoogle();
-      const appUser = await exchangeFirebaseToken(userCredential.user);
-      localStorage.setItem('authProvider', 'google');
-      onLogin({ ...appUser, photoURL: userCredential.user.photoURL || '' });
+      await resolveAccount(userCredential.user, intent, true);
     } catch (err) {
       if (err.code === 'auth/account-exists-with-different-credential') {
         const credential = googleCredentialFromError(err);
@@ -190,19 +249,14 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setAccountNotice(null);
+    setNoticeMessage('');
     if (!ensureFirebaseConfig()) return;
     setLoading(true);
     try {
       const { signInWithEmailAndPassword, linkWithCredential } = await import('firebase/auth');
       const email = sanitizeEmail(loginEmail);
       const userCredential = await signInWithEmailAndPassword(auth, email, loginPassword);
-
-      // Unverified accounts go back to the verification page (Firebase session kept
-      // so they can resend). The backend enforces the same rule on the ID token.
-      if (!userCredential.user.emailVerified) {
-        onNavigate('/verify-email', { notice: 'Please verify your email address before logging in.' });
-        return;
-      }
 
       // Finish a pending "Continue with Google": link the Google credential to
       // this same account so both sign-in methods work from now on.
@@ -216,12 +270,9 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
         setPendingGoogleLink(null);
       }
 
-      const appUser = await exchangeFirebaseToken(userCredential.user);
-
-      onLogin({
-        ...appUser,
-        photoURL: userCredential.user.photoURL || '',
-      });
+      // Completed -> Dashboard; unverified email/password account -> /verify-email;
+      // unfinished Google registration -> explained above the form.
+      await resolveAccount(userCredential.user, 'signin');
     } catch (err) {
       if (err.code === 'EMAIL_NOT_VERIFIED') {
         onNavigate('/verify-email', { notice: 'Please verify your email address before logging in.' });
@@ -354,6 +405,42 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
         {forgotStep === null && (
         <form onSubmit={handleLoginSubmit}>
           <h1>Login</h1>
+          {accountNotice && (
+            <div className={`account-notice account-notice-${accountNotice.kind}`} role="status">
+              {accountNotice.kind === 'not-registered' && (
+                <>
+                  <p className="account-notice-title"><i className="bx bx-user-x" aria-hidden="true" /> No ScholarMetrics account found.</p>
+                  <p>This {accountNotice.viaGoogle ? 'Google account' : 'account'} is not registered with ScholarMetrics. Please create an account first.</p>
+                  <div className="account-notice-actions">
+                    <button type="button" className="account-notice-primary" onClick={() => { setAccountNotice(null); onNavigate('/register'); }}>Create Account</button>
+                  </div>
+                </>
+              )}
+              {accountNotice.kind === 'incomplete' && (
+                <>
+                  <p className="account-notice-title"><i className="bx bx-error-circle" aria-hidden="true" /> Your registration is not complete.</p>
+                  <p>Please complete your registration and verify your email address before signing in.</p>
+                  <div className="account-notice-actions">
+                    <button type="button" className="account-notice-primary" onClick={continueRegistration}>Continue Registration</button>
+                  </div>
+                </>
+              )}
+              {accountNotice.kind === 'verify' && (
+                <>
+                  <p className="account-notice-title"><i className="bx bx-envelope" aria-hidden="true" /> Email verification required.</p>
+                  <p>We've sent a verification email to <strong>{accountNotice.email}</strong>.</p>
+                  <p>Please check your inbox and <strong>Spam/Junk</strong> folder, then click the verification link.</p>
+                  {noticeMessage && <p className="account-notice-message">{noticeMessage}</p>}
+                  <div className="account-notice-actions">
+                    <button type="button" className="account-notice-secondary" onClick={resendFromNotice} disabled={resendCooldown > 0}>
+                      {resendCooldown > 0 ? `Resend Verification Email (${resendCooldown}s)` : 'Resend Verification Email'}
+                    </button>
+                    <button type="button" className="account-notice-primary" onClick={continueRegistration}>Continue Registration</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {pendingGoogleLink && (
             <div className="link-prompt" role="status">
               <p>
@@ -395,7 +482,7 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
             className="google-btn"
             disabled={loading || missingConfig.length > 0}
             title={missingConfig.length > 0 ? 'Firebase not configured' : undefined}
-            onClick={handleGoogleLogin}
+            onClick={() => handleGoogleLogin('signin')}
           >
             <img src="/assets/google.png" alt="" aria-hidden="true" />
             <span>Continue with Google</span>
@@ -503,6 +590,17 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
           </div>
           <button type="submit" className="btn" disabled={loading}>
             {loading ? 'Registering…' : 'Register'}
+          </button>
+          <div className="auth-divider" role="separator"><span>OR</span></div>
+          <button
+            type="button"
+            className="google-btn"
+            disabled={loading || missingConfig.length > 0}
+            title={missingConfig.length > 0 ? 'Firebase not configured' : undefined}
+            onClick={() => handleGoogleLogin('register')}
+          >
+            <img src="/assets/google.png" alt="" aria-hidden="true" />
+            <span>Continue with Google</span>
           </button>
         </form>
       </div>
