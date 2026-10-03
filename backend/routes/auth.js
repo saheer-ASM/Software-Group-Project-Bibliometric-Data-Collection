@@ -50,21 +50,11 @@ async function verifyFirebaseToken(idToken, { requireVerifiedEmail = true } = {}
 
 // One profile per Firebase account. Firebase links Google and email/password
 // for the same email into ONE uid, so look the profile up by uid first, then by
-// email (accounts created before uids were stored). A verified Google-first
-// user without a profile gets one created here.
-async function findOrCreateProfile(decoded) {
+// email (accounts created before uids were stored). Never creates a profile.
+async function findProfile(decoded) {
   let user = await userStore.findByFirebaseUid(decoded.uid);
   if (!user) user = await userStore.findByEmail(decoded.email);
-
-  if (!user) {
-    return userStore.createFirebaseUser({
-      username: decoded.name || decoded.email.split('@')[0] || 'User',
-      email: decoded.email,
-      designation: 'Researcher',
-      firebaseUid: decoded.uid,
-      emailVerified: decoded.email_verified === true,
-    });
-  }
+  if (!user) return null;
 
   const updates = {};
   // The token proves ownership of this verified email, so it is safe to point
@@ -78,6 +68,92 @@ async function findOrCreateProfile(decoded) {
   }
   return Object.keys(updates).length ? userStore.updateUser(user.id, updates) : user;
 }
+
+// Only the Register page starts a ScholarMetrics registration: a first Google
+// sign-in there creates an INCOMPLETE profile (designation + password + email
+// verification still to do). Sign In never creates profiles.
+function createIncompleteProfile(decoded) {
+  return userStore.createFirebaseUser({
+    username: decoded.name || decoded.email.split('@')[0] || 'User',
+    email: decoded.email,
+    designation: '',
+    firebaseUid: decoded.uid,
+    emailVerified: decoded.email_verified === true,
+    profileCompleted: false,
+  });
+}
+
+// A Sign In pop-up creates a Firebase Auth record for any Google account. If that
+// account never registered (no profile, Google-only), remove the record again.
+// Email/password records are never touched.
+async function removeUnregisteredGoogleUser(uid) {
+  try {
+    const firebaseUser = await admin.auth().getUser(uid);
+    const providers = firebaseUser.providerData.map((p) => p.providerId);
+    if (!providers.includes('password')) await admin.auth().deleteUser(uid);
+  } catch (err) {
+    console.warn('Could not remove unregistered Firebase user:', err.message);
+  }
+}
+
+const isProfileComplete = (user) => user.profileCompleted !== false;
+
+const profileSummary = (user) => ({ username: user.username, email: user.email, designation: user.designation || '' });
+
+// Registration state = the stored "completed" flag (profileCompleted) plus facts
+// read from Firebase itself, so the remaining step can never be out of date:
+//   no designation             -> step 'profile'   (INCOMPLETE)
+//   no email/password sign-in  -> step 'password'  (INCOMPLETE)
+//   email not verified         -> step 'verify'    (VERIFICATION_PENDING)
+//   all done                   -> COMPLETED (flag is set here)
+// Verification is Firebase's own emailVerified on the user record, never a
+// value sent by the browser.
+async function registrationState(user, uid) {
+  const firebaseUser = await admin.auth().getUser(uid);
+  const hasPassword = firebaseUser.providerData.some((p) => p.providerId === 'password');
+  const verified = firebaseUser.emailVerified === true;
+
+  if (isProfileComplete(user)) {
+    // Finished profiles still need a verified email to sign in (existing rule).
+    return { user, status: verified ? 'COMPLETED' : 'COMPLETED_UNVERIFIED' };
+  }
+  let step = null;
+  if (!user.designation) step = 'profile';
+  else if (!hasPassword) step = 'password';
+  else if (!verified) step = 'verify';
+
+  if (!step) {
+    const completed = await userStore.updateUser(user.id, { profileCompleted: true, emailVerified: true });
+    return { user: completed, status: 'COMPLETED' };
+  }
+  return { user, status: step === 'verify' ? 'VERIFICATION_PENDING' : 'INCOMPLETE', step };
+}
+
+// Response for a registration state. Only COMPLETED gets the session JWT.
+function sendState(res, { user, status, step }) {
+  if (status === 'COMPLETED') {
+    return res.json({ status, profileCompleted: true, token: signToken(user.id), user: userStore.publicUser(user) });
+  }
+  if (status === 'COMPLETED_UNVERIFIED') {
+    return res.json({ status, code: 'EMAIL_NOT_VERIFIED', email: user.email });
+  }
+  return res.json({ status, step, profileCompleted: false, profile: profileSummary(user) });
+}
+
+// Routes that start a session for a token whose email is already verified
+// (verifyFirebaseToken checked it). Incomplete profiles get no token.
+function sendSession(res, user) {
+  if (!isProfileComplete(user)) {
+    return res.json({ status: 'INCOMPLETE', profileCompleted: false, profile: profileSummary(user) });
+  }
+  return res.json({ status: 'COMPLETED', profileCompleted: true, token: signToken(user.id), user: userStore.publicUser(user) });
+}
+
+const notRegistered = (res) => res.status(404).json({
+  status: 'NOT_REGISTERED',
+  code: 'ACCOUNT_NOT_FOUND',
+  message: 'No ScholarMetrics account found. Please create an account first.',
+});
 
 // POST /api/auth/register-profile
 // Called right after the frontend creates the Firebase email/password account.
@@ -131,21 +207,104 @@ router.post('/firebase-login', async (req, res) => {
     const { idToken, username: requestedUsername, designation: requestedDesignation } = req.body;
     const decoded = await verifyFirebaseToken(idToken);
 
-    let user = await findOrCreateProfile(decoded);
+    let user = await findProfile(decoded);
+    if (!user) return notRegistered(res);
 
+    // Name/designation edits here only apply to completed profiles; incomplete
+    // ones are finished through the registration routes.
     const updates = {};
     if (requestedUsername?.trim()) updates.username = requestedUsername;
     if (requestedDesignation?.trim()) updates.designation = requestedDesignation;
-    if (Object.keys(updates).length) user = await userStore.updateUser(user.id, updates);
+    if (isProfileComplete(user) && Object.keys(updates).length) {
+      user = await userStore.updateUser(user.id, updates);
+    }
 
-    const token = signToken(user.id);
-
-    res.json({
-      token,
-      user: userStore.publicUser(user),
-    });
+    sendSession(res, user);
   } catch (err) {
     sendError(res, err, 'Sign-in failed');
+  }
+});
+
+// POST /api/auth/registration-status  { idToken, intent: 'register' | 'signin' }
+// Decides what a (Google or password) sign-in means for ScholarMetrics:
+//   NOT_REGISTERED        no profile (Sign In only; the Register page creates one)
+//   INCOMPLETE            + step 'profile' | 'password'
+//   VERIFICATION_PENDING  + step 'verify'
+//   COMPLETED_UNVERIFIED  finished profile, email not verified yet
+//   COMPLETED             + session token
+// Accepts unverified tokens on purpose: it is how unfinished registrations are
+// recognised. It never issues a session unless Firebase reports a verified email.
+router.post('/registration-status', async (req, res) => {
+  try {
+    const decoded = await verifyFirebaseToken(req.body.idToken, { requireVerifiedEmail: false });
+    const intent = req.body.intent === 'register' ? 'register' : 'signin';
+
+    let user = await findProfile(decoded);
+    if (!user) {
+      if (intent !== 'register') {
+        await removeUnregisteredGoogleUser(decoded.uid);
+        return notRegistered(res);
+      }
+      user = await createIncompleteProfile(decoded);
+    }
+    sendState(res, await registrationState(user, decoded.uid));
+  } catch (err) {
+    sendError(res, err, 'Could not check your account');
+  }
+});
+
+// POST /api/auth/registration/profile  { idToken, username, designation }
+// Saves step 1 (Complete Your Profile) of an unfinished registration, so a user
+// who leaves later resumes at the next step.
+router.post('/registration/profile', async (req, res) => {
+  try {
+    const decoded = await verifyFirebaseToken(req.body.idToken, { requireVerifiedEmail: false });
+    const username = String(req.body.username || '').trim();
+    const designation = String(req.body.designation || '').trim();
+
+    if (username.length < 3 || username.length > 100) {
+      return res.status(400).json({ message: 'Full name must be between 3 and 100 characters.' });
+    }
+    if (designation.length < 2 || designation.length > 100) {
+      return res.status(400).json({ message: 'Designation must be between 2 and 100 characters.' });
+    }
+
+    let user = await findProfile(decoded);
+    if (!user) return notRegistered(res);
+    if (isProfileComplete(user)) {
+      // Finished profiles are edited on the Settings page, not here.
+      return res.status(409).json({ message: 'Your registration is already complete.' });
+    }
+    user = await userStore.updateUser(user.id, { username, designation });
+    sendState(res, await registrationState(user, decoded.uid));
+  } catch (err) {
+    sendError(res, err, 'Could not save your profile');
+  }
+});
+
+// POST /api/auth/complete-profile  { idToken }
+// Final step: "I've Verified". The token itself must carry email_verified: true
+// (verifyFirebaseToken), and the profile must have a designation and a linked
+// email/password sign-in. Then the profile is marked complete and the session
+// is issued.
+router.post('/complete-profile', async (req, res) => {
+  try {
+    const decoded = await verifyFirebaseToken(req.body.idToken);
+    const user = await findProfile(decoded);
+    if (!user) return notRegistered(res);
+
+    const state = await registrationState(user, decoded.uid);
+    if (state.status !== 'COMPLETED') {
+      return res.status(400).json({
+        status: state.status,
+        step: state.step,
+        code: state.step === 'password' ? 'PASSWORD_REQUIRED' : 'REGISTRATION_INCOMPLETE',
+        message: 'Please finish the remaining registration steps.',
+      });
+    }
+    sendState(res, state);
+  } catch (err) {
+    sendError(res, err, 'Could not complete your registration');
   }
 });
 
@@ -183,11 +342,7 @@ router.post('/login', async (req, res) => {
       }
     }
 
-    const token = signToken(user.id);
-    res.json({
-      token,
-      user: userStore.publicUser(user),
-    });
+    sendSession(res, user);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
@@ -197,9 +352,9 @@ router.post('/login', async (req, res) => {
 router.post('/social', async (req, res) => {
   try {
     const decoded = await verifyFirebaseToken(req.body.idToken);
-    const user = await findOrCreateProfile(decoded);
-    const token = signToken(user.id);
-    res.json({ token, user: userStore.publicUser(user) });
+    const user = await findProfile(decoded);
+    if (!user) return notRegistered(res);
+    sendSession(res, user);
   } catch (err) {
     sendError(res, err, 'Social sign-in failed');
   }
@@ -218,8 +373,7 @@ router.post('/reset-password', async (req, res) => {
 
     if (user.password) await userStore.updateUser(user.id, { password: null });
 
-    const token = signToken(user.id);
-    res.json({ token, user: userStore.publicUser(user) });
+    sendSession(res, user);
   } catch (err) {
     sendError(res, err, 'Password reset failed');
   }

@@ -27,6 +27,8 @@ function userFromDoc(doc) {
     password: data.password,
     firebaseUid: data.firebaseUid,
     emailVerified: data.emailVerified === true,
+    // Profiles created before this field existed are complete.
+    profileCompleted: data.profileCompleted !== false,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
   };
@@ -171,7 +173,9 @@ async function createUser({ username, email, designation, password }) {
 
 // Profile for an account whose password is managed by Firebase Authentication.
 // No password (or password hash) is stored here — Firebase owns the credential.
-async function createFirebaseUser({ username, email, designation, firebaseUid, emailVerified = false }) {
+// profileCompleted: false for accounts created by a first Google sign-in, until
+// the user adds a designation and links a password (/api/auth/complete-profile).
+async function createFirebaseUser({ username, email, designation, firebaseUid, emailVerified = false, profileCompleted = true }) {
   const now = new Date().toISOString();
   const user = {
     username: normalizeUsername(username),
@@ -181,6 +185,7 @@ async function createFirebaseUser({ username, email, designation, firebaseUid, e
     password: null,
     firebaseUid,
     emailVerified,
+    profileCompleted,
     createdAt: now,
     updatedAt: now,
   };

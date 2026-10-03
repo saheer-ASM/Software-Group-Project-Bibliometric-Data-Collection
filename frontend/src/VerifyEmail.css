@@ -144,3 +144,46 @@
   background: rgba(220, 38, 38, 0.1);
   color: #dc2626;
 }
+
+/* Complete Your Profile (CompleteProfile.jsx) */
+.complete-card form > .complete-step {
+  margin: 0 0 0.25rem;
+  color: #9a711d;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.complete-label {
+  display: block;
+  margin: 0 0 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.input-box input.complete-readonly,
+.input-box input.complete-readonly:focus {
+  background: var(--background);
+  border-style: dashed;
+  color: var(--text-secondary);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.complete-card .field-error.complete-error {
+  margin: -0.5rem 0 1rem;
+}
+
+.complete-card .verify-actions .verify-link {
+  margin-top: 0.25rem;
+}
+
+.verify-text.complete-hint {
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  background: rgba(196, 153, 62, 0.1);
+  color: #7a5a17;
+}
