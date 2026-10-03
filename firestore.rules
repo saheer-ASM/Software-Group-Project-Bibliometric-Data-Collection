@@ -1,0 +1,95 @@
+rules_version = '2';
+
+// Firestore Security Rules for ScholarMetrics.
+//
+// - The backend reaches Firestore through the Admin SDK, which bypasses these
+//   rules (users, userLibraries, ...). Browsers may only touch the collections
+//   that are explicitly matched below; everything else is denied.
+// - Administrators are identified by the Firebase Auth custom claim
+//   `admin: true`, set with `npm run set-admin` in backend/. It is part of the
+//   signed ID token, so a user cannot grant it to themselves.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Email/password accounts must have verified their email; Google accounts
+    // are always verified.
+    function verifiedUser() {
+      return signedIn()
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.get('admin', false) == true;
+    }
+
+    function isText(value, minLen, maxLen) {
+      return value is string && value.size() >= minLen && value.size() <= maxLen;
+    }
+
+    // A new submission must belong to the signed-in user (uid + email come from
+    // the verified token, not from anything the client chooses), start in the
+    // default status, and use the server's clock for both timestamps.
+    function ownNewSubmission(defaultStatus) {
+      let d = request.resource.data;
+      return verifiedUser()
+        && d.userId == request.auth.uid
+        && d.userEmail == request.auth.token.email
+        && d.status == defaultStatus
+        && d.createdAt == request.time
+        && d.updatedAt == request.time;
+    }
+
+    // Admins may change only the status, an optional reply, and updatedAt.
+    function validAdminUpdate(allowedStatuses) {
+      let d = request.resource.data;
+      return isAdmin()
+        && d.diff(resource.data).affectedKeys().hasOnly(['status', 'adminResponse', 'updatedAt'])
+        && d.status in allowedStatuses
+        && d.updatedAt == request.time
+        && (!('adminResponse' in d) || isText(d.adminResponse, 0, 2000));
+    }
+
+    match /feedback/{feedbackId} {
+      allow create: if ownNewSubmission('New')
+        && request.resource.data.keys().hasOnly(
+             ['userId', 'userEmail', 'feedbackType', 'message', 'status', 'createdAt', 'updatedAt'])
+        && request.resource.data.feedbackType in
+             ['Suggestion', 'General Feedback', 'Feature Request', 'Other']
+        && isText(request.resource.data.message, 10, 5000);
+
+      // Admins read everything; a user can read only their own submissions.
+      allow get, list: if isAdmin()
+        || (signedIn() && resource.data.userId == request.auth.uid);
+
+      allow update: if validAdminUpdate(['New', 'In Review', 'Resolved']);
+      allow delete: if isAdmin();
+    }
+
+    match /issues/{issueId} {
+      allow create: if ownNewSubmission('Open')
+        && request.resource.data.keys().hasOnly(
+             ['userId', 'userEmail', 'title', 'category', 'description', 'status', 'createdAt', 'updatedAt'])
+        && isText(request.resource.data.title, 5, 150)
+        && request.resource.data.category in
+             ['Bug', 'Login/Authentication', 'Dashboard', 'Data Explorer', 'Other']
+        && isText(request.resource.data.description, 10, 5000);
+
+      allow get, list: if isAdmin()
+        || (signedIn() && resource.data.userId == request.auth.uid);
+
+      allow update: if validAdminUpdate(['Open', 'In Progress', 'Resolved', 'Closed']);
+      allow delete: if isAdmin();
+    }
+
+    // Anything not matched above (users, userLibraries, ...) is backend-only.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,214 @@
+/* Send Feedback / Report an Issue modals. Mirrors the Data Explorer
+   "save to collection" dialog so it matches the existing ScholarMetrics style. */
+
+.support-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgba(4, 19, 37, 0.58);
+  backdrop-filter: blur(4px);
+}
+
+.support-dialog {
+  width: min(540px, 100%);
+  max-height: calc(100vh - 2.5rem);
+  overflow-y: auto;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(4, 19, 37, 0.3);
+  text-align: left;
+}
+
+.support-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.support-dialog-header > span {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: rgba(196, 153, 62, 0.14);
+  color: #8a651c;
+  font-size: 1.45rem;
+}
+
+.support-dialog-header > div {
+  flex: 1;
+}
+
+.support-dialog-header small {
+  color: #9a711d;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.support-dialog-header h2 {
+  margin: 0.15rem 0 0;
+  color: var(--primary-color);
+  font-size: 1.35rem;
+}
+
+.support-dialog-header > button {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+
+.support-signed-in,
+.support-login-required p {
+  margin: 0 0 1rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.support-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.support-field select,
+.support-field input,
+.support-field textarea {
+  padding: 0 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--background);
+  color: var(--text-primary);
+  font: 400 0.9rem 'Inter', sans-serif;
+  text-transform: none;
+  letter-spacing: normal;
+  outline: none;
+}
+
+.support-field select,
+.support-field input {
+  height: 46px;
+}
+
+.support-field textarea {
+  min-height: 130px;
+  padding: 0.75rem 0.85rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.support-field select:focus,
+.support-field input:focus,
+.support-field textarea:focus {
+  border-color: var(--secondary-color);
+  box-shadow: 0 0 0 3px rgba(26, 95, 122, 0.13);
+}
+
+.support-field [aria-invalid='true'] {
+  border-color: #dc2626;
+}
+
+.support-error {
+  color: #dc2626;
+  font-size: 0.78rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.support-submit-error {
+  margin: 0 0 0.5rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.08);
+  color: #b91c1c;
+  font-size: 0.85rem;
+}
+
+.support-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+}
+
+.support-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font: 700 0.85rem 'Inter', sans-serif;
+  cursor: pointer;
+}
+
+.support-actions button.primary {
+  border-color: var(--secondary-color);
+  background: var(--secondary-color);
+  color: #fff;
+}
+
+.support-actions button:disabled,
+.support-dialog-header > button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.support-toast {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 24px;
+  z-index: 1100;
+  width: fit-content;
+  max-width: calc(100vw - 32px);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.8rem 1.25rem;
+  border-radius: 10px;
+  background: #16a34a;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+  box-shadow: 0 12px 30px rgba(4, 19, 37, 0.25);
+}
+
+@media screen and (max-width: 480px) {
+  .support-dialog {
+    padding: 1.1rem;
+  }
+
+  .support-actions {
+    flex-direction: column-reverse;
+  }
+
+  .support-actions button {
+    justify-content: center;
+  }
+}

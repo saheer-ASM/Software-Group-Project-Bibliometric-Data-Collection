@@ -1,0 +1,146 @@
+/* Email verification page (shown after registration) */
+
+.verify-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem 1rem;
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+}
+
+.verify-card {
+  width: 100%;
+  max-width: 480px;
+  padding: 2.5rem 2rem;
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: var(--shadow-xl);
+  text-align: center;
+}
+
+.verify-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 1rem;
+  border-radius: 50%;
+  background: rgba(26, 95, 122, 0.1);
+  color: var(--secondary-color);
+  font-size: 2rem;
+}
+
+.verify-card h1 {
+  font-size: 1.85rem;
+  font-weight: 800;
+  color: var(--primary-color);
+  letter-spacing: -0.03em;
+  margin-bottom: 0.75rem;
+}
+
+.verify-text {
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+
+.verify-email {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  word-break: break-all;
+  margin-bottom: 0.75rem;
+}
+
+.verify-message {
+  font-size: 0.85rem;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin: 0.5rem 0 0.25rem;
+  text-align: left;
+}
+
+.verify-message.info {
+  background: rgba(22, 163, 74, 0.1);
+  color: #15803d;
+}
+
+.verify-message.error {
+  background: rgba(220, 38, 38, 0.08);
+  color: #b91c1c;
+}
+
+.verify-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.verify-actions .btn {
+  gap: 0.4rem;
+}
+
+.btn.btn-secondary {
+  background: var(--surface);
+  color: var(--secondary-color);
+  border: 1px solid var(--secondary-color);
+  box-shadow: none;
+}
+
+.btn.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.btn.btn-secondary:disabled {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.verify-link {
+  margin-top: 1.25rem;
+  background: none;
+  border: none;
+  font-size: 0.85rem;
+  color: var(--secondary-color);
+  cursor: pointer;
+}
+
+.verify-link:hover {
+  text-decoration: underline;
+}
+
+/* Password reset / email-action page (ResetPassword.jsx) */
+.reset-card form {
+  text-align: left;
+}
+
+.reset-card form > .verify-icon,
+.reset-card form > h1,
+.reset-card form > .verify-text,
+.reset-card form > .verify-email {
+  text-align: center;
+}
+
+.reset-card form > .verify-icon {
+  display: flex;
+  margin: 0 auto 1rem;
+}
+
+.reset-card .password-rules {
+  margin: -0.6rem 0 1.1rem;
+}
+
+.verify-icon.reset-icon-success {
+  background: rgba(22, 163, 74, 0.12);
+  color: #16a34a;
+}
+
+.verify-icon.reset-icon-error {
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+}

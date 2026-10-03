@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { API_BASE_URL } from './config/api';
 import './Dashboard.css';
 import AppNavbar from './AppNavbar';
+import { FooterQuickLinks, FooterContactLinks, FooterCopyright } from './FooterParts';
 
 const EMPTY_STATS = { publications: null, authors: null, fields: null };
 
@@ -267,7 +268,7 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
                 )}
               </div>
             )}
-            <a href="#library" className="nav-link" onClick={onNavigateToLibrary}>My Library</a>
+            <a href="/library" className="nav-link" onClick={onNavigateToLibrary}>My Library</a>
           </form>
         </section>
 
@@ -323,33 +324,18 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
           <div className="footer-section">
             <h4>Quick Links</h4>
             <ul>
-              <li><a href="#dashboard">Dashboard</a></li>
-              <li><a href="#explorer">Data Explorer</a></li>
-              <li><a href="#settings">Settings</a></li>
-              <li><a href="#about">About Us</a></li>
-            </ul>
-          </div>
-
-          <div className="footer-section">
-            <h4>Resources</h4>
-            <ul>
-              <li><a href="#docs">Documentation</a></li>
-              <li><a href="#api">API Reference</a></li>
-              <li><a href="#tutorials">Tutorials</a></li>
-              <li><a href="#faq">FAQ</a></li>
+              <FooterQuickLinks />
             </ul>
           </div>
 
           <div className="footer-section">
             <h4>Contact</h4>
             <ul>
-              <li><a href="#support">Support Center</a></li>
-              <li><a href="mailto:info@academine.edu">info@academine.edu</a></li>
-              <li><a href="#feedback">Send Feedback</a></li>
-              <li><a href="#report">Report an Issue</a></li>
+              <FooterContactLinks />
             </ul>
           </div>
         </div>
+        <FooterCopyright />
       </footer>
     </div>
   );
