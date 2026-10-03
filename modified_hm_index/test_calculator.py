@@ -29,7 +29,9 @@ Covers:
        must normalize to exactly 1.0 (they ARE the field average)
     3. The Eq. 19 h-index-style threshold ("early break") actually
        firing when a long tail of low-citation papers can't keep pace
-       with cumulative contribution rank
+       with cumulative contribution rank. Eq. 19 compares each
+       paper's OWN effective citations against the cumulative
+       effective rank -- not a running sum of citations
     4. field_weight correctly affecting the Eq. 20 OUTER cross-field
        combination (its role after this interface change -- see note
        in the test itself for why this differs from earlier revisions
@@ -146,42 +148,46 @@ def test_solo_author_in_field_normalizes_to_one(calc):
 # TEST 3: Eq. 19 threshold actually breaks early on a long tail
 # =============================================================
 #
-# This is the scenario the old buggy code (unconditional `.max()`)
-# would silently get wrong: a long run of near-zero-citation papers
-# should NOT all be swept into the effective rank once cumulative
-# citations stop keeping pace with cumulative contribution rank. A
-# second author with a single strong paper is included so the field
-# average isn't trivially 1.0 for everyone.
+# Eq. 19 compares the k-th paper's OWN effective citations against
+# the CUMULATIVE effective rank at k:
 #
-# Hand trace of the threshold condition (citations=[10, 0.01 x19],
-# author_field_weight=0.9, career_factor=1.0 for every paper -- so
-# each paper's r_eff increment is a constant 0.9):
+#     TC^adj_eff,f,k,i_ak  >=  r_eff,f,a(k)
 #
-#   cum_tc_eff grows ~10 + 0.01*(k-1); cum_r_eff grows 0.9*k.
-#   The condition (cum_tc_eff >= cum_r_eff) fails once k exceeds
-#   ~11, and tracing it precisely gives k_valid = 10, so:
-#       max_r_eff(Y) = 10 * 0.9 = 9.0   (NOT 20 * 0.9 = 18.0 --
-#                                         that would mean the break
-#                                         never fired)
+# (NOT a cumulative sum of citations on the left -- that variant is
+# the g-index shape and sweeps a long weak tail into the rank.)
+#
+# Hand trace. career_factor=1.0 and author_field_weight=0.9 for every
+# paper, so tc_eff(k) = 0.9*cit(k) and r_eff(k) = 0.9*k. The 0.9
+# cancels and the condition reduces to the plain h-index test
+# cit(k) >= k -- which is exactly the point: with unit weights Eq. 19
+# IS the h-index.
+#
+#   citations sorted desc: 10, 8, 6, 4, 2, then 0.01 x15
+#     k=1: 10 >= 1  ok
+#     k=2:  8 >= 2  ok
+#     k=3:  6 >= 3  ok
+#     k=4:  4 >= 4  ok   (equality counts)
+#     k=5:  2 >= 5  FAIL -> break
+#   k_valid = 4, so max_r_eff(Y) = 0.9 * 4 = 3.6
+#
+#   The 15 tail papers never enter the rank. Without the break they
+#   would give 0.9 * 20 = 18.0, five times too large.
 #
 # Peer (single paper, citations=10, author_field_weight=0.9):
-#       max_r_eff(Peer) = 1 * 0.9 = 0.9
+#   k=1: 10 >= 1 ok -> max_r_eff(Peer) = 0.9 * 1 = 0.9
 #
-# Field average = (9.0 + 0.9) / 2 = 4.95
-#   Hm'_Y    = 9.0 / 4.95 = 1.818181...
-#   Hm'_Peer = 0.9 / 4.95 = 0.181818...
+# Field average = (3.6 + 0.9) / 2 = 2.25
+#   Hm'_Y    = 3.6 / 2.25 = 1.6
+#   Hm'_Peer = 0.9 / 2.25 = 0.4
 #
-# NOTE: a naive "compare against the unbroken case" assertion is NOT
-# reliable here, because Peer's small value means the field average
-# scales down almost proportionally with Y's own score either way --
-# the ratio barely moves even though the raw max_r_eff is genuinely
-# halved by the break. Asserting the exact hand-derived value is the
-# only way to actually catch a regression of the early-break logic
-# in this shape of scenario.
+# Y needs a descending run of genuinely strong papers here. A single
+# strong paper followed by a flat tail would break at k=2 and leave Y
+# indistinguishable from Peer, testing nothing.
 
 def test_long_tail_triggers_early_break(calc):
     n = 20
-    citations = [10] + [0.01] * (n - 1)  # one strong paper, long weak tail
+    # a descending run that survives to k=4, then a weak tail
+    citations = [10, 8, 6, 4, 2] + [0.01] * (n - 5)
 
     inputs = make_inputs(
         effective_citations={
@@ -202,12 +208,9 @@ def test_long_tail_triggers_early_break(calc):
     result = calc.calculate(**inputs)
     r = result.set_index("author_id")["modified_hm_index"]
 
-    field_avg = (9.0 + 0.9) / 2
-    y_expected = 9.0 / field_avg
-    peer_expected = 0.9 / field_avg
-
-    assert r["Y"] == pytest.approx(y_expected, rel=1e-9)
-    assert r["Peer"] == pytest.approx(peer_expected, rel=1e-9)
+    field_avg = (3.6 + 0.9) / 2          # = 2.25
+    assert r["Y"] == pytest.approx(3.6 / field_avg, rel=1e-9)      # 1.6
+    assert r["Peer"] == pytest.approx(0.9 / field_avg, rel=1e-9)   # 0.4
 
 
 # =============================================================

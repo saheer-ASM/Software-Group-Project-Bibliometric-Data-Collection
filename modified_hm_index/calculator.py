@@ -246,9 +246,9 @@ class ModifiedHmIndexCalculator:
             )
 
             # -------------------------------------------------
-            # Cumulative effective rank and cumulative
-            # effective citations (needed for the Eq. 19
-            # threshold condition)
+            # Cumulative effective rank (Eq. 18). Note that
+            # r_eff IS cumulative, but the citation side of the
+            # Eq. 19 comparison is NOT -- see below.
             # -------------------------------------------------
 
             sorted_group[
@@ -259,23 +259,32 @@ class ModifiedHmIndexCalculator:
                 ].cumsum()
             )
 
-            sorted_group[
-                "cum_tc_eff"
-            ] = (
-                sorted_group[
-                    "tc_eff"
-                ].cumsum()
-            )
-
             # -------------------------------------------------
-            # Find the largest k such that cumulative effective
-            # citations still meet/exceed the cumulative
-            # effective rank (h-index-style condition, Eq. 19)
+            # Eq. 19 threshold: the k-th paper's OWN effective
+            # citations must meet/exceed the cumulative
+            # effective rank at k --
+            #
+            #     TC^adj_eff,f,k,i_ak  >=  r_eff,f,a(k)
+            #
+            # This is the direct generalisation of the h-index
+            # ("the k-th most-cited paper has at least k
+            # citations"); with career_factor x
+            # author_field_weight equal to 1 it reduces exactly
+            # to the plain h-index.
+            #
+            # NOT a cumulative sum of citations on the left --
+            # that variant is the g-index shape and gives a
+            # materially larger k on a long tail.
+            #
+            # Breaking at the first failure is exact here, not
+            # an approximation: tc_eff is sorted descending and
+            # r_eff is strictly increasing, so the comparison
+            # crosses over at most once.
             # -------------------------------------------------
 
             k_valid = 0
             for satisfied in (
-                sorted_group["cum_tc_eff"]
+                sorted_group["tc_eff"]
                 >= sorted_group["r_eff"]
             ):
                 if satisfied:

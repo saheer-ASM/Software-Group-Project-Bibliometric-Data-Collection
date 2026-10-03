@@ -410,18 +410,20 @@ Section 6.4.5) only requires `Hm'_f > 0`, not any particular formula.
 
 For each `(author_id, field_id)` combination present in the data, papers are
 sorted by `tc_eff` descending, and the calculator finds the largest `k`
-(`k_valid`) such that cumulative effective citations still meet or exceed
-cumulative effective rank (an h-index-style threshold condition):
+(`k_valid`) such that the k-th paper's **own** effective citations still meet
+or exceed the cumulative effective rank (an h-index-style threshold condition).
+Note the asymmetry: `r_eff` is cumulative, the citation side is not. With
+`career_factor x author_field_weight = 1` this reduces exactly to the plain
+h-index ("the k-th most-cited paper has at least k citations"):
 
 ```python
 sorted_group["effective_rank_contribution"] = (
     sorted_group["career_factor"] * sorted_group["author_field_weight"]
 )
 sorted_group["r_eff"] = sorted_group["effective_rank_contribution"].cumsum()
-sorted_group["cum_tc_eff"] = sorted_group["tc_eff"].cumsum()
 
 k_valid = 0
-for satisfied in (sorted_group["cum_tc_eff"] >= sorted_group["r_eff"]):
+for satisfied in (sorted_group["tc_eff"] >= sorted_group["r_eff"]):
     if satisfied:
         k_valid += 1
     else:
@@ -894,7 +896,7 @@ pytest test_calculator.py -v
 | --- | --- |
 | `test_two_author_field_average` | Hand-verified regression check on the core field-average arithmetic: an above-average and a below-average contributor in the same field, checked against an independent calculation |
 | `test_solo_author_in_field_normalizes_to_one` | Confirms the solo-contributor edge case (Section 9.3) — a field with exactly one author must normalize to 1.0 |
-| `test_long_tail_triggers_early_break` | Confirms the Eq. 19 threshold condition (`k_valid`) genuinely stops accumulating papers once cumulative citations fall behind cumulative rank, with the exact expected value hand-derived and asserted |
+| `test_long_tail_triggers_early_break` | Confirms the Eq. 19 threshold condition (`k_valid`) genuinely stops accumulating papers once a paper's own effective citations fall behind the cumulative rank, with the exact expected value hand-derived and asserted. Also guards against reverting to the cumulative-citations (g-index) variant, which would give 1.905 instead of 1.6 on this fixture |
 | `test_field_weight_affects_outer_combination` | Confirms `field_weight` drives the Eq. 20 cross-field combination — its role after the interface change, since `author_field_weight` now carries the per-field scaling that used to be `field_weight`'s first job |
 | `test_eq20_multi_author_multi_field` | A full, hand-verified multi-author, multi-field scenario exercising Pass 1, Pass 2, and the Eq. 20 combination together |
 | `test_missing_required_column_raises` | Confirms column validation still raises `ValueError` on malformed input |
