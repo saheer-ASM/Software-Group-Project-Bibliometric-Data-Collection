@@ -8,23 +8,21 @@ def compute_raw_h_value(
     """
     Numerator of Equation 16:
 
-        max(h : sum_{p'=1}^{h} TCadj_eff,f,p',i_ap' >= h)
+        max(h : TCadj_eff,f,h,i_ah >= h)
 
     Sort the author's papers in this field by effective citation
-    (descending), then find the largest h where the cumulative sum
-    of the top h papers is >= h.
+    (descending), then find the largest h where the h-th paper's
+    effective citation is >= h (the standard h-index condition).
 
     Returns (raw_h_value, papers_used).
     """
 
     sorted_values = sorted(effective_citations, reverse=True)
 
-    cumulative = Decimal("0")
     max_h = 0
 
     for position, value in enumerate(sorted_values, start=1):
-        cumulative += value
-        if cumulative >= position:
+        if value >= position:
             max_h = position
 
     return max_h, len(sorted_values)
