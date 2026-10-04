@@ -315,8 +315,8 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
         <div className="footer-content">
           <div className="footer-section">
             <div className="footer-title">
-              <i className='bx bx-file'></i>
-              <h3>ScholarMetrics</h3>
+              <img src="/assets/nmindex-icon.png" alt="" aria-hidden="true" className="footer-logo" />
+              <h3>NmIndex</h3>
             </div>
             <p>Revolutionizing research evaluation through intelligent automation and comprehensive data collection across global scholarly databases.</p>
           </div>

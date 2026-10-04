@@ -40,6 +40,6 @@ export const FooterContactLinks = () => {
 
 export const FooterCopyright = () => (
   <div className="footer-copyright">
-    © {new Date().getFullYear()} ScholarMetrics. All rights reserved.
+    © {new Date().getFullYear()} NmIndex. All rights reserved.
   </div>
 );

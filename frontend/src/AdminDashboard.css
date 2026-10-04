@@ -263,3 +263,19 @@
     display: none;
   }
 }
+
+/* NmIndex icon mark, replacing the generic file glyph in the footer title. */
+.footer-title .footer-logo {
+  height: 30px;
+  width: auto;
+  flex: none;
+}
+
+/* .footer-section h3 carries margin-bottom:1.25rem for the stacked footer
+   columns. Inside this align-items:center flex row that bottom margin makes the
+   text box taller than the text, so the wordmark rode 9.4px above the mark's
+   centre. The row supplies its own margin-bottom, so dropping it here changes
+   no spacing -- it only re-centres the two against each other. */
+.footer-title h3 {
+  margin-bottom: 0;
+}

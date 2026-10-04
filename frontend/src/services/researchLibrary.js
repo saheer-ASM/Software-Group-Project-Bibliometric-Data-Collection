@@ -153,7 +153,7 @@ export function downloadAuthorPdf(data) {
   const pageCount = Math.max(1, Math.ceil(papers.length / 8));
   const streams = Array.from({ length: pageCount }, (_, pageIndex) => {
     const commands = [rect(0, 0, 612, 842, '0.97 0.98 0.99'), rect(0, 742, 612, 100, '0.03 0.15 0.29'), rect(0, 736, 612, 6, '0.78 0.60 0.24')];
-    commands.push(text(42, 803, 20, 'ScholarMetrics', '1 1 1'), text(42, 780, 10, 'AUTHOR SUMMARY REPORT', '0.90 0.72 0.31'));
+    commands.push(text(42, 803, 20, 'NmIndex', '1 1 1'), text(42, 780, 10, 'AUTHOR SUMMARY REPORT', '0.90 0.72 0.31'));
     commands.push(text(500, 803, 9, `Page ${pageIndex + 1} of ${pageCount}`, '0.82 0.88 0.92'));
     if (pageIndex === 0) {
       commands.push(text(42, 698, 20, data.author), text(42, 675, 10, `Research profile  |  ${data.authorId || 'ID unavailable'}`, '0.33 0.42 0.53'));
@@ -170,7 +170,7 @@ export function downloadAuthorPdf(data) {
       wrap(paper.title, 78).slice(0, 2).forEach((titleLine, index) => commands.push(text(55, y - 29 - index * 13, 9, titleLine)));
       y -= 77;
     });
-    commands.push(line(42, 42, 570, 42), text(42, 25, 8, `Generated ${new Date().toLocaleString()}  |  ScholarMetrics`, '0.43 0.50 0.58'));
+    commands.push(line(42, 42, 570, 42), text(42, 25, 8, `Generated ${new Date().toLocaleString()}  |  NmIndex`, '0.43 0.50 0.58'));
     return commands.join('\n');
   });
   const fontId = 3 + streams.length * 2;
