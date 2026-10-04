@@ -1,2 +1,122 @@
 .app-navbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:2rem;padding:1rem 3rem;background:#08264a;color:#fff;border-bottom:2px solid #c4993e;box-shadow:0 5px 16px rgba(8,38,74,.16)}.app-nav-brand{display:flex;align-items:center;gap:.7rem;border:0;background:transparent;color:#fff;cursor:pointer}.app-nav-brand i{font-size:2.2rem;color:#d4aa4e}.app-nav-brand span{font-family:'Outfit',sans-serif;font-size:1.6rem;font-weight:800}.app-nav-right,.app-nav-right nav{display:flex;align-items:center}.app-nav-right{gap:1.3rem}.app-nav-right nav{gap:.35rem}.app-nav-link{padding:.62rem .95rem;border:0;border-radius:8px;background:transparent;color:rgba(255,255,255,.84);font:500 .88rem 'Inter',sans-serif;text-decoration:none;cursor:pointer;white-space:nowrap}.app-nav-link:hover{background:rgba(255,255,255,.09);color:#fff}.app-nav-link.active{background:rgba(255,255,255,.13);box-shadow:inset 0 -2px #d4aa4e;color:#fff}.app-nav-logout{margin-left:.3rem;border:1px solid rgba(255,255,255,.25)}.app-nav-profile{width:42px;height:42px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.22);border-radius:50%;background:rgba(255,255,255,.1);color:#fff;font-size:1.6rem;cursor:pointer}.app-nav-profile:hover,.app-nav-profile.active{border-color:#d4aa4e;background:rgba(255,255,255,.18)}@media(max-width:900px){.app-navbar{padding:1rem 1.3rem;flex-wrap:wrap}.app-nav-right{flex:1;justify-content:flex-end}.app-nav-right nav{order:2;width:100%;overflow-x:auto}.app-nav-link{padding:.55rem .75rem}}@media(max-width:560px){.app-navbar{gap:.7rem}.app-nav-brand span{font-size:1.25rem}.app-nav-right{flex:0}.app-nav-right nav{position:absolute;left:0;right:0;top:74px;padding:.55rem 1rem;background:#08264a;border-bottom:2px solid #c4993e}.app-navbar{margin-bottom:54px}.app-nav-link{font-size:.78rem}}
 .app-navbar{position:-webkit-sticky;position:sticky;top:0;z-index:1000;width:100%;align-self:stretch}
+
+/* NmIndex header lockup. Height is fixed and width stays auto so the supplied
+   artwork can never be stretched. The .app-nav-brand padding is zeroed because
+   the logo already carries its own internal padding. */
+.app-nav-brand{padding:0}
+.app-nav-logo{display:block;height:40px;width:auto}
+@media(max-width:560px){.app-nav-logo{height:32px}}
+
+/* ============================================================
+   Mobile navigation: hamburger + icon rail that expands to a
+   labelled sidebar. Everything here is inside the <=900px query
+   except the two "hide on desktop" defaults below, so the
+   desktop header is byte-for-byte what it was.
+   ============================================================ */
+
+/* Desktop defaults: no hamburger, no backdrop, no icons -- the desktop
+   navbar stays a plain row of text links. */
+.app-nav-toggle,
+.app-nav-backdrop,
+.app-nav-link > i { display: none; }
+
+.app-nav-link { display: inline-flex; align-items: center; }
+
+@media (max-width: 900px) {
+  .app-navbar { padding: .7rem 1rem; gap: .75rem; flex-wrap: nowrap; }
+
+  /* Three bars, top-left, before the logo. */
+  .app-nav-toggle {
+    display: grid;
+    place-items: center;
+    order: -1;
+    width: 42px;
+    height: 42px;
+    flex: none;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, .25);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, .08);
+    color: #fff;
+    font-size: 1.7rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .app-nav-toggle:hover { background: rgba(255, 255, 255, .16); border-color: #d4aa4e; }
+
+  .app-nav-right { flex: 1; justify-content: flex-end; gap: .5rem; }
+
+  /* -------- collapsed: nothing in the header --------
+     The links live in the sidebar only, so the header stays just
+     hamburger / logo / profile.
+
+     Needs `.app-nav-right nav` in the selector: the original stylesheet has
+     `.app-nav-right,.app-nav-right nav{display:flex}` at specificity (0,1,1),
+     which outranks a bare `.app-nav-menu` (0,1,0) and kept the rail visible. */
+  .app-nav-right nav.app-nav-menu { display: none; }
+
+  /* The original @media(max-width:560px) block reserves 54px under the header
+     for the old dropdown. There is nothing under the header now. */
+  .app-navbar { margin-bottom: 0; }
+
+  /* -------- expanded: the links as a slide-out sidebar -------- */
+  .app-nav-right nav.app-nav-menu.open {
+    display: flex;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: auto;
+    z-index: 1200;
+    width: min(76vw, 280px);
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: .25rem;
+    padding: 5.25rem .75rem 1.25rem;
+    background: #08264a;
+    border-right: 2px solid #c4993e;
+    overflow-y: auto;
+    box-shadow: 6px 0 28px rgba(0, 0, 0, .45);
+  }
+  .app-nav-menu.open .app-nav-link {
+    display: flex;
+    flex: none;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: .85rem;
+    width: 100%;
+    padding: .85rem 1rem;
+    border-radius: 9px;
+    text-align: left;
+    font-size: .97rem;
+  }
+  .app-nav-menu.open .app-nav-link > i { display: block; font-size: 1.35rem; line-height: 1; }
+  .app-nav-menu.open .app-nav-label { display: inline; }
+  .app-nav-menu.open .app-nav-logout {
+    margin: .5rem 0 0;
+    border: 0;
+    border-top: 1px solid rgba(255, 255, 255, .16);
+    border-radius: 0 0 9px 9px;
+  }
+
+  /* Keep the toggle tappable above the open sidebar. */
+  .app-navbar.menu-open .app-nav-toggle { position: relative; z-index: 1300; }
+
+  /* Only while the sidebar is open. The earlier version set display:block
+     unconditionally here, which beat the UA's [hidden]{display:none} (author
+     styles win over UA styles), so this fixed full-viewport layer sat over
+     every mobile page -- dimming it AND eating every tap. The :not([hidden])
+     guard keeps the React `hidden` prop authoritative either way. */
+  .app-navbar.menu-open .app-nav-backdrop:not([hidden]) {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    border: 0;
+    padding: 0;
+    background: rgba(3, 12, 26, .55);
+  }
+}
+

@@ -152,7 +152,7 @@ function sendSession(res, user) {
 const notRegistered = (res) => res.status(404).json({
   status: 'NOT_REGISTERED',
   code: 'ACCOUNT_NOT_FOUND',
-  message: 'No ScholarMetrics account found. Please create an account first.',
+  message: 'No NmIndex account found. Please create an account first.',
 });
 
 // POST /api/auth/register-profile

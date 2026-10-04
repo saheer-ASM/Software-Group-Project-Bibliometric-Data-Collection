@@ -1744,3 +1744,84 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* NmIndex icon mark, replacing the generic file glyph in the footer title. */
+.footer-title .footer-logo {
+  height: 30px;
+  width: auto;
+  flex: none;
+}
+
+/* .footer-section h3 carries margin-bottom:1.25rem for the stacked footer
+   columns. Inside this align-items:center flex row that bottom margin makes the
+   text box taller than the text, so the wordmark rode 9.4px above the mark's
+   centre. The row supplies its own margin-bottom, so dropping it here changes
+   no spacing -- it only re-centres the two against each other. */
+.footer-title h3 {
+  margin-bottom: 0;
+}
+
+/* This page's footer brand row is .de-footer-brand (every other page uses
+   .footer-title), so it needs its own copy of the logo sizing and the h3
+   margin reset. Scoped through .de-footer-section to outrank
+   `.de-footer-section h3`, which sets the 1.25rem bottom margin. */
+.de-footer-brand .footer-logo {
+  height: 30px;
+  width: auto;
+  flex: none;
+}
+
+.de-footer-section .de-footer-brand h3 {
+  margin-bottom: 0;
+}
+
+/* ============================================================
+   Data Explorer title-row actions on phones.
+
+   .de-title-row already wraps at <=768px, so the buttons drop onto their
+   own line -- but .de-title-actions is display:flex with NO flex-wrap and
+   justify-content:flex-end. The three buttons therefore stay on a single
+   line, shrink (which is why "Download summary" breaks across two lines
+   inside its own button), and the last one -- "Reset Search" -- runs off
+   the right edge.
+
+   Letting the container wrap, and the buttons stay whole, fixes it.
+   ============================================================ */
+@media screen and (max-width: 768px) {
+  .de-title-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    width: 100%;
+    gap: 0.5rem;
+  }
+
+  .de-reset-btn,
+  .de-previous-author-btn {
+    padding: 0.55rem 0.9rem;
+    font-size: 0.82rem;
+    /* Wrap as whole buttons rather than breaking the label inside them. */
+    white-space: nowrap;
+    flex: 0 1 auto;
+  }
+
+  /* Lift-on-hover does nothing on touch and can leave a button displaced
+     after a tap. */
+  .de-reset-btn:hover,
+  .de-previous-author-btn:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+@media screen and (max-width: 480px) {
+  .de-title-actions { gap: 0.4rem; }
+
+  .de-reset-btn,
+  .de-previous-author-btn {
+    padding: 0.5rem 0.7rem;
+    font-size: 0.75rem;
+    gap: 0.35rem;
+  }
+
+  .de-reset-btn i,
+  .de-previous-author-btn i { font-size: 1rem; }
+}

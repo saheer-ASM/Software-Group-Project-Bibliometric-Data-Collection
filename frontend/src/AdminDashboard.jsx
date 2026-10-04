@@ -85,7 +85,7 @@ const AdminDashboard = ({ onBack, onNavigateToExplorer, onNavigateToLibrary, onN
       <main className="dashboard-main admin-main">
         <div className="admin-heading">
           <h2>Admin Dashboard</h2>
-          <p>Feedback and issue reports from ScholarMetrics users.</p>
+          <p>Feedback and issue reports from NmIndex users.</p>
         </div>
 
         <div className="admin-tabs" role="tablist">
@@ -169,8 +169,8 @@ const AdminDashboard = ({ onBack, onNavigateToExplorer, onNavigateToLibrary, onN
         <div className="footer-content">
           <div className="footer-section">
             <div className="footer-title">
-              <i className='bx bx-file'></i>
-              <h3>ScholarMetrics</h3>
+              <img src="/assets/nmindex-icon.png" alt="" aria-hidden="true" className="footer-logo" />
+              <h3>NmIndex</h3>
             </div>
             <p>Revolutionizing research evaluation through intelligent automation and comprehensive data collection across global scholarly databases.</p>
           </div>
