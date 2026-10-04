@@ -138,12 +138,15 @@ const AdminDashboard = ({ onBack, onNavigateToExplorer, onNavigateToLibrary, onN
                 <tbody>
                   {visible.map((d) => (
                     <tr key={d.id}>
-                      <td className="admin-cell-main">{cfg.summary(d)}</td>
-                      {tab === 'issues' && <td>{d.category}</td>}
-                      <td className="admin-cell-user">{d.userEmail}</td>
-                      <td>{formatDate(d.createdAt)}</td>
-                      <td><span className={statusClass(d.status)}>{d.status}</span></td>
-                      <td>
+                      {/* data-label drives the mobile card layout: below 640px the
+                          same cells are re-flowed as cards and these become the
+                          field captions, so there is only one copy of the markup. */}
+                      <td className="admin-cell-main" data-label={tab === 'feedback' ? 'Type' : 'Title'}>{cfg.summary(d)}</td>
+                      {tab === 'issues' && <td className="admin-cell-category" data-label="Category">{d.category}</td>}
+                      <td className="admin-cell-user" data-label="User">{d.userEmail}</td>
+                      <td className="admin-cell-date" data-label="Date">{formatDate(d.createdAt)}</td>
+                      <td className="admin-cell-status" data-label="Status"><span className={statusClass(d.status)}>{d.status}</span></td>
+                      <td className="admin-cell-actions">
                         <button type="button" className="admin-view-btn" onClick={() => setSelected({ collection: tab, id: d.id })}>
                           View
                         </button>

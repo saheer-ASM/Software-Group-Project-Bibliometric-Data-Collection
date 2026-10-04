@@ -1825,3 +1825,45 @@
   .de-reset-btn i,
   .de-previous-author-btn i { font-size: 1rem; }
 }
+
+/* ============================================================
+   "Search another researcher" magnifier alignment on phones.
+
+   The <=480px rule sets .de-author-search-box{align-items:stretch} so the
+   wrapped "View profile" button fills the row. Side effect: the <i> glyph's
+   box is stretched to the input's full height (measured 48px), and an icon
+   font paints at the TOP of its line box -- so the magnifier sat high above
+   the text even though the two boxes were perfectly centre-aligned.
+
+   align-self overrides the container's stretch for this one child, so the
+   icon keeps its natural height and centres against the input. The button is
+   untouched -- it sizes itself via width:calc(100% - 8px), not via stretch.
+   ============================================================ */
+@media screen and (max-width: 480px) {
+  .de-author-search-box > .bx {
+    align-self: center;
+    display: flex;
+    align-items: center;
+    height: auto;
+  }
+}
+
+/* ============================================================
+   Publication title filter: suppress the browser's own clear button.
+
+   The input is type="search", so WebKit paints a native
+   ::-webkit-search-cancel-button -- and this field ALSO renders its own
+   "Clear publication search" button, so two crosses appeared side by side.
+
+   Deliberately scoped to .de-paper-search-box rather than applied to every
+   input[type=search]: the "Search another researcher" box above is also
+   type="search" but has NO custom clear control (just a "View profile"
+   submit), so its native cross is the only way to empty that field. Hiding
+   it globally would remove a working affordance to fix a cosmetic one.
+   ============================================================ */
+.de-paper-search-box input[type="search"]::-webkit-search-cancel-button,
+.de-paper-search-box input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}

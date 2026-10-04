@@ -7,3 +7,44 @@
 .ac-chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem}.ac-chart-card{min-width:0;padding:1.25rem}.ac-chart-area{height:350px;margin-top:1rem}.ac-chart-heading select{min-width:190px;padding:.65rem 2.4rem .65rem .85rem;border:2px solid var(--secondary-color);border-radius:8px;background-color:var(--badge-blue);color:var(--primary-color);font:600 .9rem 'Inter',sans-serif;cursor:pointer;box-shadow:0 2px 6px rgba(11,37,69,.1)}.ac-chart-heading select:hover{border-color:var(--primary-light);background-color:#e0efff}.ac-chart-heading select:focus{outline:3px solid rgba(26,95,122,.18);outline-offset:2px}.ac-chart-heading select option{background:#fff;color:var(--primary-color);font-weight:500}.ac-empty{margin-top:2rem;padding:4rem 1rem;text-align:center;color:var(--text-light);border:1px dashed var(--border);border-radius:var(--border-radius-lg)}.ac-empty>i{font-size:3rem;color:var(--secondary-color)}.ac-empty h2{margin:.5rem 0}.ac-empty p{margin:0}
 @media(max-width:900px){.ac-selected-list,.ac-metric-grid{grid-template-columns:1fr 1fr}.ac-chart-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.ac-inline{padding:1rem}.ac-selected-list,.ac-metric-grid{grid-template-columns:1fr}.ac-section-heading{flex-wrap:wrap}.ac-chart-heading select{width:100%}.ac-chart-area{height:310px}.ac-compare-button{width:100%}}
+
+/* ============================================================
+   Metric comparison on narrow screens.
+
+   The desktop track is repeat(3, minmax(0,1fr)) -- the minmax(0,...) is what
+   lets a grid item be narrower than its content. Both media queries below
+   dropped it for a bare `1fr`, which carries an implicit `auto` minimum, so
+   the track grew to fit the longest author name: a 495px card inside a 375px
+   viewport, with the value pushed off-screen entirely. The name looked
+   "partially shown" and the number looked missing because it was simply past
+   the right edge.
+   ============================================================ */
+@media (max-width: 900px) {
+  .ac-selected-list,
+  .ac-metric-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .ac-selected-list,
+  .ac-metric-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* With the track constrained, the name still needs to truncate cleanly.
+   text-overflow:ellipsis does nothing on a flex container -- the text becomes
+   an anonymous flex item rather than inline content -- so the span is a block
+   here. .ac-author-dot is already inline-block with flex:0 0 auto, so it
+   flows inline correctly; the flex `gap` it used is replaced by a margin. */
+.ac-metric-row span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ac-metric-row span .ac-author-dot {
+  margin-right: 0.5rem;
+  vertical-align: middle;
+}
+
+.ac-metric-row strong { flex: 0 0 auto; }

@@ -26,3 +26,97 @@
 .footer-title h3 {
   margin-bottom: 0;
 }
+
+/* ============================================================
+   Collection chips: delete control + confirmation.
+
+   .library-collections has blanket `span` and `button` rules that would
+   otherwise style the wrapper and the delete control as chips, so both are
+   overridden here with a higher-specificity selector.
+   ============================================================ */
+.library-collections .library-collection-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border-radius: 99px;
+  background: transparent;
+  color: inherit;
+}
+
+/* The filter chip keeps its pill shape, flattened on the side the x sits. */
+.library-collections .library-collection-chip > button:first-child {
+  border-radius: 99px 0 0 99px;
+  padding-right: 0.55rem;
+}
+
+.library-collections .library-collection-delete {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 100%;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0 99px 99px 0;
+  background: #fff6df;
+  color: #a98b3f;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease;
+}
+
+.library-collections .library-collection-delete:hover {
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.library-collections .library-collection-delete:focus-visible {
+  outline: 2px solid #be123c;
+  outline-offset: 2px;
+}
+
+/* Inline confirmation, deliberately not a modal: deleting a collection is
+   easy to undo by recreating it, and the papers are never touched. */
+.library-collection-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: -0.4rem 0 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid #fecdd3;
+  border-radius: 12px;
+  background: #fff5f6;
+  color: #7f1d2b;
+  font-size: 0.86rem;
+}
+
+.library-collection-confirm > span { flex: 1 1 auto; min-width: 0; }
+
+.library-collection-confirm button {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: 700 0.82rem 'Inter', sans-serif;
+  cursor: pointer;
+}
+
+.library-confirm-delete { background: #be123c; color: #fff; }
+.library-confirm-delete:hover { background: #9f1239; }
+.library-confirm-cancel { background: #fff; border-color: #e2e9f1; color: #475569; }
+.library-confirm-cancel:hover { border-color: #94a3b8; }
+
+@media (max-width: 760px) {
+  .library-collection-confirm { align-items: stretch; flex-direction: column; }
+  .library-collection-confirm button { width: 100%; }
+}
+
+@media (max-width: 760px) {
+  /* .library-panel-title switches to a column here, so the "Create collection"
+     button becomes the last thing in the block -- and the element has no
+     bottom margin while .library-collections has no top margin. Measured: the
+     button's bottom edge and the chips' top edge were both at 177px, i.e.
+     touching. On desktop the title is a row, so this never showed. */
+  .library-panel-title { margin-bottom: 1rem; }
+}

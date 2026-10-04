@@ -10,6 +10,7 @@ export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout,
   const [library, setLibrary] = useState(() => getLibrary(userId));
   const [collectionName, setCollectionName] = useState('');
   const [activeCollection, setActiveCollection] = useState('all');
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
 
   useEffect(() => {
     const sync = (event) => setLibrary(event.detail || getLibrary(userId));
@@ -34,8 +35,16 @@ export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout,
         : collection.paperIds.filter((id) => id !== paperId)
     }))
   });
+  // Deletes the grouping only -- every publication stays in savedPapers, so
+  // nothing the user bookmarked is lost.
+  const deleteCollection = (collectionId) => {
+    persist({ ...library, collections: library.collections.filter((collection) => collection.id !== collectionId) });
+    if (activeCollection === collectionId) setActiveCollection('all');
+    setPendingDeleteId(null);
+  };
   const removeSavedAuthor = (authorId) => persist({ ...library, savedAuthors: library.savedAuthors.filter((author) => author.id !== authorId) });
   const removeRecentAuthor = (authorId) => persist({ ...library, recentAuthors: library.recentAuthors.filter((author) => author.id !== authorId) });
+  const pendingDelete = library.collections.find((collection) => collection.id === pendingDeleteId) || null;
   const visiblePapers = activeCollection === 'all'
     ? library.savedPapers
     : library.savedPapers.filter((paper) => library.collections.find((collection) => collection.id === activeCollection)?.paperIds.includes(paper.id));
@@ -60,8 +69,18 @@ export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout,
       <section className="library-panel library-papers"><div className="library-panel-title"><h2><i className="bx bx-file" /> Saved publications <small>{library.savedPapers.length}</small></h2><form onSubmit={createCollection}><input value={collectionName} onChange={(e) => setCollectionName(e.target.value)} placeholder="New collection name" /><button>Create collection</button></form></div>
         <div className="library-collections" role="group" aria-label="Filter publications by collection">
           <button className={activeCollection === 'all' ? 'active' : ''} onClick={() => setActiveCollection('all')}>All <strong>{library.savedPapers.length}</strong></button>
-          {library.collections.map((collection) => <button key={collection.id} className={activeCollection === collection.id ? 'active' : ''} onClick={() => setActiveCollection(collection.id)}>{collection.name} <strong>{collection.paperIds.length}</strong></button>)}
+          {library.collections.map((collection) => <span key={collection.id} className="library-collection-chip">
+            <button className={activeCollection === collection.id ? 'active' : ''} onClick={() => setActiveCollection(collection.id)}>{collection.name} <strong>{collection.paperIds.length}</strong></button>
+            <button type="button" className="library-collection-delete" aria-label={`Delete collection ${collection.name}`} onClick={() => setPendingDeleteId(collection.id)}><i className="bx bx-x" aria-hidden="true" /></button>
+          </span>)}
         </div>
+        {pendingDelete && <div className="library-collection-confirm" role="alert">
+          <span>Delete &ldquo;{pendingDelete.name}&rdquo;? {pendingDelete.paperIds.length
+            ? `Its ${pendingDelete.paperIds.length} publication${pendingDelete.paperIds.length === 1 ? '' : 's'} stay in your library.`
+            : 'It has no publications.'}</span>
+          <button type="button" className="library-confirm-delete" onClick={() => deleteCollection(pendingDelete.id)}>Delete</button>
+          <button type="button" className="library-confirm-cancel" onClick={() => setPendingDeleteId(null)}>Cancel</button>
+        </div>}
         <div className="library-paper-list">{visiblePapers.length ? visiblePapers.map((paper) => <article key={paper.id}><div><span>{paper.publishedYear || 'Year unavailable'}</span><h3>{paper.title}</h3><p>{paper.authorName}</p></div><select value={library.collections.find((item) => item.paperIds.includes(paper.id))?.id || ''} onChange={(e) => assignPaper(paper.id, e.target.value)}><option value="">No collection</option>{library.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></article>) : <p className="library-empty">{library.savedPapers.length ? 'No publications are assigned to this collection yet.' : 'Bookmark publications to organize them here.'}</p>}</div>
       </section>
     </main>

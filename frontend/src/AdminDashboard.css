@@ -149,7 +149,9 @@
 
 .admin-cell-user {
   color: var(--text-secondary);
-  word-break: break-all;
+  /* `word-break: break-all` split every email mid-character. `anywhere` keeps
+     word boundaries first and only breaks when a token genuinely cannot fit. */
+  overflow-wrap: anywhere;
 }
 
 .admin-status {
@@ -278,4 +280,122 @@
    no spacing -- it only re-centres the two against each other. */
 .footer-title h3 {
   margin-bottom: 0;
+}
+
+/* ============================================================
+   Issues / Feedback table -> cards on phones.
+
+   The same <table> is re-flowed with CSS rather than rendered twice in the
+   JSX, so there is one copy of the markup and the View button, status pill
+   and status filter keep working untouched. Cells carry data-label, which
+   becomes the field caption in card mode.
+   ============================================================ */
+@media screen and (max-width: 640px) {
+  /* The wrapper no longer needs to scroll sideways -- cards fit the viewport. */
+  .admin-table-wrap { overflow-x: visible; }
+
+  .admin-table,
+  .admin-table tbody,
+  .admin-table tr,
+  .admin-table td {
+    display: block;
+    width: 100%;
+  }
+
+  /* Column headings are replaced by the per-field captions below. */
+  .admin-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* One card per row, matching the panel's existing border/radius language. */
+  .admin-table tr {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.1rem 0.75rem;
+    margin-bottom: 0.85rem;
+    padding: 0.95rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--border-radius-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .admin-table td {
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  /* Field caption above each value. */
+  .admin-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.1rem;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  /* Card header: summary on the left, category badge on the right. The title
+     has no caption -- it is the heading of the card. */
+  .admin-table td.admin-cell-main {
+    grid-column: 1;
+    grid-row: 1;
+    font-size: 0.98rem;
+    line-height: 1.35;
+    overflow-wrap: break-word;
+  }
+
+  .admin-table td.admin-cell-main::before { display: none; }
+
+  .admin-table td.admin-cell-category {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    background: var(--surface-hover);
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .admin-table td.admin-cell-category::before { display: none; }
+
+  /* Full-width field, with the email wrapping at word boundaries first. */
+  .admin-table td.admin-cell-user {
+    grid-column: 1 / -1;
+    margin-top: 0.7rem;
+  }
+
+  /* Date and Status share a row. */
+  .admin-table td.admin-cell-date {
+    grid-column: 1;
+    margin-top: 0.7rem;
+  }
+
+  .admin-table td.admin-cell-status {
+    grid-column: 2;
+    margin-top: 0.7rem;
+    text-align: right;
+  }
+
+  .admin-table td.admin-cell-actions {
+    grid-column: 1 / -1;
+    margin-top: 0.85rem;
+  }
+
+  .admin-table td.admin-cell-actions .admin-view-btn { width: 100%; }
+
+  /* The status dropdown should not be squeezed next to the heading. */
+  .admin-panel-header label { width: 100%; }
+  .admin-panel-header label select { flex: 1; min-width: 0; }
 }
