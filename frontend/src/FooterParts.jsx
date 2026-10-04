@@ -38,8 +38,57 @@ export const FooterContactLinks = () => {
   );
 };
 
+// Scrolls the window, which is what every page uses -- none of them put the
+// content in its own overflow container.
+//
+// The animation is done by hand rather than with `behavior: 'smooth'`, which
+// is a SILENT no-op in this app: index.css sets `overflow-x: clip` on
+// html/body (a deliberate guard against sideways scroll), and Chromium will
+// not animate the document scroll of a clipped scroller. Measured from a
+// scroll position of 2494px, eight samples over 3.2s never moved, while an
+// instant scrollTo(0,0) worked immediately.
+export const BackToTop = () => {
+  const scrollToTop = () => {
+    const start = window.scrollY || document.documentElement.scrollTop || 0;
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+    if (start === 0) return;
+
+    // requestAnimationFrame never fires while the document is hidden, so an
+    // animation started in a background tab would freeze part-way. Jump
+    // straight to the top in that case (and when motion is reduced).
+    if (reduceMotion || document.hidden) {
+      window.scrollTo(0, 0);
+      return;
+    }
+
+    const duration = Math.min(600, Math.max(250, start * 0.35));
+    const startedAt = performance.now();
+    const easeOutCubic = (t) => 1 - (1 - t) ** 3;
+
+    const step = (now) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      window.scrollTo(0, Math.round(start * (1 - easeOutCubic(progress))));
+      if (progress < 1) requestAnimationFrame(step);
+    };
+
+    requestAnimationFrame(step);
+  };
+
+  return (
+    <button type="button" className="footer-back-to-top" onClick={scrollToTop}>
+      Back to top
+      <i className="bx bx-up-arrow-alt" aria-hidden="true" />
+    </button>
+  );
+};
+
+// Rendered by all seven page footers, so the button only needs adding here.
 export const FooterCopyright = () => (
   <div className="footer-copyright">
-    © {new Date().getFullYear()} NmIndex. All rights reserved.
+    <BackToTop />
+    <div className="footer-copyright-text">
+      © {new Date().getFullYear()} NmIndex. All rights reserved.
+    </div>
   </div>
 );

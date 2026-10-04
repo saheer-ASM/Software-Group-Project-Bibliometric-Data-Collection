@@ -4,6 +4,7 @@ import { API_BASE_URL } from './config/api';
 import './Dashboard.css';
 import AppNavbar from './AppNavbar';
 import { FooterQuickLinks, FooterContactLinks, FooterCopyright } from './FooterParts';
+import { useTypewriter, useCyclingText } from './useTypewriter';
 
 const EMPTY_STATS = { publications: null, authors: null, fields: null };
 
@@ -49,6 +50,17 @@ const AnimatedCounter = ({ value, loading }) => {
   return <span className={loading ? 'stat-number-loading' : ''}>{displayed.toLocaleString()}</span>;
 };
 
+// Module-level so the arrays/strings keep a stable identity across renders --
+// otherwise the cycling effect would tear down and restart every render.
+const HERO_HEADING = 'Discover Research Impact';
+const HERO_SUBTEXT = 'Search for an author to explore their research impact, productivity, and performance through NmIndex and other research metrics.';
+const SEARCH_PHRASES = [
+  "Enter an author's name",
+  'Try: Geoffrey Hinton',
+  'Try: Yoshua Bengio',
+  'Search an author to discover their NmIndex',
+];
+
 const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNavigateToSettings, onNavigateToAbout, onNavigateToProfile, onNavigateToLibrary, hasSearchedAuthor, onResetSearch }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [authorSuggestions, setAuthorSuggestions] = useState([]);
@@ -59,6 +71,18 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState('');
   const scrollContainerRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  // Each line starts when the previous finishes. Reduced-motion users get all
+  // of it instantly -- see useTypewriter.
+  const heading = useTypewriter(HERO_HEADING, { speed: 42 });
+  const subtext = useTypewriter(HERO_SUBTEXT, { start: heading.done, speed: 16, startDelay: 260 });
+  // Cycling pauses while the field is focused or has text, so the placeholder
+  // never shifts under someone who is actually using it.
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchPlaceholder = useCyclingText(SEARCH_PHRASES, {
+    start: subtext.done && !searchFocused && !searchQuery,
+  });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -193,7 +217,14 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
       <main className="dashboard-main">
         {/* Welcome Section */}
         <div className="welcome-section">
-          <h2>Welcome {username}!</h2>
+          <p className="welcome-greeting">Welcome {username}!</p>
+          <h2 className={heading.done ? '' : 'is-typing'}>{heading.shown}</h2>
+          {/* The full sentence is rendered invisibly underneath to reserve its
+              final height, so the stats below never jump as lines appear. */}
+          <div className="welcome-subtext">
+            <span className="welcome-subtext-ghost" aria-hidden="true">{HERO_SUBTEXT}</span>
+            <p className={subtext.done ? '' : 'is-typing'}>{subtext.shown}</p>
+          </div>
         </div>
 
         {/* Quick Stats */}
@@ -219,16 +250,18 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
         {/* Author Search */}
         <section className="search-section">
           <h2 className="section-title">Author Search</h2>
-          <form onSubmit={handleSearch} className="search-form">
+          <form onSubmit={handleSearch} className={`search-form${searchQuery ? ' has-value' : ''}`}>
             <input
+              ref={searchInputRef}
               type="text"
-              placeholder="Enter Author's Name"
+              placeholder={searchPlaceholder}
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
                 setSuggestionsOpen(true);
               }}
-              onFocus={() => setSuggestionsOpen(true)}
+              onFocus={() => { setSuggestionsOpen(true); setSearchFocused(true); }}
+              onBlur={() => setSearchFocused(false)}
               onKeyDown={handleSearchKeyDown}
               className="search-input"
               role="combobox"
@@ -237,6 +270,20 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
               aria-controls="dashboard-author-suggestions"
               aria-activedescendant={activeSuggestion >= 0 ? `dashboard-author-${activeSuggestion}` : undefined}
             />
+            {searchQuery && (
+              <button
+                type="button"
+                className="search-clear-btn"
+                aria-label="Clear author search"
+                onClick={() => {
+                  setSearchQuery('');
+                  setSuggestionsOpen(false);
+                  searchInputRef.current?.focus();
+                }}
+              >
+                <i className='bx bx-x'></i>
+              </button>
+            )}
             <button type="submit" className="search-btn">
               <i className='bx bx-search'></i>
             </button>

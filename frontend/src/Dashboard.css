@@ -136,6 +136,13 @@
   margin: 0;
 }
 
+.welcome-greeting {
+  margin: 0 0 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
 .welcome-section h2::after {
   content: '';
   display: block;
@@ -791,4 +798,124 @@
     padding: 0.9rem 3.4rem 0.9rem 0.85rem;
   }
   .field-card { height: 150px; }
+}
+
+/* ============================================================
+   Author Search clear button.
+
+   Sits to the left of the submit button, which is absolutely positioned at
+   right:0.6rem with a 44px box. The input's right padding only cleared that
+   one button, so it grows via .has-value -- applied only while there is text
+   to clear. That matters on phones: the extra padding would otherwise eat
+   into the space the "Enter Author's Name" placeholder needs, which is the
+   clipping that was fixed earlier.
+   ============================================================ */
+.search-clear-btn {
+  position: absolute;
+  right: 3.9rem;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.search-clear-btn:hover,
+.search-clear-btn:focus-visible {
+  background: rgba(11, 37, 69, 0.08);
+  color: var(--primary-color);
+}
+
+/* Only while there is something to clear. */
+.search-form.has-value .search-input { padding-right: 6.2rem; }
+
+@media screen and (max-width: 768px) {
+  /* The `right` offset is deliberately NOT reduced here. .search-btn keeps its
+     desktop geometry (right:0.6rem + 44px wide), so its left edge is always
+     53.6px in from the form's right edge. Shrinking this offset to 3.1rem put
+     the cross at 294px against a button starting at 288px -- a 6px overlap.
+     3.9rem (62.4px) leaves a ~9px gap at every width. */
+  .search-clear-btn {
+    width: 26px;
+    height: 26px;
+    font-size: 1.1rem;
+  }
+
+  /* Must clear 62.4px offset + 26px button = 88.4px. */
+  .search-form.has-value .search-input { padding-right: 5.7rem; }
+}
+
+/* ============================================================
+   Hero typewriter.
+
+   Kept deliberately quiet: existing type scale and colours, a thin accent
+   caret that only exists while a line is being typed, and no looping on the
+   heading or the sentence.
+   ============================================================ */
+.welcome-section h2.is-typing::after,
+.welcome-subtext p.is-typing::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  background: var(--accent-color);
+  vertical-align: -0.12em;
+  animation: nmCaret 1s steps(1, end) infinite;
+}
+
+/* The heading's ::after is the gold rule; while typing it becomes the caret,
+   so the rule is suppressed until the line lands. */
+.welcome-section h2.is-typing::after {
+  width: 2px;
+  height: 1em;
+  margin-top: 0;
+  border-radius: 1px;
+}
+
+@keyframes nmCaret {
+  0%, 45% { opacity: 1; }
+  50%, 95% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* Ghost copy reserves the finished height so nothing below reflows. */
+.welcome-subtext {
+  position: relative;
+  max-width: 68ch;
+  margin-top: 0.85rem;
+}
+
+.welcome-subtext-ghost,
+.welcome-subtext p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.welcome-subtext-ghost { visibility: hidden; }
+
+.welcome-subtext p {
+  position: absolute;
+  inset: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-section h2.is-typing::after,
+  .welcome-subtext p.is-typing::after { animation: none; opacity: 0; }
+}
+
+@media screen and (max-width: 768px) {
+  .welcome-subtext p,
+  .welcome-subtext-ghost { font-size: 0.92rem; }
 }
