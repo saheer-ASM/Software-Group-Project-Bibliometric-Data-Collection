@@ -1146,7 +1146,12 @@
   padding: 1.75rem;
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 2rem;
+  /* Research fields and author contributions used to sit inside .de-pub-main,
+     which spaced its children 1.25rem apart. They are their own grid child now
+     so the card has to supply that same row gap, otherwise the block would
+     drift to the 2rem column gap. */
+  column-gap: 2rem;
+  row-gap: 1.25rem;
   box-shadow: var(--shadow-md);
   transition: all var(--transition-normal);
   position: relative;
@@ -1177,6 +1182,25 @@
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  grid-column: 1;
+  grid-row: 1;
+}
+
+/* Research fields + author contributions. Pinned under .de-pub-main in the
+   left column so the desktop card looks exactly as it did when these two were
+   nested inside it. */
+.de-pub-secondary {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+}
+
+/* The toggle is a mobile affordance only; desktop shows every section. */
+.de-pub-details-toggle {
+  display: none;
 }
 
 .de-pub-meta {
@@ -1406,6 +1430,8 @@
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 0.85rem;
+  grid-column: 2;
+  grid-row: 1 / span 2;
   min-width: 350px;
   padding-left: 1.5rem;
   border-left: 1px solid var(--border);
@@ -1623,6 +1649,13 @@
     gap: 1.5rem;
   }
 
+  .de-pub-main,
+  .de-pub-secondary,
+  .de-pub-stats {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
   .de-pub-stats {
     grid-template-columns: repeat(3, 1fr);
     min-width: unset;
@@ -1680,9 +1713,100 @@
     grid-template-columns: 1fr;
   }
 
+  /* --- Mobile collapsible details ------------------------------------- */
+
+  /* Reading order becomes: core info -> Read abstract -> Show Details ->
+     metrics -> research fields -> author contributions. Only `order` moves
+     here; the markup is not duplicated for mobile. */
+  .de-pub-stats {
+    order: 1;
+    /* Grid items default to min-width:auto, i.e. min-content. Without this a
+       long stat label could widen the whole card when the panel opens, and the
+       card would then push the page sideways. */
+    min-width: 0;
+  }
+
+  .de-pub-secondary {
+    order: 2;
+  }
+
+  .de-pub-details-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    /* Comfortable tap target. */
+    min-height: 44px;
+    width: 100%;
+    max-width: 100%;
+    padding: 0.6rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--border-radius-md);
+    background: var(--background);
+    color: var(--secondary-color);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+  }
+
+  .de-pub-details-toggle:hover,
+  .de-pub-details-toggle:focus-visible {
+    background: var(--surface);
+    border-color: var(--secondary-color);
+  }
+
+  .de-pub-details-toggle i {
+    font-size: 1.1rem;
+  }
+
+  /* Collapsed by default. display:none rather than a max-height animation so a
+     long card cannot leave a scrollable gap, and so the collapsed card costs
+     no layout height at all. */
+  .de-pub-card:not(.de-pub-card-expanded) .de-pub-stats,
+  .de-pub-card:not(.de-pub-card-expanded) .de-pub-secondary {
+    display: none;
+  }
+
+  /* Fades the revealed blocks in at their natural height. Nothing animates the
+     height itself, so expanding cannot overshoot and jump the page. */
+  .de-pub-card-expanded .de-pub-stats,
+  .de-pub-card-expanded .de-pub-secondary {
+    animation: de-pub-details-reveal 180ms ease-out both;
+  }
+
+  /* Long titles, field names and author names all share one card width. */
+  .de-pub-title,
+  .de-field-tag,
+  .de-author-name-text,
+  .de-pub-stat-label,
+  .de-pub-stat-value {
+    overflow-wrap: anywhere;
+  }
+
   .de-footer-content {
     grid-template-columns: 1fr;
     gap: 2rem;
+  }
+}
+
+@keyframes de-pub-details-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .de-pub-card-expanded .de-pub-stats,
+  .de-pub-card-expanded .de-pub-secondary {
+    animation: none;
   }
 }
 
@@ -1866,4 +1990,68 @@
   -webkit-appearance: none;
   appearance: none;
   display: none;
+}
+
+/* ============================================================
+   "Load More" for the paginated publication list.
+   ============================================================ */
+.de-load-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.de-load-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 44px;              /* comfortable tap target */
+  padding: 0.75rem 1.9rem;
+  border: 1.5px solid var(--secondary-color);
+  border-radius: var(--border-radius-md);
+  background: var(--surface);
+  color: var(--secondary-color);
+  font: 600 0.92rem 'Inter', sans-serif;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.de-load-more-btn:hover:not(:disabled) {
+  background: var(--secondary-color);
+  color: var(--surface);
+}
+
+.de-load-more-btn:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.de-load-more-count {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+@media screen and (max-width: 768px) {
+  /* Full-width target on phones, but never wider than the viewport. */
+  .de-load-more-btn {
+    width: 100%;
+    max-width: 100%;
+    padding: 0.8rem 1rem;
+  }
+
+  .de-load-more-count { font-size: 0.8rem; }
+}
+
+/* Shown while a filter change is being resolved on the server. */
+.de-filter-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--de-muted, #64748b);
 }
