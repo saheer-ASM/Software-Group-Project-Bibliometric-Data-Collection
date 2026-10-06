@@ -11,6 +11,7 @@ const searchRoutes = require('./routes/search');
 const statsRoutes = require('./routes/stats');
 const compareRoutes = require('./routes/compare');
 const libraryRoutes = require('./routes/library');
+const rateLimit = require('./middleware/rateLimit');
 
 const app = express();
 
@@ -39,6 +40,10 @@ app.use(
   })
 );
 app.use(express.json());
+
+// Applied to the whole API, before the routers, so every endpoint gets the
+// same limit rather than only the ones added since.
+app.use('/api', rateLimit);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/search', searchRoutes);
