@@ -2069,3 +2069,74 @@
   font-weight: 600;
   overflow-wrap: anywhere;
 }
+
+/* My Library's publication details: the Data Explorer's own publication card
+   inside the collection dialog's shell, wide enough for the card's two-column
+   desktop layout.
+   Only the body scrolls. The header -- with the close button -- sits outside
+   it, so opening the abstract or Show Details and scrolling down to read them
+   can never carry the close button off the screen. */
+.de-publication-dialog {
+  width: min(1180px, 100%);
+  max-height: calc(100vh - 2.5rem);
+  max-height: calc(100dvh - 2.5rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.de-publication-dialog .de-collection-dialog-header {
+  flex: 0 0 auto;
+  margin-bottom: 1rem;
+}
+.de-publication-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* Scrolling the details never scrolls the page behind the dialog. */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.de-publication-dialog-context {
+  margin: 0 0 1rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.de-publication-dialog-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  color: var(--text-secondary);
+}
+.de-publication-dialog-retry {
+  min-height: 44px;
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--secondary-color);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--secondary-color);
+  font-weight: 700;
+  cursor: pointer;
+}
+/* Dialogs sit above the sticky site navbar (z-index 1000) and its mobile menu
+   (up to 1300). At the old 300 the navbar was painted over the dialog and hid
+   its header and close button -- most visibly on phones, where the details
+   dialog is anchored to the top of the screen. */
+.de-collection-modal { z-index: 1400; }
+
+/* The hover lift is for scanning a list; a single open card stays put. */
+.de-publication-dialog .de-pub-card:hover { transform: none; }
+
+@media (max-width: 768px) {
+  /* Anchored to the top on phones: a centred dialog jumps up the screen each
+     time Read abstract or Show Details makes it taller. */
+  .de-publication-modal { place-items: start center; padding: 0.5rem; }
+  .de-publication-dialog {
+    padding: 1rem;
+    max-height: calc(100vh - 1rem);
+    max-height: calc(100dvh - 1rem);
+  }
+  .de-publication-dialog .de-pub-card { padding: 1rem; }
+}

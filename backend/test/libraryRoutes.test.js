@@ -150,12 +150,14 @@ test('PUT no longer overwrites authors, so a stale device cannot undo a removal'
     savedAuthors: [{ ...author(1), savedAt: new Date().toISOString() }, { ...author(2), savedAt: new Date().toISOString() }],
     recentAuthors: [],
     savedPapers: [{ id: 'W1', title: 'Paper' }],
-    collections: [],
+    collections: [{ id: 'c1', name: 'Reading', paperIds: [] }],
   };
   assert.equal((await call('u1', 'PUT', '', stale)).status, 200);
   const library = (await call('u1', 'GET')).body;
   assert.deepEqual(library.savedAuthors.map((a) => a.id), ['A1001'], 'the removal stuck');
-  assert.deepEqual(library.savedPapers.map((p) => p.id), ['W1'], 'papers still save through PUT');
+  // Papers now have their own routes too; PUT saves collections only.
+  assert.deepEqual(library.savedPapers, [], 'papers in a PUT body are ignored');
+  assert.deepEqual(library.collections.map((c) => c.name), ['Reading'], 'collections still save through PUT');
 });
 
 test('history: record, revisit to top, remove one, clear', async () => {
@@ -216,4 +218,69 @@ test('invalid author ids are rejected with 400 and nothing is written', async ()
   }
   assert.equal((await call('u1', 'DELETE', '/saved-authors/bogus')).status, 400);
   assert.equal(firestore.store.size, 0);
+});
+
+// ---- Saved papers ----------------------------------------------------------
+
+const work = (n) => ({ id: `W${100000 + n}`, title: `Paper ${n}`, publishedYear: 2021, authorId: 'A5050585435', authorName: 'Author' });
+
+test('save, re-save and remove a paper; removal also leaves its collection', async () => {
+  const added = await call('u1', 'POST', '/saved-papers', work(1));
+  assert.equal(added.status, 201);
+  assert.equal(added.body.limits.savedPapers, 200);
+  assert.equal((await call('u1', 'POST', '/saved-papers', work(1))).status, 200, 'duplicate is a no-op');
+
+  await call('u1', 'PUT', '', { collections: [{ id: 'c1', name: 'Reading', paperIds: ['W100001'] }] });
+  const removed = await call('u1', 'DELETE', '/saved-papers/W100001');
+  assert.equal(removed.status, 200);
+  assert.deepEqual(removed.body.savedPapers, []);
+  assert.deepEqual(removed.body.collections, [{ id: 'c1', name: 'Reading', paperIds: [] }], 'collection kept, paper gone from it');
+});
+
+test('the backend refuses the 201st saved paper', async () => {
+  for (let i = 0; i < 200; i += 1) {
+    assert.equal((await call('u1', 'POST', '/saved-papers', work(i))).status, 201);
+  }
+  const refused = await call('u1', 'POST', '/saved-papers', work(200));
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.message, /up to 200 publications/);
+  assert.equal((await call('u1', 'GET')).body.savedPapers.length, 200);
+});
+
+test('concurrent paper saves racing for the last slot: exactly one wins', async () => {
+  for (let i = 0; i < 199; i += 1) await call('u1', 'POST', '/saved-papers', work(i));
+  const results = await Promise.all(Array.from({ length: 8 }, (_, i) => call('u1', 'POST', '/saved-papers', work(500 + i))));
+  assert.equal(results.filter((r) => r.status === 201).length, 1);
+  assert.equal(results.filter((r) => r.status === 409).length, 7);
+  assert.equal((await call('u1', 'GET')).body.savedPapers.length, 200);
+});
+
+test('existing collections and saved papers survive the new limit untouched', async () => {
+  const legacy = Array.from({ length: 250 }, (_, i) => ({ ...work(i), savedAt: new Date(Date.now() - i * 1000).toISOString() }));
+  const collections = [{ id: 'c1', name: 'Thesis', paperIds: ['W100000', 'W100249'] }];
+  firestore.store.set('userLibraries/u1', { savedPapers: legacy, collections });
+
+  const library = (await call('u1', 'GET')).body;
+  assert.equal(library.savedPapers.length, 250, 'nothing deleted');
+  assert.deepEqual(library.collections, collections, 'collections and memberships intact');
+  assert.equal((await call('u1', 'POST', '/saved-papers', work(900))).status, 409, 'but no growth past 200');
+  // Saving a collection change does not disturb the papers either.
+  await call('u1', 'PUT', '', { collections: [...collections, { id: 'c2', name: 'New', paperIds: [] }] });
+  assert.equal((await call('u1', 'GET')).body.savedPapers.length, 250);
+});
+
+test('invalid paper saves are rejected and nothing is written', async () => {
+  for (const body of [{}, { id: 'W1' }, { id: 'W1', authorId: 'bad' }, { id: 'nope', authorId: 'A1' }]) {
+    assert.equal((await call('u1', 'POST', '/saved-papers', body)).status, 400);
+  }
+  assert.equal(firestore.store.size, 0);
+});
+
+test("users cannot read or remove each other's saved papers", async () => {
+  await call('alice', 'POST', '/saved-papers', work(1));
+  assert.deepEqual((await call('bob', 'GET')).body.savedPapers, []);
+  await call('bob', 'DELETE', '/saved-papers/W100001');
+  assert.deepEqual((await call('alice', 'GET')).body.savedPapers.map((p) => p.id), ['W100001']);
+  assert.equal((await call(null, 'POST', '/saved-papers', work(2))).status, 401);
+  assert.equal((await call(null, 'DELETE', '/saved-papers/W100001')).status, 401);
 });

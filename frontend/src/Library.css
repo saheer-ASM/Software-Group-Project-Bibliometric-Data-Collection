@@ -167,3 +167,30 @@
   .library-panel-actions > span { flex-basis: 100%; }
   .library-panel-actions button { flex: 1 1 auto; min-height: 44px; }
 }
+
+/* A saved publication opens its details: the title block is the button, and
+   keeps the list's existing look (year, title, author). */
+.library-paper-list article > .library-paper-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: .1rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.library-paper-open h3 { color: #08264a; overflow-wrap: anywhere; }
+.library-paper-open:hover h3,
+.library-paper-open:focus-visible h3 { color: #17617e; text-decoration: underline; }
+.library-paper-open:focus-visible { outline: 2px solid #17617e; outline-offset: 4px; border-radius: 6px; }
+.library-paper-actions { display: flex; align-items: center; gap: .5rem; flex: 0 0 auto; }
+
+@media (max-width: 760px) {
+  .library-paper-actions select { flex: 1 1 auto; max-width: none; }
+}

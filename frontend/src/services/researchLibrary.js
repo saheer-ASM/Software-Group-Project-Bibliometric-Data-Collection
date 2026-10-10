@@ -12,6 +12,10 @@ const RECENT_RETENTION_MS = RECENT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 export const SAVED_AUTHOR_LIMIT_MESSAGE =
   `You can save up to ${MAX_SAVED_AUTHORS} authors. Remove one to save another.`;
 
+export const MAX_SAVED_PAPERS = 200;
+export const SAVED_PAPER_LIMIT_MESSAGE =
+  `You can save up to ${MAX_SAVED_PAPERS} publications. Remove one to save another.`;
+
 const keyFor = (userId) => `scholarMetricsLibrary:${userId || 'guest'}`;
 const syncWriteQueues = new Map();
 
@@ -69,7 +73,7 @@ export function saveLibrary(userId, library) {
   return library;
 }
 
-// Papers and collections are still saved as a whole. Authors are not part of
+// Collections are still saved as a whole. Papers and authors are not part of
 // this request: the server keeps them through their own item requests below,
 // so a save from a second tab can never undo a removal made in the first.
 function queueRemoteLibrarySave(userId, library) {
@@ -80,7 +84,7 @@ function queueRemoteLibrarySave(userId, library) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken()}`,
       },
-      body: JSON.stringify({ savedPapers: library.savedPapers, collections: library.collections }),
+      body: JSON.stringify({ collections: library.collections }),
     }).then((response) => {
       if (!response.ok) throw new Error('Unable to save your library.');
       return response.json();
@@ -90,12 +94,6 @@ function queueRemoteLibrarySave(userId, library) {
     if (syncWriteQueues.get(userId) === next) syncWriteQueues.delete(userId);
   });
 }
-
-const mergeById = (remoteItems = [], localItems = []) => {
-  const items = new Map();
-  [...localItems, ...remoteItems].forEach((item) => item?.id && items.set(item.id, item));
-  return [...items.values()];
-};
 
 function mergeLibraries(remote, local) {
   const collections = new Map();
@@ -107,14 +105,19 @@ function mergeLibraries(remote, local) {
       paperIds: [...new Set([...(existing?.paperIds || []), ...(collection.paperIds || [])])],
     });
   });
+  // The server's lists win for saved papers and authors. Merging them with
+  // this browser's copy would bring back an item removed on another device,
+  // because this copy would still hold it.
+  const savedPapers = Array.isArray(remote.savedPapers) ? remote.savedPapers : [];
+  const savedPaperIds = new Set(savedPapers.map((paper) => paper.id));
   return {
-    // The server's lists win for authors. Merging them with this browser's
-    // copy (as papers still are) would bring back an author removed on another
-    // device, because this copy would still hold it.
     savedAuthors: newestFirst(remote.savedAuthors, 'savedAt'),
-    savedPapers: mergeById(remote.savedPapers, local.savedPapers),
+    savedPapers,
     recentAuthors: unexpired(remote.recentAuthors),
-    collections: [...collections.values()],
+    collections: [...collections.values()].map((collection) => ({
+      ...collection,
+      paperIds: collection.paperIds.filter((id) => savedPaperIds.has(id)),
+    })),
   };
 }
 
@@ -141,7 +144,7 @@ export function updateLibrary(userId, updater) {
 // becomes this browser's copy. If the request fails the change is undone and
 // the caller gets a message to show. Guests stay local, under the same limits.
 
-async function authorRequest(method, path, body) {
+async function libraryRequest(method, path, body) {
   const response = await fetch(`${API_BASE_URL}/api/library${path}`, {
     method,
     headers: {
@@ -173,7 +176,7 @@ export async function saveAuthor(userId, author) {
     ...current, savedAuthors: current.savedAuthors.filter((item) => item.id !== entry.id),
   }));
   try {
-    const { ok, status, payload } = await authorRequest('POST', '/saved-authors', { id: entry.id, name: entry.name });
+    const { ok, status, payload } = await libraryRequest('POST', '/saved-authors', { id: entry.id, name: entry.name });
     // The server's list is the record either way: on 409 it holds the 100 it
     // kept, which also takes this optimistic entry back out.
     if (Array.isArray(payload.savedAuthors)) setField(userId, 'savedAuthors', payload.savedAuthors);
@@ -202,7 +205,7 @@ export async function removeSavedAuthor(userId, authorId) {
     ...current, savedAuthors: newestFirst([removed, ...current.savedAuthors], 'savedAt'),
   }));
   try {
-    const { ok, payload } = await authorRequest('DELETE', `/saved-authors/${encodeURIComponent(authorId)}`);
+    const { ok, payload } = await libraryRequest('DELETE', `/saved-authors/${encodeURIComponent(authorId)}`);
     if (ok && Array.isArray(payload.savedAuthors)) setField(userId, 'savedAuthors', payload.savedAuthors);
     if (ok) return { ok: true, saved: false };
     undo();
@@ -232,7 +235,7 @@ export async function recordRecentAuthor(userId, author) {
   }));
   if (!isSignedIn(userId)) return;
   try {
-    const { ok, payload } = await authorRequest('POST', '/recent-authors', { id: author.id, name: author.name });
+    const { ok, payload } = await libraryRequest('POST', '/recent-authors', { id: author.id, name: author.name });
     if (ok && Array.isArray(payload.recentAuthors)) setField(userId, 'recentAuthors', payload.recentAuthors);
   } catch (_) {
     // History is a convenience: the next library sync reconciles it.
@@ -250,7 +253,7 @@ export async function removeRecentAuthor(userId, authorId) {
     ...current, recentAuthors: unexpired([removed, ...current.recentAuthors]),
   }));
   try {
-    const { ok, payload } = await authorRequest('DELETE', `/recent-authors/${encodeURIComponent(authorId)}`);
+    const { ok, payload } = await libraryRequest('DELETE', `/recent-authors/${encodeURIComponent(authorId)}`);
     if (ok && Array.isArray(payload.recentAuthors)) setField(userId, 'recentAuthors', payload.recentAuthors);
     if (ok) return { ok: true };
     undo();
@@ -266,7 +269,7 @@ export async function clearRecentAuthors(userId) {
   setField(userId, 'recentAuthors', []);
   if (!isSignedIn(userId)) return { ok: true };
   try {
-    const { ok, payload } = await authorRequest('DELETE', '/recent-authors');
+    const { ok, payload } = await libraryRequest('DELETE', '/recent-authors');
     if (ok) return { ok: true };
     setField(userId, 'recentAuthors', previous);
     return { ok: false, message: payload.message || 'Could not clear your history. Please try again.' };
@@ -276,38 +279,121 @@ export async function clearRecentAuthors(userId) {
   }
 }
 
-export function toggleSavedPaper(userId, paper) {
-  return updateLibrary(userId, (library) => ({
-    ...library,
-    savedPapers: library.savedPapers.some((item) => item.id === paper.id)
-      ? library.savedPapers.filter((item) => item.id !== paper.id)
-      : [{ ...paper, savedAt: new Date().toISOString() }, ...library.savedPapers]
+// ---- Saved papers: one request per change, like authors --------------------
+
+// What is stored for a saved paper: a reference to the publication plus what
+// the My Library list shows. Opening it reads the full record from the API.
+const paperReference = (paper) => ({
+  id: paper.id,
+  title: paper.title,
+  publishedYear: paper.publishedYear ?? null,
+  authorId: paper.authorId,
+  authorName: paper.authorName,
+});
+
+// The library with `paper` in the chosen collection (a new one when a name is
+// given) -- a paper sits in at most one collection -- and in savedPapers.
+function withPaperInCollection(library, paper, collectionId, newCollectionName) {
+  let collections = library.collections;
+  let targetId = collectionId;
+  const name = (newCollectionName || '').trim();
+  if (name) {
+    targetId = `collection-${Date.now()}`;
+    collections = [...collections, { id: targetId, name, paperIds: [] }];
+  }
+  collections = collections.map((collection) => ({
+    ...collection,
+    paperIds: collection.id === targetId
+      ? [...new Set([...collection.paperIds, paper.id])]
+      : collection.paperIds.filter((id) => id !== paper.id),
   }));
+  return {
+    ...library,
+    collections,
+    savedPapers: library.savedPapers.some((item) => item.id === paper.id)
+      ? library.savedPapers
+      : [{ ...paperReference(paper), savedAt: new Date().toISOString() }, ...library.savedPapers],
+  };
 }
 
-export function savePaperToCollection(userId, paper, collectionId, newCollectionName = '') {
-  return updateLibrary(userId, (library) => {
-    let collections = library.collections;
-    let targetId = collectionId;
-    const name = newCollectionName.trim();
-    if (name) {
-      targetId = `collection-${Date.now()}`;
-      collections = [...collections, { id: targetId, name, paperIds: [] }];
+/**
+ * Saves a paper (if it is not saved yet) into a collection, or moves an
+ * already-saved one there. Resolves to { ok, limitReached?, message? }; on
+ * failure the library is put back as it was.
+ */
+export async function savePaperToCollection(userId, paper, collectionId, newCollectionName = '') {
+  const before = getLibrary(userId);
+  const alreadySaved = before.savedPapers.some((item) => item.id === paper.id);
+  if (!alreadySaved && before.savedPapers.length >= MAX_SAVED_PAPERS) {
+    return { ok: false, limitReached: true, message: SAVED_PAPER_LIMIT_MESSAGE };
+  }
+
+  const next = withPaperInCollection(before, paper, collectionId, newCollectionName);
+  if (alreadySaved || !isSignedIn(userId)) {
+    // Only the collection changed (or this is a guest): the existing path.
+    saveLibrary(userId, next);
+    return { ok: true };
+  }
+
+  writeLocal(userId, next);
+  const undo = (savedPapers = before.savedPapers) => updateLocal(userId, (current) => ({
+    ...current, savedPapers, collections: before.collections,
+  }));
+  try {
+    const { ok, status, payload } = await libraryRequest('POST', '/saved-papers', paperReference(paper));
+    if (!ok) {
+      undo(Array.isArray(payload.savedPapers) ? payload.savedPapers : before.savedPapers);
+      return {
+        ok: false,
+        limitReached: status === 409,
+        message: payload.message || 'Could not save this publication. Please try again.',
+      };
     }
-    collections = collections.map((collection) => ({
-      ...collection,
-      paperIds: collection.id === targetId
-        ? [...new Set([...collection.paperIds, paper.id])]
-        : collection.paperIds.filter((id) => id !== paper.id)
-    }));
-    return {
-      ...library,
-      collections,
-      savedPapers: library.savedPapers.some((item) => item.id === paper.id)
-        ? library.savedPapers
-        : [{ ...paper, savedAt: new Date().toISOString() }, ...library.savedPapers]
-    };
+    if (Array.isArray(payload.savedPapers)) setField(userId, 'savedPapers', payload.savedPapers);
+    // The paper is saved; now record which collection holds it.
+    queueRemoteLibrarySave(userId, getLibrary(userId)).catch(() => {});
+    return { ok: true };
+  } catch (_) {
+    undo();
+    return { ok: false, message: `Could not save this publication. ${OFFLINE}` };
+  }
+}
+
+/** Removes a saved paper and takes it out of its collection. */
+export async function removeSavedPaper(userId, paperId) {
+  const before = getLibrary(userId);
+  if (!before.savedPapers.some((item) => item.id === paperId)) return { ok: true };
+  writeLocal(userId, {
+    ...before,
+    savedPapers: before.savedPapers.filter((item) => item.id !== paperId),
+    collections: before.collections.map((collection) => ({
+      ...collection, paperIds: collection.paperIds.filter((id) => id !== paperId),
+    })),
   });
+  if (!isSignedIn(userId)) return { ok: true };
+
+  const undo = () => updateLocal(userId, (current) => ({
+    ...current, savedPapers: before.savedPapers, collections: before.collections,
+  }));
+  try {
+    const { ok, payload } = await libraryRequest('DELETE', `/saved-papers/${encodeURIComponent(paperId)}`);
+    if (!ok) {
+      undo();
+      return { ok: false, message: payload.message || 'Could not remove this publication. Please try again.' };
+    }
+    if (Array.isArray(payload.savedPapers)) setField(userId, 'savedPapers', payload.savedPapers);
+    return { ok: true };
+  } catch (_) {
+    undo();
+    return { ok: false, message: `Could not remove this publication. ${OFFLINE}` };
+  }
+}
+
+/** Save without choosing a collection, or remove. Resolves to { ok, message? }. */
+export function toggleSavedPaper(userId, paper) {
+  return getLibrary(userId).savedPapers.some((item) => item.id === paper.id)
+    ? removeSavedPaper(userId, paper.id)
+    : savePaperToCollection(userId, paper, '', '');
 }
 
 export function downloadAuthorPdf(data) {
