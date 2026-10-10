@@ -919,3 +919,11 @@
   .welcome-subtext p,
   .welcome-subtext-ghost { font-size: 0.92rem; }
 }
+
+/* "Type at least 2 characters" after a too-short author search. */
+.search-hint {
+  margin: 0.6rem 0 0;
+  color: #b45309;
+  font-size: 0.85rem;
+  font-weight: 600;
+}

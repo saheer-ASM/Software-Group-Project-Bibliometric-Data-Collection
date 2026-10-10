@@ -30,20 +30,37 @@ const CONFIG = {
 
 const emptyForm = { feedbackType: FEEDBACK_TYPES[0], message: '', title: '', category: ISSUE_CATEGORIES[0], description: '' };
 
+// Lengths count what is saved: the text with surrounding whitespace trimmed.
+const len = (v) => v.trim().length;
+const formatCount = (n) => n.toLocaleString('en-US');
+
 const validate = (kind, form) => {
   const errors = {};
-  const len = (v) => v.trim().length;
   if (kind === 'feedback') {
-    if (len(form.message) < LIMITS.messageMin) errors.message = `Please write at least ${LIMITS.messageMin} characters.`;
-    else if (len(form.message) > LIMITS.messageMax) errors.message = `Please keep it under ${LIMITS.messageMax} characters.`;
+    if (len(form.message) < LIMITS.feedbackMin) errors.message = `Please write at least ${LIMITS.feedbackMin} characters.`;
+    else if (len(form.message) > LIMITS.feedbackMax) errors.message = `Please keep it to ${formatCount(LIMITS.feedbackMax)} characters or fewer.`;
   } else {
     if (len(form.title) < LIMITS.titleMin) errors.title = `Please give the issue a title (at least ${LIMITS.titleMin} characters).`;
-    else if (len(form.title) > LIMITS.titleMax) errors.title = `Please keep the title under ${LIMITS.titleMax} characters.`;
-    if (len(form.description) < LIMITS.messageMin) errors.description = `Please describe the issue (at least ${LIMITS.messageMin} characters).`;
-    else if (len(form.description) > LIMITS.messageMax) errors.description = `Please keep it under ${LIMITS.messageMax} characters.`;
+    else if (len(form.title) > LIMITS.titleMax) errors.title = `Please keep the title to ${LIMITS.titleMax} characters or fewer.`;
+    if (len(form.description) < LIMITS.descriptionMin) errors.description = `Please describe the issue (at least ${LIMITS.descriptionMin} characters).`;
+    else if (len(form.description) > LIMITS.descriptionMax) errors.description = `Please keep it to ${formatCount(LIMITS.descriptionMax)} characters or fewer.`;
   }
   return errors;
 };
+
+// "245 / 1,000" under a field, with the minimum beside it. Counts the trimmed
+// text, the same number the validation and the server use; the input's
+// maxLength stops typing at the maximum.
+function CharacterCount({ id, value, min, max }) {
+  const count = len(value);
+  const state = count > max ? ' over' : count >= max * 0.9 ? ' near' : '';
+  return (
+    <span className="support-field-meta" id={id}>
+      <span>At least {min} characters</span>
+      <span className={`support-counter${state}`}>{formatCount(count)} / {formatCount(max)}</span>
+    </span>
+  );
+}
 
 // Renders the Send Feedback / Report an Issue modal (kind = 'feedback' | 'issue')
 // and the success toast. Mounted once in App.js and opened via useAppShell().
@@ -159,10 +176,12 @@ const SupportDialogs = ({ kind, onClose, onRequireLogin }) => {
                         value={form.message}
                         onChange={set('message')}
                         disabled={saving}
-                        maxLength={LIMITS.messageMax}
+                        maxLength={LIMITS.feedbackMax}
                         placeholder="Tell us what you think, or what would make NmIndex better…"
                         aria-invalid={Boolean(errors.message)}
+                        aria-describedby="support-message-count"
                       />
+                      <CharacterCount id="support-message-count" value={form.message} min={LIMITS.feedbackMin} max={LIMITS.feedbackMax} />
                       {errors.message && <span className="support-error">{errors.message}</span>}
                     </label>
                   </>
@@ -178,7 +197,9 @@ const SupportDialogs = ({ kind, onClose, onRequireLogin }) => {
                         maxLength={LIMITS.titleMax}
                         placeholder="e.g. Dashboard does not load"
                         aria-invalid={Boolean(errors.title)}
+                        aria-describedby="support-title-count"
                       />
+                      <CharacterCount id="support-title-count" value={form.title} min={LIMITS.titleMin} max={LIMITS.titleMax} />
                       {errors.title && <span className="support-error">{errors.title}</span>}
                     </label>
                     <label className="support-field">
@@ -194,10 +215,12 @@ const SupportDialogs = ({ kind, onClose, onRequireLogin }) => {
                         value={form.description}
                         onChange={set('description')}
                         disabled={saving}
-                        maxLength={LIMITS.messageMax}
+                        maxLength={LIMITS.descriptionMax}
                         placeholder="What happened? What did you expect? Steps to reproduce help a lot."
                         aria-invalid={Boolean(errors.description)}
+                        aria-describedby="support-description-count"
                       />
+                      <CharacterCount id="support-description-count" value={form.description} min={LIMITS.descriptionMin} max={LIMITS.descriptionMax} />
                       {errors.description && <span className="support-error">{errors.description}</span>}
                     </label>
                   </>

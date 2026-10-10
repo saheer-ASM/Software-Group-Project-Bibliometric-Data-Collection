@@ -1,18 +1,17 @@
 const express       = require('express');
 const authMiddleware = require('../middleware/auth');
 const authorService  = require('../services/authorSearchService');
+const { parseAuthorQuery } = require('../services/authorQuery');
 
 const router = express.Router();
 
 // GET /api/authors?q=<name>
 router.get('/', async (req, res) => {
-  const { q } = req.query;
-  if (!q || q.trim().length < 2) {
-    return res.status(400).json({ message: 'Query must be at least 2 characters' });
-  }
+  const query = parseAuthorQuery(req.query.q);
+  if (query.error) return res.status(400).json({ message: query.error });
 
   try {
-    const authors = await authorService.searchByName(q.trim());
+    const authors = await authorService.searchByName(query.value);
     res.json(authors);
   } catch (err) {
     res.status(500).json({ message: 'Search failed', error: err.message });
@@ -21,13 +20,11 @@ router.get('/', async (req, res) => {
 
 // GET /api/authors/search?name=<name>
 router.get('/search', authMiddleware, async (req, res) => {
-  const { name } = req.query;
-  if (!name || name.trim().length < 2) {
-    return res.status(400).json({ message: 'Query must be at least 2 characters' });
-  }
+  const query = parseAuthorQuery(req.query.name);
+  if (query.error) return res.status(400).json({ message: query.error });
 
   try {
-    const authors = await authorService.searchByName(name.trim());
+    const authors = await authorService.searchByName(query.value);
     res.json({ authors });
   } catch (err) {
     res.status(500).json({ message: 'Search failed', error: err.message });

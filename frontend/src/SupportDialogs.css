@@ -241,3 +241,19 @@
 
   .admin-meta { grid-template-columns: 1fr; }
 }
+
+/* Minimum hint and live "245 / 1,000" counter under a text field. Resets the
+   uppercase label styling, as .support-error does. */
+.support-field-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--text-muted, #64748b);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.support-counter { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.support-counter.near { color: #b45309; font-weight: 600; }
+.support-counter.over { color: #dc2626; font-weight: 600; }
