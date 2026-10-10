@@ -52,13 +52,32 @@ app.use('/api/authors', authorRoutes);
 app.use('/api/compare', compareRoutes);
 app.use('/api/library', libraryRoutes);
 
-app.get('/api/health', async (_req, res) => {
-  let database = 'connected';
+// Last database failure reported, so the log records each change of state
+// once instead of repeating the same line on every 30-second health probe.
+let lastDatabaseFailure = null;
+
+async function checkDatabase() {
   try {
     await pool.query('SELECT 1');
-  } catch (_error) {
-    database = 'unavailable';
+    if (lastDatabaseFailure !== null) {
+      console.log(`[db] PostgreSQL at ${pool.dbTarget} is reachable again`);
+      lastDatabaseFailure = null;
+    }
+    return true;
+  } catch (error) {
+    const reason = pool.describeDbError(error);
+    if (reason !== lastDatabaseFailure) {
+      console.error(`[db] PostgreSQL at ${pool.dbTarget} is unavailable: ${reason}`);
+      lastDatabaseFailure = reason;
+    }
+    return false;
   }
+}
+
+app.get('/api/health', async (_req, res) => {
+  // The reason is logged server-side only; this endpoint is public through
+  // nginx, so it reports the state without the details.
+  const database = (await checkDatabase()) ? 'connected' : 'unavailable';
 
   const dependencies = {
     database,
@@ -79,4 +98,13 @@ const PORT = process.env.PORT || 5005;
 // inside a container binds the container's own loopback, so nginx on the Docker
 // network would never be able to reach it.
 const HOST = process.env.HOST || 'localhost';
-app.listen(PORT, HOST, () => console.log(`Server running on http://${HOST}:${PORT}`));
+app.listen(PORT, HOST, () => {
+  console.log(`Server running on http://${HOST}:${PORT}`);
+  // pg connects lazily, so without this the first sign of a bad database
+  // setting would be a failed request. Logged, not fatal: a transient outage
+  // should not crash-loop the container, and /api/health keeps reporting it.
+  console.log(`[db] PostgreSQL target ${pool.dbTarget}, TLS ${pool.dbTls}`);
+  checkDatabase().then((ok) => {
+    if (ok) console.log('[db] connected to PostgreSQL');
+  });
+});
