@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../config/firebase');
 const authMiddleware = require('../middleware/auth');
 const authors = require('../services/libraryAuthors');
+const papers = require('../services/libraryPapers');
 
 const router = express.Router();
 const libraries = db ? db.collection('userLibraries') : null;
@@ -13,31 +14,26 @@ const LIMITS = {
   savedAuthors: authors.MAX_SAVED_AUTHORS,
   recentAuthors: authors.MAX_RECENT_AUTHORS,
   recentRetentionDays: authors.RECENT_RETENTION_DAYS,
+  savedPapers: papers.MAX_SAVED_PAPERS,
 };
 
 function cleanText(value, maxLength = 500) {
   return String(value || '').trim().slice(0, maxLength);
 }
 
-// Papers and collections: still saved as a whole with PUT, as before.
-function cleanPapersAndCollections(input = {}) {
+// Collections: still saved as a whole with PUT, as before.
+function cleanCollections(input = {}) {
   const array = (value, limit) => (Array.isArray(value) ? value.slice(0, limit) : []);
-  return {
-    savedPapers: array(input.savedPapers, 2000).map((paper) => ({
-      id: cleanText(paper.id, 100), title: cleanText(paper.title, 1000),
-      publishedYear: paper.publishedYear ?? null, authorId: cleanText(paper.authorId, 100),
-      authorName: cleanText(paper.authorName, 300), savedAt: cleanText(paper.savedAt, 50),
-    })).filter((paper) => paper.id),
-    collections: array(input.collections, 200).map((collection) => ({
-      id: cleanText(collection.id, 100), name: cleanText(collection.name, 100),
-      paperIds: [...new Set(array(collection.paperIds, 2000).map((id) => cleanText(id, 100)).filter(Boolean))],
-    })).filter((collection) => collection.id && collection.name),
-  };
+  return array(input.collections, 200).map((collection) => ({
+    id: cleanText(collection.id, 100), name: cleanText(collection.name, 100),
+    paperIds: [...new Set(array(collection.paperIds, 2000).map((id) => cleanText(id, 100)).filter(Boolean))],
+  })).filter((collection) => collection.id && collection.name);
 }
 
 function cleanLibrary(input = {}, now = Date.now()) {
   return {
-    ...cleanPapersAndCollections(input),
+    savedPapers: papers.normalizeSavedPapers(input.savedPapers),
+    collections: cleanCollections(input),
     savedAuthors: authors.normalizeSaved(input.savedAuthors),
     // Expired views are left out of every response, so they never display.
     recentAuthors: authors.normalizeRecent(input.recentAuthors, now),
@@ -59,22 +55,29 @@ function failed(res, action, error) {
 const userDoc = (req) => libraries.doc(String(req.user.id));
 
 /**
- * Read-modify-write of one field in a transaction. Firestore retries the
- * callback when another request changes the document first, so two saves
- * racing for the 100th slot cannot both succeed, and neither overwrites the
- * other. `change(currentValue)` returns { value, result }; an undefined value
- * leaves the document untouched.
+ * Read-modify-write of the user's document in a transaction. Firestore retries
+ * the callback when another request changes the document first, so two saves
+ * racing for the last slot cannot both succeed, and neither overwrites the
+ * other. `change(data)` returns { fields, result }; `fields` are merged into
+ * the document, and undefined fields leave it untouched.
  */
-function updateField(req, field, change) {
+function updateDocument(req, change) {
   const ref = userDoc(req);
   return db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref);
-    const current = snapshot.exists ? snapshot.get(field) : undefined;
-    const { value, result } = change(current);
-    if (value !== undefined) {
-      transaction.set(ref, { [field]: value, updatedAt: new Date().toISOString() }, { merge: true });
+    const { fields, result } = change(snapshot.exists ? snapshot.data() : {});
+    if (fields !== undefined) {
+      transaction.set(ref, { ...fields, updatedAt: new Date().toISOString() }, { merge: true });
     }
     return result;
+  });
+}
+
+// The single-field case the author routes use.
+function updateField(req, field, change) {
+  return updateDocument(req, (data) => {
+    const { value, result } = change(data[field]);
+    return { fields: value === undefined ? undefined : { [field]: value }, result };
   });
 }
 
@@ -91,15 +94,15 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Saves papers and collections. Saved and recently viewed authors are NOT
-// written here any more: a whole-library save from a second tab or device
-// would overwrite them -- undoing removals and dropping items saved meanwhile.
-// They change only through the item routes below. Author lists in the body
-// (older clients still send them) are ignored.
+// Saves collections (their names and which papers each holds). Saved papers
+// and authors are NOT written here: a whole-library save from a second tab or
+// device would overwrite them -- undoing removals, dropping items saved
+// meanwhile, and bypassing the limits. They change only through the item
+// routes below; those lists in the body (older clients send them) are ignored.
 router.put('/', async (req, res) => {
   if (!libraries) return unavailable(res);
   try {
-    const library = cleanPapersAndCollections(req.body);
+    const library = { collections: cleanCollections(req.body) };
     await userDoc(req).set({ ...library, updatedAt: new Date().toISOString() }, { merge: true });
     return res.json(library);
   } catch (error) {
@@ -163,6 +166,48 @@ router.delete('/saved-authors/:authorId', async (req, res) => {
     return res.json({ savedAuthors, limits: LIMITS });
   } catch (error) {
     return failed(res, 'remove this author', error);
+  }
+});
+
+// ---- Saved papers -----------------------------------------------------------
+
+router.post('/saved-papers', async (req, res) => {
+  if (!libraries) return unavailable(res);
+  const paper = papers.parsePaper(req.body);
+  if (!paper) return res.status(400).json({ message: 'A valid publication id and author id are required.' });
+  try {
+    const outcome = await updateDocument(req, (data) => {
+      const result = papers.addSavedPaper(data.savedPapers, paper);
+      return { fields: result.status === 'added' ? { savedPapers: result.savedPapers } : undefined, result };
+    });
+    if (outcome.status === 'limit') {
+      return res.status(409).json({
+        message: `You can save up to ${LIMITS.savedPapers} publications. Remove one to save another.`,
+        savedPapers: outcome.savedPapers,
+        limits: LIMITS,
+      });
+    }
+    return res.status(outcome.status === 'added' ? 201 : 200)
+      .json({ savedPapers: outcome.savedPapers, limits: LIMITS });
+  } catch (error) {
+    return failed(res, 'save this publication', error);
+  }
+});
+
+router.delete('/saved-papers/:paperId', async (req, res) => {
+  if (!libraries) return unavailable(res);
+  // Lenient on purpose: a paper saved by an older version may have an id that
+  // would not pass the check used for new saves, and it must still be removable.
+  const paperId = String(req.params.paperId || '').trim().slice(0, 100);
+  if (!paperId) return res.status(400).json({ message: 'A publication id is required.' });
+  try {
+    const next = await updateDocument(req, (data) => {
+      const result = papers.removeSavedPaper(data.savedPapers, cleanCollections(data), paperId);
+      return { fields: result, result };
+    });
+    return res.json({ ...next, limits: LIMITS });
+  } catch (error) {
+    return failed(res, 'remove this publication', error);
   }
 });
 

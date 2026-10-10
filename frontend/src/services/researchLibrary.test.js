@@ -152,11 +152,11 @@ describe('signed in', () => {
     const merged = await syncLibraryFromServer(USER);
 
     expect(merged.savedAuthors.map((a) => a.id)).toEqual(['A1001']);
-    // Papers keep their existing union merge.
-    expect(merged.savedPapers.map((p) => p.id).sort()).toEqual(['W-local', 'W-remote']);
-    // The follow-up PUT carries papers and collections only.
+    // Saved papers follow the server too now, so a paper removed elsewhere stays removed.
+    expect(merged.savedPapers.map((p) => p.id)).toEqual(['W-remote']);
+    // The follow-up PUT carries collections only.
     const putBody = JSON.parse(fetch.mock.calls[1][1].body);
-    expect(Object.keys(putBody).sort()).toEqual(['collections', 'savedPapers']);
+    expect(Object.keys(putBody)).toEqual(['collections']);
   });
 });
 

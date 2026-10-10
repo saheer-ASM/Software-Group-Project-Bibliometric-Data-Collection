@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { API_BASE_URL } from './config/api';
+import PublicationCard from './components/PublicationCard';
 import { publicationYears } from './services/publicationFilters';
-import { downloadAuthorPdf, getLibrary, recordRecentAuthor, savePaperToCollection, toggleSavedAuthor, toggleSavedPaper } from './services/researchLibrary';
+import { downloadAuthorPdf, getLibrary, recordRecentAuthor, savePaperToCollection, toggleSavedAuthor, toggleSavedPaper, MAX_SAVED_PAPERS, SAVED_PAPER_LIMIT_MESSAGE } from './services/researchLibrary';
 import './DataExplorer.css';
 import AppNavbar from './AppNavbar';
 import PublicationFilterHelp from './components/PublicationFilterHelp';
@@ -113,6 +114,9 @@ const DataExplorer = ({
   const userId = user?.id || user?.email;
   const [library, setLibrary] = useState(() => getLibrary(userId));
   const [paperToSave, setPaperToSave] = useState(null);
+  // Shown inside the collection dialog: the 200-paper limit, or a failed save.
+  const [collectionError, setCollectionError] = useState('');
+  const [savingPaper, setSavingPaper] = useState(false);
   const [selectedCollectionId, setSelectedCollectionId] = useState('');
   const [newCollectionName, setNewCollectionName] = useState('');
   const [comparisonOpen, setComparisonOpen] = useState(false);
@@ -144,11 +148,6 @@ const DataExplorer = ({
     if (!result.ok) setSaveNotice(result.message);
   };
 
-  const formatPercentage = (value, digits = 2) => {
-    const number = Number(value || 0);
-    const percentage = Math.abs(number) <= 1 ? number * 100 : number;
-    return `${percentage.toFixed(digits)}%`;
-  };
 
   // Default "empty" profile shown before any data is fetched
   const defaultProfile = {
@@ -611,19 +610,31 @@ const DataExplorer = ({
   const requestPaperSave = (publication) => {
     const paper = { id: publication.id, title: publication.title, publishedYear: publication.publishedYear, authorId: data.authorId, authorName: data.author };
     if (library.savedPapers.some((item) => item.id === publication.id)) {
-      toggleSavedPaper(userId, paper);
+      toggleSavedPaper(userId, paper).then((result) => {
+        if (!result.ok) setSaveNotice(result.message);
+      });
       return;
     }
     setPaperToSave(paper);
     setSelectedCollectionId(library.collections[0]?.id || '');
     setNewCollectionName('');
+    // Said up front, before the user picks a collection for nothing.
+    setCollectionError(library.savedPapers.length >= MAX_SAVED_PAPERS ? SAVED_PAPER_LIMIT_MESSAGE : '');
   };
 
-  const confirmPaperSave = (event) => {
+  const confirmPaperSave = async (event) => {
     event.preventDefault();
-    if (!paperToSave || (!selectedCollectionId && !newCollectionName.trim())) return;
-    savePaperToCollection(userId, paperToSave, selectedCollectionId, newCollectionName);
-    setPaperToSave(null);
+    if (!paperToSave || savingPaper || (!selectedCollectionId && !newCollectionName.trim())) return;
+    setSavingPaper(true);
+    const result = await savePaperToCollection(userId, paperToSave, selectedCollectionId, newCollectionName);
+    setSavingPaper(false);
+    if (result.ok) {
+      setPaperToSave(null);
+      setCollectionError('');
+    } else {
+      // The dialog stays open so the message is read where the action was.
+      setCollectionError(result.message);
+    }
   };
 
   const clearFilters = () => {
@@ -1018,116 +1029,16 @@ const DataExplorer = ({
         {data && filteredPublications.length > 0 && (
           <section className="de-publications">
             {filteredPublications.map((pub, publicationIndex) => (
-              <div
+              <PublicationCard
                 key={pub.id}
-                className={`de-pub-card${expandedPublicationIds.has(pub.id) ? ' de-pub-card-expanded' : ''}`}
-              >
-                <div className="de-pub-main">
-                  <div className="de-pub-meta">
-                    <span className="de-publication-number">Paper {String(publicationIndex + 1).padStart(2, '0')}</span>
-                    <span><i className='bx bx-calendar'></i>{pub.publishedYear || 'Year unavailable'}</span>
-                    {pub.source && <span><i className='bx bx-book-open'></i>{pub.source}</span>}
-                    <span><i className='bx bx-group'></i>{pub.authors.length} authors</span>
-                    <span><i className='bx bx-sort-alt-2'></i>{pub.authorOrdering}</span>
-                    <button
-                      type="button"
-                      className={`de-paper-save${library.savedPapers.some((paper) => paper.id === pub.id) ? ' saved' : ''}`}
-                      onClick={() => requestPaperSave(pub)}
-                    >
-                      <i className={library.savedPapers.some((paper) => paper.id === pub.id) ? 'bx bxs-bookmark' : 'bx bx-bookmark'}></i>
-                      {library.savedPapers.some((paper) => paper.id === pub.id) ? 'Saved' : 'Save paper'}
-                    </button>
-                  </div>
-                  <h3 className="de-pub-title">{pub.title}</h3>
-                  {pub.abstract && (
-                    <details className="de-pub-abstract">
-                      <summary>Read abstract</summary>
-                      <p>{pub.abstract}</p>
-                    </details>
-                  )}
-                  {/* Mobile only -- hidden by a media query on desktop, where
-                      every section below is already shown in full. */}
-                  <button
-                    type="button"
-                    className="de-pub-details-toggle"
-                    aria-expanded={expandedPublicationIds.has(pub.id)}
-                    aria-controls={`de-pub-stats-${pub.id} de-pub-secondary-${pub.id}`}
-                    onClick={() => togglePublicationDetails(pub.id)}
-                  >
-                    <i
-                      className={expandedPublicationIds.has(pub.id) ? 'bx bx-chevron-up' : 'bx bx-chevron-down'}
-                      aria-hidden="true"
-                    />
-                    {expandedPublicationIds.has(pub.id) ? 'Hide Details' : 'Show Details'}
-                  </button>
-                </div>
-                <div className="de-pub-secondary" id={`de-pub-secondary-${pub.id}`}>
-                  <div className="de-pub-fields">
-                    <h4 className="de-fields-heading">Research fields</h4>
-                    <div className="de-field-tags">
-                    {pub.fieldDetails.map((field, idx) => (
-                      <span key={idx} className="de-field-tag">
-                        {field.name} <strong>{formatPercentage(field.weight, 1)}</strong>
-                      </span>
-                    ))}
-                    </div>
-                  </div>
-                  <div className="de-pub-authors">
-                    <div className="de-authors-heading">
-                      <h4>Author contributions</h4>
-                      {!pub.authors.some((author) => Number(author.weight) > 0) && (
-                        <span className="de-pending-badge">Not calculated</span>
-                      )}
-                    </div>
-                    <ul>
-                      {pub.authors.map((author) => (
-                        <li key={author.id}>
-                          <button type="button" className="de-author-link" onClick={() => handleAuthorSelect(author)}>
-                            <span className="de-author-position">{author.position}</span>
-                            <span className="de-author-name-text">{author.name}</span>
-                            <strong>{Number(author.weight) > 0 ? formatPercentage(author.weight) : '—'}</strong>
-                            <i className='bx bx-chevron-right' aria-hidden="true"></i>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-                <div className="de-pub-stats" id={`de-pub-stats-${pub.id}`}>
-                  <div className="de-pub-stat">
-                    <i className='bx bx-revision'></i>
-                    <span className="de-pub-stat-label">Self citations</span>
-                    <span className="de-pub-stat-value">{pub.selfCitations}</span>
-                  </div>
-                  <div className="de-pub-stat">
-                    <i className='bx bx-calendar'></i>
-                    <span className="de-pub-stat-label">Published</span>
-                    <span className="de-pub-stat-value">{pub.publishedYear || '—'}</span>
-                  </div>
-                  <div className="de-pub-stat">
-                    <i className='bx bx-quote-left'></i>
-                    <span className="de-pub-stat-label">Normal citations</span>
-                    <span className="de-pub-stat-value">{pub.totalCitations}</span>
-                  </div>
-                  <div className="de-pub-stat">
-                    <i className='bx bx-line-chart'></i>
-                    <span className="de-pub-stat-label">Adjusted citations</span>
-                    <span className="de-pub-stat-value">{Number(pub.adjustedCitations).toFixed(3)}</span>
-                  </div>
-                  <div className="de-pub-stat">
-                    <i className='bx bx-analyse'></i>
-                    <span className="de-pub-stat-label">Average ISC</span>
-                    <span className="de-pub-stat-value">{Number(pub.averageIsc).toFixed(3)}</span>
-                  </div>
-                  <div className="de-pub-stat">
-                    <i className='bx bx-pie-chart-alt-2'></i>
-                    <span className="de-pub-stat-label">Your contribution</span>
-                    <span className={`de-pub-stat-value ${Number(pub.authorContributionWeight) > 0 ? '' : 'de-value-pending'}`}>
-                      {Number(pub.authorContributionWeight) > 0 ? formatPercentage(pub.authorContributionWeight) : 'Not calculated'}
-                    </span>
-                  </div>
-                </div>
-              </div>
+                publication={pub}
+                label={`Paper ${String(publicationIndex + 1).padStart(2, '0')}`}
+                saved={library.savedPapers.some((paper) => paper.id === pub.id)}
+                onToggleSave={requestPaperSave}
+                expanded={expandedPublicationIds.has(pub.id)}
+                onToggleExpanded={togglePublicationDetails}
+                onSelectAuthor={handleAuthorSelect}
+              />
             ))}
           </section>
         )}
@@ -1174,10 +1085,11 @@ const DataExplorer = ({
                 <button type="button" aria-label="Close" onClick={() => setPaperToSave(null)}><i className="bx bx-x"></i></button>
               </div>
               <p className="de-collection-paper-title">{paperToSave.title}</p>
+              {collectionError && <p className="de-save-notice" role="alert">{collectionError}</p>}
               {library.collections.length > 0 && <label>Existing collection<select value={newCollectionName ? '' : selectedCollectionId} onChange={(event) => { setSelectedCollectionId(event.target.value); setNewCollectionName(''); }}><option value="" disabled>Select a collection</option>{library.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name} ({collection.paperIds.length})</option>)}</select></label>}
               <div className="de-collection-divider"><span>or create a new collection</span></div>
               <label>New collection name<input type="text" value={newCollectionName} onChange={(event) => { setNewCollectionName(event.target.value); if (event.target.value) setSelectedCollectionId(''); }} placeholder="e.g. Machine Learning" maxLength="60" autoFocus={!library.collections.length} /></label>
-              <div className="de-collection-dialog-actions"><button type="button" onClick={() => setPaperToSave(null)}>Cancel</button><button type="submit" disabled={!selectedCollectionId && !newCollectionName.trim()}><i className="bx bxs-bookmark"></i> Save to collection</button></div>
+              <div className="de-collection-dialog-actions"><button type="button" onClick={() => setPaperToSave(null)}>Cancel</button><button type="submit" disabled={savingPaper || library.savedPapers.length >= MAX_SAVED_PAPERS || (!selectedCollectionId && !newCollectionName.trim())}><i className="bx bxs-bookmark"></i> Save to collection</button></div>
             </form>
           </div>
         )}

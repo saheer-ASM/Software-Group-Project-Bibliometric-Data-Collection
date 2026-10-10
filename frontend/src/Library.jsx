@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getLibrary, saveLibrary, removeSavedAuthor, removeRecentAuthor, clearRecentAuthors,
-  MAX_SAVED_AUTHORS, RECENT_AUTHORS_PREVIEW, RECENT_RETENTION_DAYS,
+  removeSavedPaper, savePaperToCollection,
+  MAX_SAVED_AUTHORS, MAX_SAVED_PAPERS, RECENT_AUTHORS_PREVIEW, RECENT_RETENTION_DAYS,
 } from './services/researchLibrary';
+import PublicationDetailsDialog from './components/PublicationDetailsDialog';
 import './Dashboard.css';
 import './Library.css';
 import AppNavbar from './AppNavbar';
@@ -19,6 +21,10 @@ export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout,
   // An action the server refused or that failed offline; the list itself has
   // already been put back by the service.
   const [notice, setNotice] = useState('');
+  // The saved paper whose details are open, with the collection it was in when
+  // opened (so removing and re-saving it from the dialog puts it back there).
+  const [openPaper, setOpenPaper] = useState(null);
+  const paperTriggerRef = useRef(null);
 
   useEffect(() => {
     const sync = (event) => setLibrary(event.detail || getLibrary(userId));
@@ -61,6 +67,30 @@ export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout,
   // Opened by id as well as name: several researchers share a name, and the
   // name alone would open whichever one the database returned first.
   const openAuthor = (author) => onOpenAuthor({ id: author.id, name: author.name });
+  const collectionOfPaper = (paperId) => library.collections.find((collection) => collection.paperIds.includes(paperId));
+  const openPaperDetails = (paper, trigger) => {
+    paperTriggerRef.current = trigger;
+    const collection = collectionOfPaper(paper.id);
+    setOpenPaper({ paper, collectionId: collection?.id || '', collectionName: collection?.name || '' });
+  };
+  // Closing leaves the active collection and scroll position as they were, and
+  // returns focus to the paper that was opened (when it is still listed).
+  const closePaperDetails = useCallback(() => {
+    setOpenPaper(null);
+    const trigger = paperTriggerRef.current;
+    if (trigger && document.contains(trigger)) trigger.focus();
+  }, []);
+  const handleRemovePaper = (paperId) => removeSavedPaper(userId, paperId).then(report);
+  // The card's Saved / Save paper button, as in the Data Explorer: removes the
+  // paper, or saves it again into the collection it came from.
+  const toggleOpenPaperSaved = () => {
+    if (!openPaper) return;
+    const isSaved = library.savedPapers.some((paper) => paper.id === openPaper.paper.id);
+    (isSaved
+      ? removeSavedPaper(userId, openPaper.paper.id)
+      : savePaperToCollection(userId, openPaper.paper, openPaper.collectionId, '')
+    ).then(report);
+  };
   const visibleRecentAuthors = showFullHistory
     ? library.recentAuthors
     : library.recentAuthors.slice(0, RECENT_AUTHORS_PREVIEW);
@@ -106,7 +136,7 @@ export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout,
             </div>)}
         </section>
       </div>
-      <section className="library-panel library-papers"><div className="library-panel-title"><h2><i className="bx bx-file" /> Saved publications <small>{library.savedPapers.length}</small></h2><form onSubmit={createCollection}><input value={collectionName} onChange={(e) => setCollectionName(e.target.value)} placeholder="New collection name" /><button>Create collection</button></form></div>
+      <section className="library-panel library-papers"><div className="library-panel-title"><h2><i className="bx bx-file" /> Saved publications <small aria-label={`${library.savedPapers.length} of ${MAX_SAVED_PAPERS} saved`}>({library.savedPapers.length}/{MAX_SAVED_PAPERS})</small></h2><form onSubmit={createCollection}><input value={collectionName} onChange={(e) => setCollectionName(e.target.value)} placeholder="New collection name" /><button>Create collection</button></form></div>
         <div className="library-collections" role="group" aria-label="Filter publications by collection">
           <button className={activeCollection === 'all' ? 'active' : ''} onClick={() => setActiveCollection('all')}>All <strong>{library.savedPapers.length}</strong></button>
           {library.collections.map((collection) => <span key={collection.id} className="library-collection-chip">
@@ -121,9 +151,18 @@ export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout,
           <button type="button" className="library-confirm-delete" onClick={() => deleteCollection(pendingDelete.id)}>Delete</button>
           <button type="button" className="library-confirm-cancel" onClick={() => setPendingDeleteId(null)}>Cancel</button>
         </div>}
-        <div className="library-paper-list">{visiblePapers.length ? visiblePapers.map((paper) => <article key={paper.id}><div><span>{paper.publishedYear || 'Year unavailable'}</span><h3>{paper.title}</h3><p>{paper.authorName}</p></div><select value={library.collections.find((item) => item.paperIds.includes(paper.id))?.id || ''} onChange={(e) => assignPaper(paper.id, e.target.value)}><option value="">No collection</option>{library.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></article>) : <p className="library-empty">{library.savedPapers.length ? 'No publications are assigned to this collection yet.' : 'Bookmark publications to organize them here.'}</p>}</div>
+        <div className="library-paper-list">{visiblePapers.length ? visiblePapers.map((paper) => <article key={paper.id}><button type="button" className="library-paper-open" onClick={(event) => openPaperDetails(paper, event.currentTarget)} aria-label={`Open details for ${paper.title || 'this publication'}`}><span>{paper.publishedYear || 'Year unavailable'}</span><h3>{paper.title || 'Untitled publication'}</h3><p>{paper.authorName}</p></button><div className="library-paper-actions"><select aria-label={`Collection for ${paper.title || 'this publication'}`} value={collectionOfPaper(paper.id)?.id || ''} onChange={(e) => assignPaper(paper.id, e.target.value)}><option value="">No collection</option>{library.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select><button type="button" className="library-author-delete" onClick={() => handleRemovePaper(paper.id)} aria-label={`Remove ${paper.title || 'this publication'} from saved publications`} title="Remove saved publication"><i className="bx bx-trash" /></button></div></article>) : <p className="library-empty">{library.savedPapers.length ? 'No publications are assigned to this collection yet.' : 'Bookmark publications to organize them here.'}</p>}</div>
       </section>
     </main>
+
+    {openPaper && <PublicationDetailsDialog
+      paper={openPaper.paper}
+      collectionName={collectionOfPaper(openPaper.paper.id)?.name || openPaper.collectionName}
+      saved={library.savedPapers.some((paper) => paper.id === openPaper.paper.id)}
+      onToggleSave={toggleOpenPaperSaved}
+      onSelectAuthor={(author) => { setOpenPaper(null); onOpenAuthor({ id: author.id, name: author.name }); }}
+      onClose={closePaperDetails}
+    />}
 
     <footer className="dashboard-footer">
       <div className="footer-content">

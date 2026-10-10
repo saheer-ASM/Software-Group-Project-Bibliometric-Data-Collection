@@ -170,9 +170,18 @@ const CONTRIBUTIONS = new Set(['primary', 'major', 'minor', 'coauthor']);
  * further values are appended to `params` and referenced positionally, so
  * every value is bound, never interpolated.
  */
+// Every pub_id in the database is an OpenAlex work id: "W" followed by digits.
+const PUBLICATION_ID_PATTERN = /^W\d{1,20}$/;
+
 function buildPublicationFilters(query, params) {
   const clauses = [AUTHOR_MATCH_SQL];
   const add = (value) => { params.push(value); return `$${params.length}`; };
+
+  // One specific publication, still in this author's context: the card's
+  // author-specific figures (contribution, self and adjusted citations) need
+  // the author, and the result has exactly the shape of a normal page.
+  const pubId = (query.pubId || '').trim();
+  if (PUBLICATION_ID_PATTERN.test(pubId)) clauses.push(`p.pub_id = ${add(pubId)}`);
 
   const title = (query.query || '').trim();
   if (title) clauses.push(`p.pub_title ILIKE ${add(`%${title}%`)}`);
@@ -466,6 +475,11 @@ router.get('/publications', async (req, res) => {
   const authorId = (req.query.authorId || '').trim();
   if (!authorId) {
     return res.status(400).json({ message: 'authorId is required' });
+  }
+  // A malformed pubId must fail loudly: ignoring it would quietly return the
+  // author's first page instead of the one publication that was asked for.
+  if (req.query.pubId !== undefined && !PUBLICATION_ID_PATTERN.test(String(req.query.pubId).trim())) {
+    return res.status(400).json({ message: 'pubId must be a publication id such as W1234567' });
   }
 
   const { page, limit, offset } = parsePaging(req.query);
