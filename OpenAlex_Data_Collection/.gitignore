@@ -1,0 +1,14 @@
+# Google service-account key -- grants write access to the shared sheet, never commit it
+service_account.json
+*.env
+.env
+
+# local SQLite database (large) -- share the file directly, never commit it
+database/*.db
+database/*.db-journal
+database/*.db-wal
+database/*.db-shm
+database/*.sqlite*
+
+# local run caches / checkpoints / backups
+cache/
