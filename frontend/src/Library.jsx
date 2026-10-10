@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { getLibrary, saveLibrary } from './services/researchLibrary';
+import {
+  getLibrary, saveLibrary, removeSavedAuthor, removeRecentAuthor, clearRecentAuthors,
+  MAX_SAVED_AUTHORS, RECENT_AUTHORS_PREVIEW, RECENT_RETENTION_DAYS,
+} from './services/researchLibrary';
 import './Dashboard.css';
 import './Library.css';
 import AppNavbar from './AppNavbar';
@@ -10,6 +13,12 @@ export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout,
   const [library, setLibrary] = useState(() => getLibrary(userId));
   const [collectionName, setCollectionName] = useState('');
   const [activeCollection, setActiveCollection] = useState('all');
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
+  const [showFullHistory, setShowFullHistory] = useState(false);
+  const [confirmClearHistory, setConfirmClearHistory] = useState(false);
+  // An action the server refused or that failed offline; the list itself has
+  // already been put back by the service.
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     const sync = (event) => setLibrary(event.detail || getLibrary(userId));
@@ -34,8 +43,28 @@ export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout,
         : collection.paperIds.filter((id) => id !== paperId)
     }))
   });
-  const removeSavedAuthor = (authorId) => persist({ ...library, savedAuthors: library.savedAuthors.filter((author) => author.id !== authorId) });
-  const removeRecentAuthor = (authorId) => persist({ ...library, recentAuthors: library.recentAuthors.filter((author) => author.id !== authorId) });
+  // Deletes the grouping only -- every publication stays in savedPapers, so
+  // nothing the user bookmarked is lost.
+  const deleteCollection = (collectionId) => {
+    persist({ ...library, collections: library.collections.filter((collection) => collection.id !== collectionId) });
+    if (activeCollection === collectionId) setActiveCollection('all');
+    setPendingDeleteId(null);
+  };
+  const report = (result) => setNotice(result && !result.ok ? result.message : '');
+  const handleRemoveSavedAuthor = (authorId) => removeSavedAuthor(userId, authorId).then(report);
+  const handleRemoveRecentAuthor = (authorId) => removeRecentAuthor(userId, authorId).then(report);
+  const handleClearHistory = () => {
+    setConfirmClearHistory(false);
+    setShowFullHistory(false);
+    clearRecentAuthors(userId).then(report);
+  };
+  // Opened by id as well as name: several researchers share a name, and the
+  // name alone would open whichever one the database returned first.
+  const openAuthor = (author) => onOpenAuthor({ id: author.id, name: author.name });
+  const visibleRecentAuthors = showFullHistory
+    ? library.recentAuthors
+    : library.recentAuthors.slice(0, RECENT_AUTHORS_PREVIEW);
+  const pendingDelete = library.collections.find((collection) => collection.id === pendingDeleteId) || null;
   const visiblePapers = activeCollection === 'all'
     ? library.savedPapers
     : library.savedPapers.filter((paper) => library.collections.find((collection) => collection.id === activeCollection)?.paperIds.includes(paper.id));
@@ -49,19 +78,49 @@ export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout,
         </div>
         <div className="library-intro-art"><span><i className="bx bx-bookmark-heart"></i></span><i className="bx bx-book-open"></i></div>
       </section>
+      {notice && <p className="library-notice" role="alert">{notice}</p>}
       <div className="library-grid">
-        <section className="library-panel"><h2><i className="bx bxs-user-pin" /> Saved authors <small>{library.savedAuthors.length}</small></h2>
-          <div className="library-items">{library.savedAuthors.length ? library.savedAuthors.map((author) => <div className="library-author-row" key={author.id}><button className="library-author-open" onClick={() => onOpenAuthor(author.name)}><i className="bx bxs-user-circle" /><span><strong>{author.name}</strong><small>{author.id}</small></span><i className="bx bx-chevron-right" /></button><button className="library-author-delete" onClick={() => removeSavedAuthor(author.id)} aria-label={`Remove ${author.name} from saved authors`} title="Remove saved author"><i className="bx bx-trash" /></button></div>) : <p className="library-empty">Save an author from their Data Explorer profile.</p>}</div>
+        <section className="library-panel"><h2><i className="bx bxs-user-pin" /> Saved authors <small aria-label={`${library.savedAuthors.length} of ${MAX_SAVED_AUTHORS} saved`}>({library.savedAuthors.length}/{MAX_SAVED_AUTHORS})</small></h2>
+          <div className="library-items">{library.savedAuthors.length ? library.savedAuthors.map((author) => <div className="library-author-row" key={author.id}><button className="library-author-open" onClick={() => openAuthor(author)}><i className="bx bxs-user-circle" /><span><strong>{author.name}</strong><small>{author.id}</small></span><i className="bx bx-chevron-right" /></button><button className="library-author-delete" onClick={() => handleRemoveSavedAuthor(author.id)} aria-label={`Remove ${author.name} from saved authors`} title="Remove saved author"><i className="bx bx-trash" /></button></div>) : <p className="library-empty">Save an author from their Data Explorer profile.</p>}</div>
         </section>
         <section className="library-panel"><h2><i className="bx bx-history" /> Recently viewed <small>{library.recentAuthors.length}</small></h2>
-          <div className="library-items">{library.recentAuthors.length ? library.recentAuthors.map((author) => <div className="library-author-row" key={author.id}><button className="library-author-open" onClick={() => onOpenAuthor(author.name)}><i className="bx bx-time-five" /><span><strong>{author.name}</strong><small>{new Date(author.viewedAt).toLocaleDateString()}</small></span><i className="bx bx-chevron-right" /></button><button className="library-author-delete" onClick={() => removeRecentAuthor(author.id)} aria-label={`Remove ${author.name} from recently viewed`} title="Remove recent author"><i className="bx bx-trash" /></button></div>) : <p className="library-empty">Viewed researchers will appear here.</p>}</div>
+          <div className="library-items">{library.recentAuthors.length ? visibleRecentAuthors.map((author) => <div className="library-author-row" key={author.id}><button className="library-author-open" onClick={() => openAuthor(author)}><i className="bx bx-time-five" /><span><strong>{author.name}</strong><small>{new Date(author.viewedAt).toLocaleDateString()}</small></span><i className="bx bx-chevron-right" /></button><button className="library-author-delete" onClick={() => handleRemoveRecentAuthor(author.id)} aria-label={`Remove ${author.name} from recently viewed`} title="Remove recent author"><i className="bx bx-trash" /></button></div>) : <p className="library-empty">Viewed researchers will appear here.</p>}</div>
+          {library.recentAuthors.length > 0 && (confirmClearHistory
+            ? <div className="library-collection-confirm" role="alert">
+              <span>Clear your browsing history? Saved authors are not affected.</span>
+              <button type="button" className="library-confirm-delete" onClick={handleClearHistory}>Clear</button>
+              <button type="button" className="library-confirm-cancel" onClick={() => setConfirmClearHistory(false)}>Cancel</button>
+            </div>
+            : <div className="library-panel-actions">
+              <span>
+                {showFullHistory || library.recentAuthors.length <= RECENT_AUTHORS_PREVIEW
+                  ? `Last ${RECENT_RETENTION_DAYS} days`
+                  : `Latest ${RECENT_AUTHORS_PREVIEW} of ${library.recentAuthors.length}`}
+              </span>
+              {library.recentAuthors.length > RECENT_AUTHORS_PREVIEW && (
+                <button type="button" onClick={() => setShowFullHistory((value) => !value)} aria-expanded={showFullHistory}>
+                  {showFullHistory ? 'Show latest' : `Full history (${library.recentAuthors.length})`}
+                </button>
+              )}
+              <button type="button" className="library-clear-history" onClick={() => setConfirmClearHistory(true)}>Clear history</button>
+            </div>)}
         </section>
       </div>
       <section className="library-panel library-papers"><div className="library-panel-title"><h2><i className="bx bx-file" /> Saved publications <small>{library.savedPapers.length}</small></h2><form onSubmit={createCollection}><input value={collectionName} onChange={(e) => setCollectionName(e.target.value)} placeholder="New collection name" /><button>Create collection</button></form></div>
         <div className="library-collections" role="group" aria-label="Filter publications by collection">
           <button className={activeCollection === 'all' ? 'active' : ''} onClick={() => setActiveCollection('all')}>All <strong>{library.savedPapers.length}</strong></button>
-          {library.collections.map((collection) => <button key={collection.id} className={activeCollection === collection.id ? 'active' : ''} onClick={() => setActiveCollection(collection.id)}>{collection.name} <strong>{collection.paperIds.length}</strong></button>)}
+          {library.collections.map((collection) => <span key={collection.id} className="library-collection-chip">
+            <button className={activeCollection === collection.id ? 'active' : ''} onClick={() => setActiveCollection(collection.id)}>{collection.name} <strong>{collection.paperIds.length}</strong></button>
+            <button type="button" className="library-collection-delete" aria-label={`Delete collection ${collection.name}`} onClick={() => setPendingDeleteId(collection.id)}><i className="bx bx-x" aria-hidden="true" /></button>
+          </span>)}
         </div>
+        {pendingDelete && <div className="library-collection-confirm" role="alert">
+          <span>Delete &ldquo;{pendingDelete.name}&rdquo;? {pendingDelete.paperIds.length
+            ? `Its ${pendingDelete.paperIds.length} publication${pendingDelete.paperIds.length === 1 ? '' : 's'} stay in your library.`
+            : 'It has no publications.'}</span>
+          <button type="button" className="library-confirm-delete" onClick={() => deleteCollection(pendingDelete.id)}>Delete</button>
+          <button type="button" className="library-confirm-cancel" onClick={() => setPendingDeleteId(null)}>Cancel</button>
+        </div>}
         <div className="library-paper-list">{visiblePapers.length ? visiblePapers.map((paper) => <article key={paper.id}><div><span>{paper.publishedYear || 'Year unavailable'}</span><h3>{paper.title}</h3><p>{paper.authorName}</p></div><select value={library.collections.find((item) => item.paperIds.includes(paper.id))?.id || ''} onChange={(e) => assignPaper(paper.id, e.target.value)}><option value="">No collection</option>{library.collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></article>) : <p className="library-empty">{library.savedPapers.length ? 'No publications are assigned to this collection yet.' : 'Bookmark publications to organize them here.'}</p>}</div>
       </section>
     </main>
@@ -70,8 +129,8 @@ export default function Library({ user, onBack, onOpenAuthor, onNavigateToAbout,
       <div className="footer-content">
         <div className="footer-section">
           <div className="footer-title">
-            <i className="bx bx-file"></i>
-            <h3>ScholarMetrics</h3>
+            <img src="/assets/nmindex-icon.png" alt="" aria-hidden="true" className="footer-logo" />
+            <h3>NmIndex</h3>
           </div>
           <p>Revolutionizing research evaluation through intelligent automation and comprehensive data collection across global scholarly databases.</p>
         </div>

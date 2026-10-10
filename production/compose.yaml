@@ -81,18 +81,22 @@ services:
       # --- PostgreSQL: remote AWS server, outside this stack -----------
       # Names match backend/config/database.js exactly -- no renaming, no
       # production-only aliases. Values come from production/.env.
+      # Every setting is required: an empty one is a compose error here, not
+      # a silent fallback to localhost inside the container.
       DB_HOST: ${DB_HOST:?DB_HOST must be set in production/.env}
       DB_PORT: ${DB_PORT:-5432}
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      # Empty => config/database.js uses TLS with rejectUnauthorized:false,
-      # which is what the remote AWS instance expects. "disable" would turn TLS
-      # off and should only ever be used for a database on this machine.
+      DB_NAME: ${DB_NAME:?DB_NAME must be set in production/.env}
+      DB_USER: ${DB_USER:?DB_USER must be set in production/.env}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in production/.env}
+      # Empty => TLS without certificate verification, which is what the
+      # remote AWS instance expects. "require" is the same, stated explicitly.
+      # "verify-full" also checks the certificate (needs the RDS CA bundle and
+      # the RDS endpoint name). "disable" turns TLS off -- only ever for a
+      # database on this machine.
       DB_SSLMODE: ${DB_SSLMODE-}
 
       # --- auth tokens ------------------------------------------------
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in the root .env}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in production/.env}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
 
       # --- Firebase Admin (server-side, NEVER given to the frontend) ---

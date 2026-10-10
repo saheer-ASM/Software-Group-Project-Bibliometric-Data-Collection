@@ -275,7 +275,7 @@ const CompleteProfile = ({ onLogin, onNavigate, initialState }) => {
             <div className="verify-icon" aria-hidden="true"><i className="bx bx-user-plus" /></div>
             <p className="complete-step">{stepLabel}</p>
             <h1>Complete Your Profile</h1>
-            <p className="verify-text">A few details to finish your ScholarMetrics account.</p>
+            <p className="verify-text">A few details to finish your NmIndex account.</p>
 
             <label className="complete-label" htmlFor="cp-name">Full Name</label>
             <div className="input-box">

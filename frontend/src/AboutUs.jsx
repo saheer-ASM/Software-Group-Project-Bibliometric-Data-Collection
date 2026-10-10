@@ -46,7 +46,7 @@ const AboutUs = ({ onBack, onNavigateToSettings, onNavigateToProfile, onNavigate
       <main className="about-main">
         {/* Page Title */}
         <section className="title-section">
-          <h1 className="page-title">About ScholarMetrics</h1>
+          <h1 className="page-title">About NmIndex</h1>
           <p className="subtitle">
             Automated Bibliometric Data Gathering System - Revolutionizing research evaluation
             through intelligent automation and comprehensive data collection across global scholarly
@@ -142,8 +142,8 @@ const AboutUs = ({ onBack, onNavigateToSettings, onNavigateToProfile, onNavigate
         <div className="footer-content">
           <div className="footer-section">
             <div className="footer-title">
-              <i className='bx bx-file'></i>
-              <h3>ScholarMetrics</h3>
+              <img src="/assets/nmindex-icon.png" alt="" aria-hidden="true" className="footer-logo" />
+              <h3>NmIndex</h3>
             </div>
             <p>Revolutionizing research evaluation through intelligent automation and comprehensive data collection across global scholarly databases.</p>
           </div>

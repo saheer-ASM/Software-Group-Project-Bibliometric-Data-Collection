@@ -59,13 +59,13 @@ afterEach(() => {
   expect(window.confirm).not.toHaveBeenCalled();
 });
 
-test('Sign In + never-registered Google account -> "No ScholarMetrics account found" + Create Account, no registration steps', async () => {
+test('Sign In + never-registered Google account -> "No NmIndex account found" + Create Account, no registration steps', async () => {
   getRegistrationState.mockResolvedValue({ status: 'NOT_REGISTERED' });
   const { onNavigate, container } = renderForm('login');
   clickGoogle(container, 'login');
 
-  expect(await screen.findByText('No ScholarMetrics account found.')).toBeInTheDocument();
-  expect(screen.getByText(/This Google account is not registered with ScholarMetrics/)).toBeInTheDocument();
+  expect(await screen.findByText('No NmIndex account found.')).toBeInTheDocument();
+  expect(screen.getByText(/This Google account is not registered with NmIndex/)).toBeInTheDocument();
   expect(getRegistrationState).toHaveBeenCalledWith(mockGoogleUser, 'signin');
   expect(firebaseAuth.signOut).toHaveBeenCalled();
   expect(onNavigate).not.toHaveBeenCalledWith('/complete-profile', expect.anything());

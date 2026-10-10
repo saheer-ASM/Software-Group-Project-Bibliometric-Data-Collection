@@ -136,6 +136,13 @@
   margin: 0;
 }
 
+.welcome-greeting {
+  margin: 0 0 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
 .welcome-section h2::after {
   content: '';
   display: block;
@@ -668,4 +675,247 @@
     grid-template-columns: 1fr;
     gap: 2rem;
   }
+}
+
+/* NmIndex icon mark, replacing the generic file glyph in the footer title. */
+.footer-title .footer-logo {
+  height: 30px;
+  width: auto;
+  flex: none;
+}
+
+/* .footer-section h3 carries margin-bottom:1.25rem for the stacked footer
+   columns. Inside this align-items:center flex row that bottom margin makes the
+   text box taller than the text, so the wordmark rode 9.4px above the mark's
+   centre. The row supplies its own margin-bottom, so dropping it here changes
+   no spacing -- it only re-centres the two against each other. */
+.footer-title h3 {
+  margin-bottom: 0;
+}
+
+/* ============================================================
+   Quick Stats on phones.
+
+   The existing @media(max-width:768px) rule collapses .stats-grid to a
+   single column while the card keeps its desktop padding (2.25rem) and a
+   2.75rem number -- so three short figures took ~420px of vertical space.
+   There are only three values and they are all short, so they fit
+   comfortably side by side instead.
+
+   Everything is scoped under .stats-grid for a reason: Profile.css defines
+   a bare, non-media-query `.stat-label` (0.72rem / 700 / .08em letter
+   spacing) that leaks across the whole app. It has the same specificity as
+   a plain `.stat-label` but loads later in the bundle, so it silently won
+   and the label kept rendering at 10.8px no matter what was set here.
+   `.stats-grid .stat-label` is (0,2,0) and beats it regardless of order,
+   while staying confined to the Dashboard's Quick Stats.
+   ============================================================ */
+@media screen and (max-width: 768px) {
+  .stats-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.6rem;
+  }
+
+  .stats-grid .stat-card {
+    padding: 1.1rem 0.45rem;
+    border-radius: var(--border-radius);
+  }
+
+  /* The lift-on-hover is meaningless on touch and makes the row jump. */
+  .stats-grid .stat-card:hover { transform: none; }
+
+  .stats-grid .stat-number {
+    font-size: 1.5rem;
+    margin-bottom: 0.3rem;
+    letter-spacing: -0.02em;
+  }
+
+  .stats-grid .stat-label {
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.25;
+    margin-bottom: 0;
+  }
+}
+
+@media screen and (max-width: 360px) {
+  /* Only the genuinely narrow phones. Measured: at 320px the card gives
+     ~75px of content box, and "PUBLICATIONS" is 75.1px at 0.66rem -- it
+     would fit by a tenth of a pixel, which no font stack should be trusted
+     with. 0.6rem measures 68.3px and leaves real headroom. 375px keeps the
+     larger 0.66rem from the rule above; it has 93px to play with. */
+  .stats-grid { gap: 0.45rem; }
+  .stats-grid .stat-card { padding: 0.9rem 0.3rem; }
+  .stats-grid .stat-number { font-size: 1.3rem; }
+  .stats-grid .stat-label { font-size: 0.6rem; }
+}
+
+/* ============================================================
+   Author Search + Popular Fields on phones.
+   ============================================================ */
+@media screen and (max-width: 768px) {
+  /* -------- Author Search --------
+     Measured: the placeholder "Enter Author's Name" needs 154.4px. At 375px
+     the input gave it 207px and at 360px 192px, but at 320px only 152px --
+     so it clipped on the narrowest phones. The desktop input reserves 4.5rem
+     (72px) on the right to clear a 44px button that only needs ~54px, and
+     1.5rem on the left. Trimming both, plus a slightly smaller face, buys
+     back roughly 40px. */
+  .search-input {
+    font-size: 0.95rem;
+    padding: 0.95rem 3.6rem 0.95rem 1rem;
+  }
+
+  /* -------- Popular Fields --------
+     The two 50px arrows plus the 1.5rem wrapper gaps consumed 148px of the
+     row, leaving a 193px viewport (138px at 320px) for a card with
+     min-width:290px -- so every card was cut off. The arrows are redundant on
+     touch: .fields-scroll-container is already overflow-x:auto with
+     -webkit-overflow-scrolling:touch, so the row swipes natively. */
+  .fields-wrapper { gap: 0; }
+  .scroll-btn { display: none; }
+
+  .fields-grid { gap: 1rem; }
+
+  /* Sized so a card always fits the viewport with the next one peeking --
+     that sliver is what tells the user the row scrolls now the arrows are
+     gone. Capped at the desktop 290px so it never grows on a tablet. */
+  .field-card {
+    min-width: min(78vw, 290px);
+    height: 170px;
+  }
+
+  /* Hover lift does nothing useful on touch and can leave a card stuck
+     mid-transform after a tap. */
+  .field-card:hover { transform: none; }
+}
+
+@media screen and (max-width: 360px) {
+  .search-section { padding: 1.5rem 0.9rem; }
+  .search-input {
+    font-size: 0.9rem;
+    padding: 0.9rem 3.4rem 0.9rem 0.85rem;
+  }
+  .field-card { height: 150px; }
+}
+
+/* ============================================================
+   Author Search clear button.
+
+   Sits to the left of the submit button, which is absolutely positioned at
+   right:0.6rem with a 44px box. The input's right padding only cleared that
+   one button, so it grows via .has-value -- applied only while there is text
+   to clear. That matters on phones: the extra padding would otherwise eat
+   into the space the "Enter Author's Name" placeholder needs, which is the
+   clipping that was fixed earlier.
+   ============================================================ */
+.search-clear-btn {
+  position: absolute;
+  right: 3.9rem;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.search-clear-btn:hover,
+.search-clear-btn:focus-visible {
+  background: rgba(11, 37, 69, 0.08);
+  color: var(--primary-color);
+}
+
+/* Only while there is something to clear. */
+.search-form.has-value .search-input { padding-right: 6.2rem; }
+
+@media screen and (max-width: 768px) {
+  /* The `right` offset is deliberately NOT reduced here. .search-btn keeps its
+     desktop geometry (right:0.6rem + 44px wide), so its left edge is always
+     53.6px in from the form's right edge. Shrinking this offset to 3.1rem put
+     the cross at 294px against a button starting at 288px -- a 6px overlap.
+     3.9rem (62.4px) leaves a ~9px gap at every width. */
+  .search-clear-btn {
+    width: 26px;
+    height: 26px;
+    font-size: 1.1rem;
+  }
+
+  /* Must clear 62.4px offset + 26px button = 88.4px. */
+  .search-form.has-value .search-input { padding-right: 5.7rem; }
+}
+
+/* ============================================================
+   Hero typewriter.
+
+   Kept deliberately quiet: existing type scale and colours, a thin accent
+   caret that only exists while a line is being typed, and no looping on the
+   heading or the sentence.
+   ============================================================ */
+.welcome-section h2.is-typing::after,
+.welcome-subtext p.is-typing::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  background: var(--accent-color);
+  vertical-align: -0.12em;
+  animation: nmCaret 1s steps(1, end) infinite;
+}
+
+/* The heading's ::after is the gold rule; while typing it becomes the caret,
+   so the rule is suppressed until the line lands. */
+.welcome-section h2.is-typing::after {
+  width: 2px;
+  height: 1em;
+  margin-top: 0;
+  border-radius: 1px;
+}
+
+@keyframes nmCaret {
+  0%, 45% { opacity: 1; }
+  50%, 95% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* Ghost copy reserves the finished height so nothing below reflows. */
+.welcome-subtext {
+  position: relative;
+  max-width: 68ch;
+  margin-top: 0.85rem;
+}
+
+.welcome-subtext-ghost,
+.welcome-subtext p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.welcome-subtext-ghost { visibility: hidden; }
+
+.welcome-subtext p {
+  position: absolute;
+  inset: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-section h2.is-typing::after,
+  .welcome-subtext p.is-typing::after { animation: none; opacity: 0; }
+}
+
+@media screen and (max-width: 768px) {
+  .welcome-subtext p,
+  .welcome-subtext-ghost { font-size: 0.92rem; }
 }

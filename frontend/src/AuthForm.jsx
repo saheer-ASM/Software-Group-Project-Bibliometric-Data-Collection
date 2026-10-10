@@ -29,6 +29,7 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
   const [registerEmailTouched, setRegisterEmailTouched] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const [showRegisterConfirmPassword, setShowRegisterConfirmPassword] = useState(false);
 
@@ -367,7 +368,7 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
         {forgotStep === 'form' && (
           <form className="forgot-view" onSubmit={handleSendReset} noValidate>
             <h1>Reset Password</h1>
-            <p>Enter the email address you use for ScholarMetrics and we'll send you a link to reset your password.</p>
+            <p>Enter the email address you use for NmIndex and we'll send you a link to reset your password.</p>
             <div className="input-box">
               <input
                 type="email"
@@ -404,13 +405,14 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
 
         {forgotStep === null && (
         <form onSubmit={handleLoginSubmit}>
+          <img src="/assets/nmindex-logo.png" alt="NmIndex — Researcher Impact Analytics" className="auth-logo" />
           <h1>Login</h1>
           {accountNotice && (
             <div className={`account-notice account-notice-${accountNotice.kind}`} role="status">
               {accountNotice.kind === 'not-registered' && (
                 <>
-                  <p className="account-notice-title"><i className="bx bx-user-x" aria-hidden="true" /> No ScholarMetrics account found.</p>
-                  <p>This {accountNotice.viaGoogle ? 'Google account' : 'account'} is not registered with ScholarMetrics. Please create an account first.</p>
+                  <p className="account-notice-title"><i className="bx bx-user-x" aria-hidden="true" /> No NmIndex account found.</p>
+                  <p>This {accountNotice.viaGoogle ? 'Google account' : 'account'} is not registered with NmIndex. Please create an account first.</p>
                   <div className="account-notice-actions">
                     <button type="button" className="account-notice-primary" onClick={() => { setAccountNotice(null); onNavigate('/register'); }}>Create Account</button>
                   </div>
@@ -462,13 +464,22 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
           </div>
           <div className="input-box">
             <input
-              type="password"
+              type={showLoginPassword ? 'text' : 'password'}
               placeholder="Password"
+              className="has-toggle"
               required
               value={loginPassword}
               onChange={(e) => setLoginPassword(e.target.value)}
             />
             <span className="input-icon" aria-hidden="true">L</span>
+            <button
+              type="button"
+              className="password-toggle"
+              onClick={() => setShowLoginPassword((v) => !v)}
+              aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+            >
+              <i className={`bx ${showLoginPassword ? 'bx-hide' : 'bx-show'}`} aria-hidden="true" />
+            </button>
           </div>
           <div className="forgot-link">
             <a href="/forgot-password" onClick={openForgotPassword}>Forgot Password?</a>
@@ -487,6 +498,14 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
             <img src="/assets/google.png" alt="" aria-hidden="true" />
             <span>Continue with Google</span>
           </button>
+          {/* Mobile only. On desktop the sliding toggle panel does this job,
+              so .mobile-switch is display:none above the 800px breakpoint. */}
+          <p className="mobile-switch">
+            Don't have an account?{' '}
+            <button type="button" className="mobile-switch-btn" onClick={handleRegisterClick}>
+              Register
+            </button>
+          </p>
         </form>
         )}
       </div>
@@ -494,6 +513,7 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
       {/* Register Form */}
       <div className="form-box register">
         <form onSubmit={handleRegisterSubmit} noValidate>
+          <img src="/assets/nmindex-logo.png" alt="NmIndex — Researcher Impact Analytics" className="auth-logo" />
           <h1>Registration</h1>
           <div className="input-box">
             <input
@@ -602,6 +622,12 @@ const AuthForm = ({ onLogin, mode = 'login', onNavigate, notice = '' }) => {
             <img src="/assets/google.png" alt="" aria-hidden="true" />
             <span>Continue with Google</span>
           </button>
+          <p className="mobile-switch">
+            Already have an account?{' '}
+            <button type="button" className="mobile-switch-btn" onClick={handleLoginClick}>
+              Login
+            </button>
+          </p>
         </form>
       </div>
 

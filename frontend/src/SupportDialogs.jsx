@@ -160,7 +160,7 @@ const SupportDialogs = ({ kind, onClose, onRequireLogin }) => {
                         onChange={set('message')}
                         disabled={saving}
                         maxLength={LIMITS.messageMax}
-                        placeholder="Tell us what you think, or what would make ScholarMetrics better…"
+                        placeholder="Tell us what you think, or what would make NmIndex better…"
                         aria-invalid={Boolean(errors.message)}
                       />
                       {errors.message && <span className="support-error">{errors.message}</span>}

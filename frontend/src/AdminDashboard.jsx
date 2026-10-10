@@ -85,7 +85,7 @@ const AdminDashboard = ({ onBack, onNavigateToExplorer, onNavigateToLibrary, onN
       <main className="dashboard-main admin-main">
         <div className="admin-heading">
           <h2>Admin Dashboard</h2>
-          <p>Feedback and issue reports from ScholarMetrics users.</p>
+          <p>Feedback and issue reports from NmIndex users.</p>
         </div>
 
         <div className="admin-tabs" role="tablist">
@@ -138,12 +138,15 @@ const AdminDashboard = ({ onBack, onNavigateToExplorer, onNavigateToLibrary, onN
                 <tbody>
                   {visible.map((d) => (
                     <tr key={d.id}>
-                      <td className="admin-cell-main">{cfg.summary(d)}</td>
-                      {tab === 'issues' && <td>{d.category}</td>}
-                      <td className="admin-cell-user">{d.userEmail}</td>
-                      <td>{formatDate(d.createdAt)}</td>
-                      <td><span className={statusClass(d.status)}>{d.status}</span></td>
-                      <td>
+                      {/* data-label drives the mobile card layout: below 640px the
+                          same cells are re-flowed as cards and these become the
+                          field captions, so there is only one copy of the markup. */}
+                      <td className="admin-cell-main" data-label={tab === 'feedback' ? 'Type' : 'Title'}>{cfg.summary(d)}</td>
+                      {tab === 'issues' && <td className="admin-cell-category" data-label="Category">{d.category}</td>}
+                      <td className="admin-cell-user" data-label="User">{d.userEmail}</td>
+                      <td className="admin-cell-date" data-label="Date">{formatDate(d.createdAt)}</td>
+                      <td className="admin-cell-status" data-label="Status"><span className={statusClass(d.status)}>{d.status}</span></td>
+                      <td className="admin-cell-actions">
                         <button type="button" className="admin-view-btn" onClick={() => setSelected({ collection: tab, id: d.id })}>
                           View
                         </button>
@@ -169,8 +172,8 @@ const AdminDashboard = ({ onBack, onNavigateToExplorer, onNavigateToLibrary, onN
         <div className="footer-content">
           <div className="footer-section">
             <div className="footer-title">
-              <i className='bx bx-file'></i>
-              <h3>ScholarMetrics</h3>
+              <img src="/assets/nmindex-icon.png" alt="" aria-hidden="true" className="footer-logo" />
+              <h3>NmIndex</h3>
             </div>
             <p>Revolutionizing research evaluation through intelligent automation and comprehensive data collection across global scholarly databases.</p>
           </div>

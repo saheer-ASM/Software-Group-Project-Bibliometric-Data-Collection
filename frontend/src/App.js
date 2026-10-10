@@ -123,6 +123,7 @@ function App() {
   // /data-explorer?author=Name opens that author's profile (also after a refresh
   // or from a bookmarked link).
   const urlAuthor = location.pathname === PATHS.explorer ? (searchParams.get('author') || '').trim() : '';
+  const urlAuthorId = urlAuthor ? (searchParams.get('authorId') || '').trim() : '';
   useEffect(() => {
     if (urlAuthor && urlAuthor !== authorName) {
       setAuthorName(urlAuthor);
@@ -162,14 +163,25 @@ function App() {
     navigate(path);
   };
 
+  // Accepts a name, or { id, name } from the library. The id pins the exact
+  // researcher: several authors share a name, and a name alone opens whichever
+  // one the database returns first.
   const handleNavigateToExplorer = (searchedAuthor) => {
-    const nextAuthor = typeof searchedAuthor === 'string' ? searchedAuthor.trim() : '';
+    const fromLibrary = searchedAuthor && typeof searchedAuthor === 'object' && 'id' in searchedAuthor;
+    const nextAuthor = typeof searchedAuthor === 'string'
+      ? searchedAuthor.trim()
+      : (fromLibrary ? String(searchedAuthor.name || '').trim() : '');
+    const nextAuthorId = fromLibrary ? String(searchedAuthor.id || '').trim() : '';
     if (nextAuthor) {
       setAuthorName(nextAuthor);
       setHasSearchedAuthor(true);
     }
     const author = nextAuthor || authorName;
-    navigate(author ? `${PATHS.explorer}?author=${encodeURIComponent(author)}` : PATHS.explorer);
+    const params = new URLSearchParams();
+    if (author) params.set('author', author);
+    if (nextAuthor && nextAuthorId) params.set('authorId', nextAuthorId);
+    const query = params.toString();
+    navigate(query ? `${PATHS.explorer}?${query}` : PATHS.explorer);
   };
 
   const handleResetSearch = () => {
@@ -275,6 +287,7 @@ function App() {
             element={protectedPage(
               <DataExplorer
                 authorName={urlAuthor || authorName}
+                authorId={urlAuthorId}
                 onBack={handleBackToDashboard}
                 onNavigateToSettings={handleNavigateToSettings}
                 onNavigateToAbout={handleNavigateToAbout}

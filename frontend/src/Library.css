@@ -10,3 +10,160 @@
 .library-main{padding-top:2.5rem}.library-intro{position:relative;overflow:hidden;min-height:250px;padding:2.4rem 3rem;border-radius:24px;background:linear-gradient(125deg,#071f3c 0%,#0b4464 55%,#18728a 100%);box-shadow:0 16px 36px rgba(8,38,74,.16)}.library-intro:after{content:"";position:absolute;width:360px;height:360px;right:-100px;top:-150px;border:1px solid rgba(255,255,255,.13);border-radius:50%;box-shadow:0 0 0 55px rgba(255,255,255,.035),0 0 0 110px rgba(255,255,255,.025)}.library-intro-copy{position:relative;z-index:2;max-width:820px}.library-intro-copy>span{display:inline-flex;padding:.4rem .7rem;border:1px solid rgba(236,187,75,.35);border-radius:99px;background:rgba(236,187,75,.1);font-size:.72rem;font-weight:800;letter-spacing:.13em;color:#f3c75c}.library-intro h2{margin:.75rem 0 .45rem;color:#fff;font-size:2.15rem;line-height:1.15}.library-intro p{max-width:760px;color:#d9e9f0;font-size:1rem;line-height:1.6}.library-overview{display:flex;gap:2.5rem;margin-top:1.6rem}.library-overview div{display:flex;flex-direction:column}.library-overview strong{font-size:1.4rem;color:#fff}.library-overview small{color:#bcd3de;font-size:.76rem}.library-intro-art{position:relative;z-index:2;width:150px;height:150px;display:grid;place-items:center;flex:0 0 150px;border:1px solid rgba(255,255,255,.16);border-radius:32px;background:rgba(255,255,255,.08);transform:rotate(4deg);color:#f3c75c}.library-intro-art>i{font-size:4.5rem}.library-intro-art span{position:absolute;left:-18px;bottom:-14px;width:52px;height:52px;display:grid;place-items:center;border-radius:16px;background:#f3c75c;color:#08264a;box-shadow:0 8px 20px rgba(0,0,0,.18)}.library-intro-art span i{font-size:1.5rem}@media(max-width:760px){.library-intro{padding:2rem;min-height:auto}.library-intro-art{display:none}.library-overview{gap:1.25rem;flex-wrap:wrap}.library-intro h2{font-size:1.65rem}}
 .library-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:stretch}.library-grid>.library-panel{height:455px;min-width:0}.library-grid .library-items{height:352px;max-height:352px;overflow-y:auto}.library-grid .library-items>button{min-height:64px;height:64px;flex:0 0 64px}.library-grid .library-items>.library-empty{margin:auto 0}@media(max-width:760px){.library-grid{grid-template-columns:1fr}.library-grid>.library-panel{height:455px}}
 .library-grid .library-items>.library-author-row{position:relative;min-height:64px;height:64px;flex:0 0 64px}.library-author-open{display:flex;align-items:center;gap:.75rem;width:100%;height:100%;padding:.8rem 4.9rem .8rem .8rem;border:1px solid #e2e9f1;border-radius:11px;background:#f8fafc;color:#203b59;text-align:left;cursor:pointer}.library-author-open:hover{border-color:#17617e;background:#f4f8fa}.library-author-open>i:first-child{font-size:1.6rem;color:#17617e}.library-author-open>span{min-width:0;display:flex;flex:1;flex-direction:column}.library-author-open strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.library-author-open small{color:#718096}.library-author-open>.bx-chevron-right{position:absolute;right:3.5rem}.library-author-delete{position:absolute;right:.7rem;top:50%;transform:translateY(-50%);width:34px;height:34px;display:grid;place-items:center;border:1px solid transparent;border-radius:9px;background:transparent;color:#94a3b8;font-size:1.15rem;cursor:pointer}.library-author-delete:hover{border-color:#fecdd3;background:#fff1f2;color:#be123c}.library-author-delete:focus-visible{outline:2px solid #be123c;outline-offset:2px}
+
+/* NmIndex icon mark, replacing the generic file glyph in the footer title. */
+.footer-title .footer-logo {
+  height: 30px;
+  width: auto;
+  flex: none;
+}
+
+/* .footer-section h3 carries margin-bottom:1.25rem for the stacked footer
+   columns. Inside this align-items:center flex row that bottom margin makes the
+   text box taller than the text, so the wordmark rode 9.4px above the mark's
+   centre. The row supplies its own margin-bottom, so dropping it here changes
+   no spacing -- it only re-centres the two against each other. */
+.footer-title h3 {
+  margin-bottom: 0;
+}
+
+/* ============================================================
+   Collection chips: delete control + confirmation.
+
+   .library-collections has blanket `span` and `button` rules that would
+   otherwise style the wrapper and the delete control as chips, so both are
+   overridden here with a higher-specificity selector.
+   ============================================================ */
+.library-collections .library-collection-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border-radius: 99px;
+  background: transparent;
+  color: inherit;
+}
+
+/* The filter chip keeps its pill shape, flattened on the side the x sits. */
+.library-collections .library-collection-chip > button:first-child {
+  border-radius: 99px 0 0 99px;
+  padding-right: 0.55rem;
+}
+
+.library-collections .library-collection-delete {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 100%;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0 99px 99px 0;
+  background: #fff6df;
+  color: #a98b3f;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease;
+}
+
+.library-collections .library-collection-delete:hover {
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.library-collections .library-collection-delete:focus-visible {
+  outline: 2px solid #be123c;
+  outline-offset: 2px;
+}
+
+/* Inline confirmation, deliberately not a modal: deleting a collection is
+   easy to undo by recreating it, and the papers are never touched. */
+.library-collection-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: -0.4rem 0 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid #fecdd3;
+  border-radius: 12px;
+  background: #fff5f6;
+  color: #7f1d2b;
+  font-size: 0.86rem;
+}
+
+.library-collection-confirm > span { flex: 1 1 auto; min-width: 0; }
+
+.library-collection-confirm button {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: 700 0.82rem 'Inter', sans-serif;
+  cursor: pointer;
+}
+
+.library-confirm-delete { background: #be123c; color: #fff; }
+.library-confirm-delete:hover { background: #9f1239; }
+.library-confirm-cancel { background: #fff; border-color: #e2e9f1; color: #475569; }
+.library-confirm-cancel:hover { border-color: #94a3b8; }
+
+@media (max-width: 760px) {
+  .library-collection-confirm { align-items: stretch; flex-direction: column; }
+  .library-collection-confirm button { width: 100%; }
+}
+
+@media (max-width: 760px) {
+  /* .library-panel-title switches to a column here, so the "Create collection"
+     button becomes the last thing in the block -- and the element has no
+     bottom margin while .library-collections has no top margin. Measured: the
+     button's bottom edge and the chips' top edge were both at 177px, i.e.
+     touching. On desktop the title is a row, so this never showed. */
+  .library-panel-title { margin-bottom: 1rem; }
+}
+
+/* Saved / recently viewed panels keep their fixed height; the list takes what
+   is left after the heading and the history actions, and scrolls. */
+.library-grid > .library-panel { display: flex; flex-direction: column; }
+.library-grid .library-items { height: auto; max-height: none; flex: 1 1 auto; min-height: 0; }
+.library-grid .library-collection-confirm { margin: .75rem 0 0; }
+
+.library-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  margin-top: .75rem;
+  padding-top: .75rem;
+  border-top: 1px solid #e2e9f1;
+  color: #718096;
+  font-size: .82rem;
+}
+.library-panel-actions > span { flex: 1 1 auto; min-width: 0; }
+.library-panel-actions button {
+  min-height: 36px;
+  padding: .45rem .8rem;
+  border: 1px solid #dce5ef;
+  border-radius: 9px;
+  background: #fff;
+  color: #17617e;
+  font-weight: 700;
+  cursor: pointer;
+}
+.library-panel-actions button:hover { border-color: #17617e; }
+.library-panel-actions .library-clear-history { color: #be123c; }
+.library-panel-actions .library-clear-history:hover { border-color: #be123c; }
+
+.library-notice {
+  margin: 1.5rem 0 0;
+  padding: .75rem 1rem;
+  border: 1px solid #fecdd3;
+  border-radius: 12px;
+  background: #fff1f2;
+  color: #9f1239;
+  font-size: .9rem;
+}
+
+@media (max-width: 760px) {
+  .library-panel-actions > span { flex-basis: 100%; }
+  .library-panel-actions button { flex: 1 1 auto; min-height: 44px; }
+}

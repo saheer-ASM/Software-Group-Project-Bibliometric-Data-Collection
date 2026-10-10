@@ -1,12 +1,12 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { API_BASE_URL } from './config/api';
+import { publicationYears } from './services/publicationFilters';
 import { downloadAuthorPdf, getLibrary, recordRecentAuthor, savePaperToCollection, toggleSavedAuthor, toggleSavedPaper } from './services/researchLibrary';
 import './DataExplorer.css';
 import AppNavbar from './AppNavbar';
 import PublicationFilterHelp from './components/PublicationFilterHelp';
 import PublicationYearRange from './components/PublicationYearRange';
-import { publicationYears, filterPublications } from './services/publicationFilters';
 import ComparisonDashboard from './components/comparison/ComparisonDashboard';
 import { FooterQuickLinks, FooterContactLinks, FooterCopyright } from './FooterParts';
 
@@ -63,6 +63,7 @@ const MetricCard = ({ title, value, tooltip }) => {
 
 const DataExplorer = ({
   authorName,
+  authorId: requestedAuthorId = '',
   onBack,
   onNavigateToSettings,
   onNavigateToAbout,
@@ -84,6 +85,23 @@ const DataExplorer = ({
   const [impactLevel, setImpactLevel] = useState('');
   const [selectedContribution, setSelectedContribution] = useState('');
   const [paperQuery, setPaperQuery] = useState('');
+
+  // One canonical serialisation of the active filters. The refetch effect,
+  // Load More and the exports all send this same string, so the server can
+  // never be asked for a page under filters the UI is not showing.
+  const filterQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (paperQuery.trim()) params.set('query', paperQuery.trim());
+    if (selectedField) params.set('field', selectedField);
+    if (selectedYear) {
+      params.set('yearFrom', String(selectedYear[0]));
+      params.set('yearTo', String(selectedYear[1]));
+    }
+    if (selectedContribution) params.set('contribution', selectedContribution);
+    if (citationType) params.set('citationType', citationType);
+    if (impactLevel) params.set('impact', impactLevel);
+    return params.toString();
+  }, [paperQuery, selectedField, selectedYear, selectedContribution, citationType, impactLevel]);
   const [paperSuggestionsOpen, setPaperSuggestionsOpen] = useState(false);
   const [activePaperSuggestion, setActivePaperSuggestion] = useState(-1);
   const [authorHistory, setAuthorHistory] = useState([]);
@@ -108,6 +126,23 @@ const DataExplorer = ({
   React.useEffect(() => {
     if (data?.authorId) recordRecentAuthor(userId, { id: data.authorId, name: data.author });
   }, [data?.authorId, data?.author, userId]);
+
+  // Save / unsave this author. The button is disabled while a request is in
+  // flight so a double click cannot race itself; a refusal (the 100-author
+  // limit) or a failure is shown under the header.
+  const [savingAuthor, setSavingAuthor] = useState(false);
+  const [saveNotice, setSaveNotice] = useState('');
+  React.useEffect(() => { setSaveNotice(''); }, [data?.authorId]);
+  const isAuthorSaved = Boolean(data?.authorId) && library.savedAuthors.some((author) => author.id === data.authorId);
+
+  const handleToggleSavedAuthor = async () => {
+    if (!data?.authorId || savingAuthor) return;
+    setSavingAuthor(true);
+    setSaveNotice('');
+    const result = await toggleSavedAuthor(userId, { id: data.authorId, name: data.author });
+    setSavingAuthor(false);
+    if (!result.ok) setSaveNotice(result.message);
+  };
 
   const formatPercentage = (value, digits = 2) => {
     const number = Number(value || 0);
@@ -177,6 +212,172 @@ const DataExplorer = ({
       if (searchControllerRef.current === controller) setLoading(false);
     }
   }, [searchQuery]);
+
+  // "Load More" appends the next server page into data.publications, so every
+  // existing consumer (filters, the PDF export, the counts) keeps reading from
+  // the same array it always did. Pagination metadata rides alongside it.
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadMoreRef = useRef(false);
+
+  const loadMorePublications = useCallback(async () => {
+    const paging = data?.publicationsPagination;
+    // The ref guard stops a double-tap (or a re-render) firing two requests for
+    // the same page.
+    if (!data?.authorId || !paging?.hasNextPage || loadMoreRef.current) return;
+    loadMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      // Page 2 of a filtered result, not page 2 of everything.
+      const params = new URLSearchParams(filterQuery);
+      params.set('authorId', data.authorId);
+      params.set('page', String(paging.page + 1));
+      params.set('limit', String(paging.limit));
+      const response = await fetch(`${API_BASE_URL}/api/search/publications?${params.toString()}`);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message || 'Could not load more publications');
+      }
+      const result = await response.json();
+      setData((previous) => {
+        if (!previous || previous.authorId !== data.authorId) return previous;
+        // Dedupe by id: a retry or an overlapping page can never render twice.
+        const seen = new Set(previous.publications.map((item) => item.id));
+        const added = (result.publications || []).filter((item) => !seen.has(item.id));
+        return {
+          ...previous,
+          publications: [...previous.publications, ...added],
+          publicationsPagination: result.pagination,
+        };
+      });
+    } catch (err) {
+      setError(err.message || 'Could not load more publications');
+    } finally {
+      loadMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [data, filterQuery]);
+
+  // Which filter string the currently loaded publications represent. The
+  // author payload from GET /api/search always arrives unfiltered, so a fresh
+  // author starts at the empty string.
+  const loadedFilterRef = useRef('');
+  const filterRequestRef = useRef(0);
+  const [filteringPublications, setFilteringPublications] = useState(false);
+
+  // Which publication cards have their mobile details panel open. Keyed by
+  // publication id, never by list index: Load More, a filter change or a new
+  // author all reshuffle the list, and an index-keyed set would then point at
+  // whichever paper happened to land in that slot.
+  const [expandedPublicationIds, setExpandedPublicationIds] = useState(() => new Set());
+
+  const togglePublicationDetails = useCallback((publicationId) => {
+    setExpandedPublicationIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(publicationId)) next.delete(publicationId);
+      else next.add(publicationId);
+      return next;
+    });
+  }, []);
+
+  // Reconcile rather than reset: Load More appends, so a card the reader
+  // already opened stays open, while ids that left the list (filter change,
+  // new author) are dropped so they cannot re-open a different paper later.
+  useEffect(() => {
+    const visibleIds = new Set((data?.publications || []).map((publication) => publication.id));
+    setExpandedPublicationIds((previous) => {
+      if (previous.size === 0) return previous;
+      const next = new Set();
+      previous.forEach((id) => { if (visibleIds.has(id)) next.add(id); });
+      // Returning the same reference when nothing was pruned keeps this effect
+      // from scheduling a pointless re-render on every publications change.
+      return next.size === previous.size ? previous : next;
+    });
+  }, [data?.publications]);
+
+  useEffect(() => {
+    loadedFilterRef.current = '';
+  }, [data?.authorId]);
+
+  useEffect(() => {
+    const authorId = data?.authorId;
+    if (!authorId) return undefined;
+    // Already showing this exact filter set -- re-requesting it here is what
+    // would otherwise fire a duplicate page-1 request on every re-render.
+    if (loadedFilterRef.current === filterQuery) return undefined;
+
+    const controller = new AbortController();
+    const token = filterRequestRef.current + 1;
+    filterRequestRef.current = token;
+    setFilteringPublications(true);
+
+    // Debounced so typing in the title box does not fire a query per keystroke.
+    const timer = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams(filterQuery);
+        params.set('authorId', authorId);
+        params.set('page', '1');
+        const response = await fetch(
+          `${API_BASE_URL}/api/search/publications?${params.toString()}`,
+          { signal: controller.signal }
+        );
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.message || 'Could not apply publication filters');
+        }
+        const result = await response.json();
+        // A slow reply from an older filter set must not overwrite a newer one.
+        if (token !== filterRequestRef.current) return;
+        loadedFilterRef.current = filterQuery;
+        setData((previous) => (previous && previous.authorId === authorId ? {
+          ...previous,
+          // Replaced, not appended: this is page 1 of a new result set.
+          publications: result.publications || [],
+          publicationsPagination: result.pagination,
+        } : previous));
+      } catch (err) {
+        if (err.name === 'AbortError' || token !== filterRequestRef.current) return;
+        setError(err.message || 'Could not apply publication filters');
+      } finally {
+        if (token === filterRequestRef.current) setFilteringPublications(false);
+      }
+    }, 300);
+
+    // Cancels both the pending debounce and any in-flight request, so changing
+    // author or filter mid-flight cannot land stale rows.
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [data?.authorId, filterQuery]);
+
+  // Before paging existed, the exports received every publication matching the
+  // filters, because every publication was in the browser. Paging would
+  // silently narrow that to "just the page on screen", so the export pages
+  // through the filtered result on the server to keep its original meaning.
+  const collectFilteredPublications = useCallback(async (authorId) => {
+    const collected = [];
+    const seen = new Set();
+    let page = 1;
+    for (;;) {
+      const params = new URLSearchParams(filterQuery);
+      params.set('authorId', authorId);
+      params.set('page', String(page));
+      params.set('limit', '50');
+      const response = await fetch(`${API_BASE_URL}/api/search/publications?${params.toString()}`);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message || 'Could not collect publications for export');
+      }
+      const result = await response.json();
+      (result.publications || []).forEach((publication) => {
+        if (seen.has(publication.id)) return;
+        seen.add(publication.id);
+        collected.push(publication);
+      });
+      if (!result.pagination?.hasNextPage) return collected;
+      page += 1;
+    }
+  }, [filterQuery]);
 
   const handleAuthorSelect = async (author) => {
     if (!author?.id || loading) return;
@@ -274,11 +475,13 @@ const DataExplorer = ({
   React.useEffect(() => {
     if (authorName) {
       setSearchQuery(authorName);
-      const timer = setTimeout(() => handleSearch(authorName), 100);
+      // An id (from the library) identifies the exact researcher; the name is
+      // then only the label shown while it loads.
+      const timer = setTimeout(() => handleSearch(authorName, requestedAuthorId), 100);
       return () => clearTimeout(timer);
     }
     return undefined;
-  }, [authorName]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authorName, requestedAuthorId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleResetSearchClick = () => {
     setData(null);
@@ -295,8 +498,17 @@ const DataExplorer = ({
     if (onResetSearch) onResetSearch();
   };
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     const exportData = data || defaultProfile;
+    let allFiltered = null;
+    if (data?.authorId) {
+      try {
+        allFiltered = await collectFilteredPublications(data.authorId);
+      } catch (err) {
+        setError(err.message || 'Could not export publications');
+        return;
+      }
+    }
     const csvContent = [
       ['Author', exportData.author],
       ['Author ID', exportData.authorId],
@@ -309,7 +521,7 @@ const DataExplorer = ({
       ['Title', 'Fields', 'Authors', 'Contribution Weight', 'Self Citations', 'ISC', 'Year', 'Citations', 'Adjusted Citations']
     ];
 
-    const publicationsToExport = data ? filteredPublications : exportData.publications;
+    const publicationsToExport = allFiltered || exportData.publications;
     publicationsToExport.forEach(pub => {
       csvContent.push([
         pub.title,
@@ -344,10 +556,22 @@ const DataExplorer = ({
     : data?.authorId
       ? `Research profile · ${data.authorId}`
       : 'Enter an author name to explore their research profile';
-  const availableFields = useMemo(() => [...new Set(
-    (data?.publications || []).flatMap((publication) => publication.fields || [])
-  )].sort((a, b) => a.localeCompare(b)), [data]);
-  const availableYears = useMemo(() => publicationYears(data?.publications || []), [data]);
+  // Dropdown options come from the server, computed over the author's whole
+  // corpus. Deriving them from data.publications would only ever offer the
+  // years and fields that happen to sit on the pages already loaded, so the
+  // loaded rows are only a fallback for a payload without facets.
+  const availableFields = useMemo(() => {
+    const facets = data?.publicationFacets?.fields;
+    if (facets?.length) return facets;
+    return [...new Set((data?.publications || []).flatMap((publication) => publication.fields || []))]
+      .sort((a, b) => a.localeCompare(b));
+  }, [data]);
+
+  const availableYears = useMemo(() => {
+    const facets = data?.publicationFacets?.years;
+    if (facets?.length) return facets;
+    return publicationYears(data?.publications || []);
+  }, [data]);
   const paperSuggestions = useMemo(() => {
     const query = paperQuery.trim().toLocaleLowerCase();
     if (query.length < 2) return [];
@@ -355,11 +579,10 @@ const DataExplorer = ({
       .filter((publication) => publication.title?.toLocaleLowerCase().includes(query))
       .slice(0, 8);
   }, [data, paperQuery]);
-  const filteredPublications = useMemo(() => filterPublications(data?.publications || [], {
-    query: paperQuery, field: selectedField, years: selectedYear,
-    contribution: selectedContribution,
-    citationType, impact: impactLevel,
-  }, data?.authorId), [data, paperQuery, selectedField, selectedYear, selectedContribution, citationType, impactLevel]);
+  // Filtering happens in SQL now, so what is loaded IS the filtered result.
+  // Re-filtering here would hide nothing extra and could disagree with the
+  // server's filtered total, which is what drives the paging controls.
+  const filteredPublications = data?.publications || [];
 
   const selectPaperSuggestion = (publication) => {
     setPaperQuery(publication.title);
@@ -433,17 +656,26 @@ const DataExplorer = ({
               </button>
             )}
             {data && (
-              <button className="de-reset-btn" onClick={() => downloadAuthorPdf({ ...data, publications: filteredPublications })}>
+              <button className="de-reset-btn" onClick={async () => {
+                try {
+                  const publications = await collectFilteredPublications(data.authorId);
+                  downloadAuthorPdf({ ...data, publications });
+                } catch (err) {
+                  setError(err.message || 'Could not export publications');
+                }
+              }}>
                 <i className='bx bx-download'></i> Download summary
               </button>
             )}
             {data && (
               <button
-                className={`de-reset-btn${library.savedAuthors.some((author) => author.id === data.authorId) ? ' de-saved-btn' : ''}`}
-                onClick={() => toggleSavedAuthor(userId, { id: data.authorId, name: data.author })}
+                className={`de-reset-btn${isAuthorSaved ? ' de-saved-btn' : ''}`}
+                onClick={handleToggleSavedAuthor}
+                disabled={savingAuthor}
+                aria-pressed={isAuthorSaved}
               >
-                <i className={library.savedAuthors.some((author) => author.id === data.authorId) ? 'bx bxs-bookmark' : 'bx bx-bookmark'}></i>
-                {library.savedAuthors.some((author) => author.id === data.authorId) ? 'Author saved' : 'Save author'}
+                <i className={isAuthorSaved ? 'bx bxs-bookmark' : 'bx bx-bookmark'}></i>
+                {isAuthorSaved ? 'Author saved' : 'Save author'}
               </button>
             )}
             <button className="de-reset-btn" onClick={handleResetSearchClick}>
@@ -451,6 +683,8 @@ const DataExplorer = ({
             </button>
           </div>
         </div>
+
+        {saveNotice && <p className="de-save-notice" role="alert">{saveNotice}</p>}
 
         <form className="de-author-search" onSubmit={handleExplorerSearchSubmit}>
           <label htmlFor="explorer-author-search">Search another researcher</label>
@@ -544,7 +778,7 @@ const DataExplorer = ({
               />
               <MetricCard
                 title="NM INDEX"
-                value={displayData.nmIndex}
+                value={Number(displayData.nmIndex).toFixed(3)}
                 tooltip="Overall research impact score calculated by combining multiple research performance indicators."
               />
               <MetricCard
@@ -659,7 +893,7 @@ const DataExplorer = ({
                 <p>Browse, filter, and review this researcher’s publication record and impact metrics.</p>
               </div>
             </div>
-            <span className="de-portfolio-count">{data?.publications?.length || 0} publications</span>
+            <span className="de-portfolio-count">{data?.publicationsPagination?.total ?? data?.publications?.length ?? 0} publications</span>
           </div>
 
         <div className="de-publication-search">
@@ -771,7 +1005,12 @@ const DataExplorer = ({
           <PublicationFilterHelp />
           <div className="de-filter-summary" aria-live="polite">
             <i className='bx bx-list-ul'></i>
-            <span>Showing <strong>{filteredPublications.length}</strong> of <strong>{data?.publications?.length || 0}</strong> publications</span>
+            <span>Showing <strong>{filteredPublications.length}</strong> of <strong>{data?.publicationsPagination?.total ?? data?.publications?.length ?? 0}</strong> publications</span>
+            {filteringPublications && (
+              <span className="de-filter-status" role="status">
+                <i className="bx bx-loader-alt bx-spin" aria-hidden="true" /> Applying filters…
+              </span>
+            )}
           </div>
         </section>
 
@@ -779,7 +1018,10 @@ const DataExplorer = ({
         {data && filteredPublications.length > 0 && (
           <section className="de-publications">
             {filteredPublications.map((pub, publicationIndex) => (
-              <div key={pub.id} className="de-pub-card">
+              <div
+                key={pub.id}
+                className={`de-pub-card${expandedPublicationIds.has(pub.id) ? ' de-pub-card-expanded' : ''}`}
+              >
                 <div className="de-pub-main">
                   <div className="de-pub-meta">
                     <span className="de-publication-number">Paper {String(publicationIndex + 1).padStart(2, '0')}</span>
@@ -803,6 +1045,23 @@ const DataExplorer = ({
                       <p>{pub.abstract}</p>
                     </details>
                   )}
+                  {/* Mobile only -- hidden by a media query on desktop, where
+                      every section below is already shown in full. */}
+                  <button
+                    type="button"
+                    className="de-pub-details-toggle"
+                    aria-expanded={expandedPublicationIds.has(pub.id)}
+                    aria-controls={`de-pub-stats-${pub.id} de-pub-secondary-${pub.id}`}
+                    onClick={() => togglePublicationDetails(pub.id)}
+                  >
+                    <i
+                      className={expandedPublicationIds.has(pub.id) ? 'bx bx-chevron-up' : 'bx bx-chevron-down'}
+                      aria-hidden="true"
+                    />
+                    {expandedPublicationIds.has(pub.id) ? 'Hide Details' : 'Show Details'}
+                  </button>
+                </div>
+                <div className="de-pub-secondary" id={`de-pub-secondary-${pub.id}`}>
                   <div className="de-pub-fields">
                     <h4 className="de-fields-heading">Research fields</h4>
                     <div className="de-field-tags">
@@ -834,7 +1093,7 @@ const DataExplorer = ({
                     </ul>
                   </div>
                 </div>
-                <div className="de-pub-stats">
+                <div className="de-pub-stats" id={`de-pub-stats-${pub.id}`}>
                   <div className="de-pub-stat">
                     <i className='bx bx-revision'></i>
                     <span className="de-pub-stat-label">Self citations</span>
@@ -872,7 +1131,31 @@ const DataExplorer = ({
             ))}
           </section>
         )}
-        {data && data.publications?.length > 0 && filteredPublications.length === 0 && (
+
+        {/* Load More. Hidden automatically once the server says there is no
+            next page, so the final page ends the list cleanly. */}
+        {data?.publicationsPagination?.hasNextPage && (
+          <div className="de-load-more">
+            <button
+              type="button"
+              className="de-load-more-btn"
+              onClick={loadMorePublications}
+              disabled={loadingMore || filteringPublications}
+            >
+              {loadingMore ? (
+                <><i className="bx bx-loader-alt bx-spin" aria-hidden="true" /> Loading…</>
+              ) : (
+                <><i className="bx bx-chevron-down" aria-hidden="true" /> Load More</>
+              )}
+            </button>
+            <p className="de-load-more-count" role="status">
+              Showing <strong>{data.publications.length}</strong> of{' '}
+              <strong>{data.publicationsPagination.total}</strong> publications
+            </p>
+          </div>
+        )}
+
+        {data && !filteringPublications && activeFilterCount > 0 && filteredPublications.length === 0 && (
           <div className="de-no-results">
             <i className='bx bx-filter-alt'></i>
             <h3>No publications match these filters</h3>
@@ -912,8 +1195,8 @@ const DataExplorer = ({
         <div className="de-footer-content">
           <div className="de-footer-section">
             <div className="de-footer-brand">
-              <i className='bx bx-file'></i>
-              <h3>ScholarMetrics</h3>
+              <img src="/assets/nmindex-icon.png" alt="" aria-hidden="true" className="footer-logo" />
+              <h3>NmIndex</h3>
             </div>
             <p>Revolutionizing research evaluation through intelligent automation and comprehensive data collection across global scholarly databases.</p>
           </div>

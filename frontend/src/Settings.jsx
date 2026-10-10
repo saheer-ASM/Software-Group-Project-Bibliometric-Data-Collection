@@ -42,8 +42,7 @@ const Settings = ({ username = "Jone Smith", userEmail = "researcher@university.
       {/* Header */}
       <header className="settings-header">
         <div className="header-left">
-          <i className='bx bxs-graduation'></i>
-          <h1 className="logo">ScholarMetrics</h1>
+          <img src="/assets/nmindex-header.png" alt="NmIndex — Researcher Impact Analytics" className="settings-logo" />
         </div>
         <div className="header-right">
           <nav className="header-nav">
@@ -157,8 +156,8 @@ const Settings = ({ username = "Jone Smith", userEmail = "researcher@university.
         <div className="footer-content">
           <div className="footer-section">
             <div className="footer-title">
-              <i className='bx bx-file'></i>
-              <h3>ScholarMetrics</h3>
+              <img src="/assets/nmindex-icon.png" alt="" aria-hidden="true" className="footer-logo" />
+              <h3>NmIndex</h3>
             </div>
             <p>Revolutionizing research evaluation through intelligent automation and comprehensive data collection across global scholarly databases.</p>
           </div>

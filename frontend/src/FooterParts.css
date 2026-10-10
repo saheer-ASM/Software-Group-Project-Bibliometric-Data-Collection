@@ -9,3 +9,48 @@
   text-align: center;
   box-sizing: border-box;
 }
+
+/* "Back to top" pill, shown in every page footer above the copyright line.
+   The footers are dark (--primary-dark), so a light pill reads clearly. */
+.footer-back-to-top {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 1.25rem;
+  padding: 0.6rem 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--primary-color);
+  font: 600 0.85rem 'Inter', sans-serif;
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.footer-back-to-top i {
+  font-size: 1.1rem;
+  color: #c0392b;
+  transition: transform var(--transition-fast);
+}
+
+.footer-back-to-top:hover {
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+.footer-back-to-top:hover i { transform: translateY(-2px); }
+
+.footer-back-to-top:focus-visible {
+  outline: 3px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 2px;
+}
+
+/* The copyright div is now a container, so its text needs its own element. */
+.footer-copyright-text { color: inherit; }
+
+@media (prefers-reduced-motion: reduce) {
+  .footer-back-to-top,
+  .footer-back-to-top i { transition: none; }
+  .footer-back-to-top:hover i { transform: none; }
+}
