@@ -63,6 +63,7 @@ const MetricCard = ({ title, value, tooltip }) => {
 
 const DataExplorer = ({
   authorName,
+  authorId: requestedAuthorId = '',
   onBack,
   onNavigateToSettings,
   onNavigateToAbout,
@@ -125,6 +126,23 @@ const DataExplorer = ({
   React.useEffect(() => {
     if (data?.authorId) recordRecentAuthor(userId, { id: data.authorId, name: data.author });
   }, [data?.authorId, data?.author, userId]);
+
+  // Save / unsave this author. The button is disabled while a request is in
+  // flight so a double click cannot race itself; a refusal (the 100-author
+  // limit) or a failure is shown under the header.
+  const [savingAuthor, setSavingAuthor] = useState(false);
+  const [saveNotice, setSaveNotice] = useState('');
+  React.useEffect(() => { setSaveNotice(''); }, [data?.authorId]);
+  const isAuthorSaved = Boolean(data?.authorId) && library.savedAuthors.some((author) => author.id === data.authorId);
+
+  const handleToggleSavedAuthor = async () => {
+    if (!data?.authorId || savingAuthor) return;
+    setSavingAuthor(true);
+    setSaveNotice('');
+    const result = await toggleSavedAuthor(userId, { id: data.authorId, name: data.author });
+    setSavingAuthor(false);
+    if (!result.ok) setSaveNotice(result.message);
+  };
 
   const formatPercentage = (value, digits = 2) => {
     const number = Number(value || 0);
@@ -457,11 +475,13 @@ const DataExplorer = ({
   React.useEffect(() => {
     if (authorName) {
       setSearchQuery(authorName);
-      const timer = setTimeout(() => handleSearch(authorName), 100);
+      // An id (from the library) identifies the exact researcher; the name is
+      // then only the label shown while it loads.
+      const timer = setTimeout(() => handleSearch(authorName, requestedAuthorId), 100);
       return () => clearTimeout(timer);
     }
     return undefined;
-  }, [authorName]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authorName, requestedAuthorId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleResetSearchClick = () => {
     setData(null);
@@ -649,11 +669,13 @@ const DataExplorer = ({
             )}
             {data && (
               <button
-                className={`de-reset-btn${library.savedAuthors.some((author) => author.id === data.authorId) ? ' de-saved-btn' : ''}`}
-                onClick={() => toggleSavedAuthor(userId, { id: data.authorId, name: data.author })}
+                className={`de-reset-btn${isAuthorSaved ? ' de-saved-btn' : ''}`}
+                onClick={handleToggleSavedAuthor}
+                disabled={savingAuthor}
+                aria-pressed={isAuthorSaved}
               >
-                <i className={library.savedAuthors.some((author) => author.id === data.authorId) ? 'bx bxs-bookmark' : 'bx bx-bookmark'}></i>
-                {library.savedAuthors.some((author) => author.id === data.authorId) ? 'Author saved' : 'Save author'}
+                <i className={isAuthorSaved ? 'bx bxs-bookmark' : 'bx bx-bookmark'}></i>
+                {isAuthorSaved ? 'Author saved' : 'Save author'}
               </button>
             )}
             <button className="de-reset-btn" onClick={handleResetSearchClick}>
@@ -661,6 +683,8 @@ const DataExplorer = ({
             </button>
           </div>
         </div>
+
+        {saveNotice && <p className="de-save-notice" role="alert">{saveNotice}</p>}
 
         <form className="de-author-search" onSubmit={handleExplorerSearchSubmit}>
           <label htmlFor="explorer-author-search">Search another researcher</label>

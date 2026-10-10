@@ -2055,3 +2055,17 @@
   font-size: 0.82rem;
   color: var(--de-muted, #64748b);
 }
+
+/* Save-author refusal or failure (e.g. the 100-author limit). Same palette as
+   .de-error, but compact: it sits between the header and the search box. */
+.de-save-notice {
+  margin: 0 0 1.25rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(190, 18, 60, 0.15);
+  border-radius: var(--border-radius-md);
+  background: var(--badge-rose);
+  color: var(--badge-rose-text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
