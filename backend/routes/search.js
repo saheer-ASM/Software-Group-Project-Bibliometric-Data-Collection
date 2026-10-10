@@ -1,5 +1,6 @@
 const express = require('express');
 const pool = require('../config/database');
+const { parseAuthorQuery } = require('../services/authorQuery');
 
 const router = express.Router();
 const numeric = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
@@ -449,10 +450,16 @@ async function fetchAuthorData(authorName, authorId) {
 
 router.get('/', async (req, res) => {
   try {
-    if (!req.query.author?.trim() && !req.query.authorId?.trim()) {
+    const authorId = typeof req.query.authorId === 'string' ? req.query.authorId.trim() : '';
+    // With an id the name is only a label, so it may be short -- but never
+    // oversized. Without one, the name is what is looked up: at least 2
+    // characters, checked here so a short name never reaches the database.
+    if (!authorId && typeof req.query.author !== 'string') {
       return res.status(400).json({ message: 'Author name or ID is required' });
     }
-    const data = await fetchAuthorData(req.query.author, req.query.authorId);
+    const name = parseAuthorQuery(req.query.author, { required: !authorId });
+    if (name.error) return res.status(400).json({ message: name.error });
+    const data = await fetchAuthorData(name.value, authorId || undefined);
     if (!data) return res.status(404).json({ message: 'Author not found in database' });
     return res.json(data);
   } catch (error) {

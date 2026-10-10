@@ -2,6 +2,10 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { API_BASE_URL } from './config/api';
 import PublicationCard from './components/PublicationCard';
+import {
+  AUTHOR_QUERY_MAX, AUTHOR_QUERY_TOO_SHORT, AUTHOR_SUGGESTION_DELAY_MS,
+  fetchAuthorSuggestions, isSearchableAuthorQuery, normalizeAuthorQuery,
+} from './services/authorSearch';
 import { publicationYears } from './services/publicationFilters';
 import { downloadAuthorPdf, getLibrary, recordRecentAuthor, savePaperToCollection, toggleSavedAuthor, toggleSavedPaper, MAX_SAVED_PAPERS, SAVED_PAPER_LIMIT_MESSAGE } from './services/researchLibrary';
 import './DataExplorer.css';
@@ -167,9 +171,13 @@ const DataExplorer = ({
 
   // Fetch author data from backend API
   const handleSearch = useCallback(async (queryOverride, authorIdOverride = '') => {
-    const query = queryOverride || searchQuery;
-    if (!query.trim() && !authorIdOverride) {
+    const query = normalizeAuthorQuery(queryOverride || searchQuery);
+    if (!query && !authorIdOverride) {
       setError('Please enter an author name');
+      return;
+    }
+    if (!authorIdOverride && !isSearchableAuthorQuery(query)) {
+      setError(AUTHOR_QUERY_TOO_SHORT);
       return;
     }
 
@@ -190,7 +198,7 @@ const DataExplorer = ({
 
     try {
       const params = new URLSearchParams();
-      if (query.trim()) params.set('author', query.trim());
+      if (query) params.set('author', query);
       if (authorIdOverride) params.set('authorId', authorIdOverride);
       const response = await fetch(`${API_BASE_URL}/api/search?${params.toString()}`, {
         signal: controller.signal,
@@ -407,9 +415,10 @@ const DataExplorer = ({
     }
   };
 
+  // Trimmed and normalized: adding a trailing space does not re-run the lookup.
+  const authorQuery = normalizeAuthorQuery(searchQuery);
   React.useEffect(() => {
-    const query = searchQuery.trim();
-    if (!suggestionsOpen || query.length < 2) {
+    if (!suggestionsOpen || !isSearchableAuthorQuery(authorQuery)) {
       setAuthorSuggestions([]);
       setActiveSuggestion(-1);
       setSuggestionsLoading(false);
@@ -419,24 +428,20 @@ const DataExplorer = ({
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/authors?q=${encodeURIComponent(query)}`, {
-          signal: controller.signal,
-        });
-        if (!response.ok) throw new Error('Suggestions unavailable');
-        setAuthorSuggestions(await response.json());
+        setAuthorSuggestions(await fetchAuthorSuggestions(authorQuery, { signal: controller.signal }));
         setActiveSuggestion(-1);
       } catch (suggestionError) {
         if (suggestionError.name !== 'AbortError') setAuthorSuggestions([]);
       } finally {
         if (!controller.signal.aborted) setSuggestionsLoading(false);
       }
-    }, 250);
+    }, AUTHOR_SUGGESTION_DELAY_MS);
 
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [searchQuery, suggestionsOpen]);
+  }, [authorQuery, suggestionsOpen]);
 
   const selectSuggestedAuthor = async (author) => {
     setSuggestionsOpen(false);
@@ -705,6 +710,7 @@ const DataExplorer = ({
               id="explorer-author-search"
               type="search"
               value={searchQuery}
+              maxLength={AUTHOR_QUERY_MAX}
               placeholder="Start typing an author’s name…"
               autoComplete="off"
               role="combobox"

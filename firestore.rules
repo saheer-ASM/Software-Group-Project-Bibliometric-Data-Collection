@@ -32,6 +32,15 @@ service cloud.firestore {
       return value is string && value.size() >= minLen && value.size() <= maxLen;
     }
 
+    // User-written text: must arrive already trimmed (the app trims before
+    // saving), so the minimum counts real characters -- otherwise padding with
+    // spaces ("         x") would satisfy it. size() counts UTF-16 code units,
+    // the same unit as JavaScript's .length and the form's maxLength.
+    // Limits are mirrored in frontend/src/services/supportService.js (LIMITS).
+    function isTrimmedText(value, minLen, maxLen) {
+      return isText(value, minLen, maxLen) && value == value.trim();
+    }
+
     // A new submission must belong to the signed-in user (uid + email come from
     // the verified token, not from anything the client chooses), start in the
     // default status, and use the server's clock for both timestamps.
@@ -61,7 +70,7 @@ service cloud.firestore {
              ['userId', 'userEmail', 'feedbackType', 'message', 'status', 'createdAt', 'updatedAt'])
         && request.resource.data.feedbackType in
              ['Suggestion', 'General Feedback', 'Feature Request', 'Other']
-        && isText(request.resource.data.message, 10, 5000);
+        && isTrimmedText(request.resource.data.message, 10, 1000);
 
       // Admins read everything; a user can read only their own submissions.
       allow get, list: if isAdmin()
@@ -75,10 +84,10 @@ service cloud.firestore {
       allow create: if ownNewSubmission('Open')
         && request.resource.data.keys().hasOnly(
              ['userId', 'userEmail', 'title', 'category', 'description', 'status', 'createdAt', 'updatedAt'])
-        && isText(request.resource.data.title, 5, 150)
+        && isTrimmedText(request.resource.data.title, 5, 120)
         && request.resource.data.category in
              ['Bug', 'Login/Authentication', 'Dashboard', 'Data Explorer', 'Other']
-        && isText(request.resource.data.description, 10, 5000);
+        && isTrimmedText(request.resource.data.description, 20, 2000);
 
       allow get, list: if isAdmin()
         || (signedIn() && resource.data.userId == request.auth.uid);

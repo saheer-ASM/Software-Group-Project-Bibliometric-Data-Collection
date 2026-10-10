@@ -22,12 +22,16 @@ export const FEEDBACK_STATUSES = ['New', 'In Review', 'Resolved'];
 export const ISSUE_CATEGORIES = ['Bug', 'Login/Authentication', 'Dashboard', 'Data Explorer', 'Other'];
 export const ISSUE_STATUSES = ['Open', 'In Progress', 'Resolved', 'Closed'];
 
-// Limits mirrored in firestore.rules.
+// Limits mirrored in firestore.rules, which enforces them on the server and
+// requires the text to arrive trimmed. Lengths are JavaScript .length (UTF-16
+// units), the same unit as the rules' size() and the inputs' maxLength.
 export const LIMITS = {
-  messageMin: 10,
-  messageMax: 5000,
+  feedbackMin: 10,
+  feedbackMax: 1000,
   titleMin: 5,
-  titleMax: 150,
+  titleMax: 120,
+  descriptionMin: 20,
+  descriptionMax: 2000,
   adminResponseMax: 2000,
 };
 

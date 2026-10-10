@@ -5,6 +5,10 @@ import './Dashboard.css';
 import AppNavbar from './AppNavbar';
 import { FooterQuickLinks, FooterContactLinks, FooterCopyright } from './FooterParts';
 import { useTypewriter, useCyclingText } from './useTypewriter';
+import {
+  AUTHOR_QUERY_MAX, AUTHOR_QUERY_TOO_SHORT, AUTHOR_SUGGESTION_DELAY_MS,
+  fetchAuthorSuggestions, isSearchableAuthorQuery, normalizeAuthorQuery,
+} from './services/authorSearch';
 
 const EMPTY_STATS = { publications: null, authors: null, fields: null };
 
@@ -67,6 +71,10 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState(-1);
+  // Shown when a too-short name is submitted; cleared as soon as they type.
+  const [searchHint, setSearchHint] = useState('');
+  // Trimmed and normalized: adding a trailing space does not re-run the lookup.
+  const authorQuery = normalizeAuthorQuery(searchQuery);
   const [stats, setStats] = useState(getCachedStats);
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState('');
@@ -107,8 +115,7 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
   }, []);
 
   useEffect(() => {
-    const query = searchQuery.trim();
-    if (!suggestionsOpen || query.length < 2) {
+    if (!suggestionsOpen || !isSearchableAuthorQuery(authorQuery)) {
       setAuthorSuggestions([]);
       setSuggestionsLoading(false);
       setActiveSuggestion(-1);
@@ -119,24 +126,20 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
     const timer = setTimeout(async () => {
       setSuggestionsLoading(true);
       try {
-        const response = await fetch(`${API_BASE_URL}/api/authors?q=${encodeURIComponent(query)}`, {
-          signal: controller.signal
-        });
-        if (!response.ok) throw new Error('Author lookup failed');
-        setAuthorSuggestions(await response.json());
+        setAuthorSuggestions(await fetchAuthorSuggestions(authorQuery, { signal: controller.signal }));
         setActiveSuggestion(-1);
       } catch (error) {
         if (error.name !== 'AbortError') setAuthorSuggestions([]);
       } finally {
         if (!controller.signal.aborted) setSuggestionsLoading(false);
       }
-    }, 250);
+    }, AUTHOR_SUGGESTION_DELAY_MS);
 
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [searchQuery, suggestionsOpen]);
+  }, [authorQuery, suggestionsOpen]);
 
   const handleScroll = (direction) => {
     if (scrollContainerRef.current) {
@@ -169,15 +172,18 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
 
   const handleSearch = (e) => {
     e.preventDefault();
-    if (searchQuery.trim()) {
-      if (activeSuggestion >= 0 && authorSuggestions[activeSuggestion]) {
-        selectAuthor(authorSuggestions[activeSuggestion]);
-        return;
-      }
-      setSuggestionsOpen(false);
-      // Navigate to Data Explorer with author name
-      onNavigateToExplorer(searchQuery.trim());
+    if (activeSuggestion >= 0 && authorSuggestions[activeSuggestion]) {
+      selectAuthor(authorSuggestions[activeSuggestion]);
+      return;
     }
+    if (!authorQuery) return;
+    if (!isSearchableAuthorQuery(authorQuery)) {
+      setSearchHint(AUTHOR_QUERY_TOO_SHORT);
+      return;
+    }
+    setSuggestionsOpen(false);
+    // Navigate to Data Explorer with author name
+    onNavigateToExplorer(authorQuery);
   };
 
   const selectAuthor = (author) => {
@@ -256,9 +262,11 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
               type="text"
               placeholder={searchPlaceholder}
               value={searchQuery}
+              maxLength={AUTHOR_QUERY_MAX}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
                 setSuggestionsOpen(true);
+                setSearchHint('');
               }}
               onFocus={() => { setSuggestionsOpen(true); setSearchFocused(true); }}
               onBlur={() => setSearchFocused(false)}
@@ -317,6 +325,7 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
             )}
             <a href="/library" className="nav-link" onClick={onNavigateToLibrary}>My Library</a>
           </form>
+          {searchHint && <p className="search-hint" role="alert">{searchHint}</p>}
         </section>
 
         {/* Popular Fields */}
