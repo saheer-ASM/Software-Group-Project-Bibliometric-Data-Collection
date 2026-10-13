@@ -70,9 +70,8 @@ def best_match(name, inst_id, extra=""):
         cands += [c for c in get("authors", search=extra, per_page=15)["results"] if c["id"] not in seen]
     scored = []
     for c in cands:
-        insts = {i["id"].rsplit("/", 1)[-1] for i in c.get("affiliations", [])
-                 for i in [i["institution"]]} | {
-            i["id"].rsplit("/", 1)[-1] for i in c.get("last_known_institutions") or []}
+        insts = {a["institution"]["id"].rsplit("/", 1)[-1] for a in c.get("affiliations", [])}
+        insts |= {i["id"].rsplit("/", 1)[-1] for i in c.get("last_known_institutions") or []}
         at_ruhuna = inst_id in insts
         ns = max(name_score(name, c["display_name"]), name_score(extra, c["display_name"]) if extra else 0)
         scored.append((ns + (0.5 if at_ruhuna else 0), ns, at_ruhuna, c))
