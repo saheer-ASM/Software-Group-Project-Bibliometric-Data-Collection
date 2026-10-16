@@ -20,6 +20,8 @@ CREATE_STATEMENTS = [
         weighted_sum_adjusted_citations REAL NOT NULL DEFAULT 0,
         weighted_citation_avg_field_and_year REAL,
         data_coverage_ratio REAL NOT NULL DEFAULT 0,
+        benchmark_method TEXT NOT NULL DEFAULT 'exact',
+        benchmark_papers INTEGER,
         calculated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (field_name, publication_year)
     ) WITHOUT ROWID

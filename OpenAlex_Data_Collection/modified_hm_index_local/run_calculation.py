@@ -46,6 +46,12 @@ def _fields() -> str:
         for n in (1, 2, 3))
 
 
+COHORT_FILTER = {
+    "all": "",
+    "done": " AND e.author_id IN (SELECT author_id FROM author WHERE pub_finished = 'done')",
+}
+
+
 STEPS = [
     "DROP TABLE IF EXISTS temp.tmp_hm_fields",
     "DROP TABLE IF EXISTS temp.tmp_hm_ranked",
@@ -81,7 +87,7 @@ STEPS = [
           AND e.capped_adjusted_citation IS NOT NULL
           AND e.author_field_weight > 0
           AND e.career_factor > 0
-          AND f.field_weight > 0
+          AND f.field_weight > 0/*COHORT*/
     )
     """,
 
@@ -126,6 +132,8 @@ STEPS = [
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Modified Hm-index (Eq 18-20), local database.")
+    parser.add_argument("--cohort", choices=["all", "done"], default="all",
+                        help="all authors (cloud behaviour) or only pub_finished = done authors")
     parser.add_argument("--dry-run", action="store_true",
                         help="calculate and print a summary, do not update the author table")
     return parser.parse_args()
@@ -156,6 +164,7 @@ def main():
 
         print("\nSTEP 1/2: Calculating (author, field) effective ranks ...")
         for number, statement in enumerate(STEPS, start=1):
+            statement = statement.replace("/*COHORT*/", COHORT_FILTER[arguments.cohort])
             connection.execute(statement)
             if "CREATE TEMP TABLE" in statement:
                 stamp(f"step {number}/{len(STEPS)} done")
@@ -190,6 +199,10 @@ def main():
             columns = [r[1] for r in connection.execute("PRAGMA table_info(author)")]
             if "modified_hm_index" not in columns:
                 connection.execute("ALTER TABLE author ADD COLUMN modified_hm_index REAL")
+            if arguments.cohort != "all":   # no mixed populations
+                connection.execute("UPDATE author SET modified_hm_index = NULL "
+                                   "WHERE modified_hm_index IS NOT NULL "
+                                   "AND author_id NOT IN (SELECT author_id FROM tmp_hm_result)")
             connection.execute(
                 "UPDATE author SET modified_hm_index = "
                 "(SELECT r.modified_hm_index FROM tmp_hm_result r "

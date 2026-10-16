@@ -63,15 +63,30 @@ def quote_identifier(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
 
 
-def load_authors(connection) -> pd.DataFrame:
+COHORTS = {
+    # cloud behaviour: every author in the author table is in the reference population
+    "all": None,
+    # authors whose publications AND their citing papers were fully collected
+    "done": "SELECT author_id FROM author WHERE pub_finished = 'done'",
+    # the paper's selection style (3.1.1): >= 5 publications and some citations
+    "eligible": ("SELECT author_id FROM author_total_cites "
+                 "WHERE publication_count >= 5 AND total_cites_score > 0"),
+}
+
+
+def load_authors(connection, cohort: str = "all") -> pd.DataFrame:
     cfg = config.AUTHOR_TABLE
-    query = f"""
-        SELECT {quote_identifier(cfg['author_id'])} AS author_id
-        FROM {quote_identifier(cfg['table'])}
-        WHERE {quote_identifier(cfg['author_id'])} IS NOT NULL
-    """
+    cohort_sql = COHORTS[cohort]
+    if cohort_sql is None:
+        query = f"""
+            SELECT {quote_identifier(cfg['author_id'])} AS author_id
+            FROM {quote_identifier(cfg['table'])}
+            WHERE {quote_identifier(cfg['author_id'])} IS NOT NULL
+        """
+    else:
+        query = cohort_sql
     df = pd.read_sql(query, connection)
-    print(f"  Loaded {len(df):,} authors")
+    print(f"  Loaded {len(df):,} authors (cohort: {cohort})")
     return df
 
 
@@ -106,14 +121,14 @@ def load_metric(connection, metric_name: str) -> pd.DataFrame:
     return df
 
 
-def get_data_from_database() -> pd.DataFrame:
+def get_data_from_database(cohort: str = "all") -> pd.DataFrame:
     connection = get_connection()
     try:
         print()
         print("=" * 60)
         print("LOADING COMPONENT METRICS")
         print("=" * 60)
-        authors = load_authors(connection)
+        authors = load_authors(connection, cohort)
         merged = authors[["author_id"]].copy()
         for metric_name in list(config.LOG_METRICS) + list(config.RANK_METRICS):
             metric_df = load_metric(connection, metric_name)
@@ -123,7 +138,7 @@ def get_data_from_database() -> pd.DataFrame:
         connection.close()
 
 
-def write_results(results: pd.DataFrame) -> None:
+def write_results(results: pd.DataFrame, clear_first: bool = False) -> None:
     connection = get_connection()
     cols = config.NM_RESULT_COLUMNS
     metric_names = list(config.LOG_METRICS) + list(config.RANK_METRICS)
@@ -146,6 +161,11 @@ def write_results(results: pd.DataFrame) -> None:
         with connection:
             for statement in SCHEMA:
                 connection.execute(statement)
+            if clear_first:
+                # percentiles of different cohorts must not be mixed in one table
+                removed = connection.execute(
+                    f"DELETE FROM {quote_identifier(config.NM_RESULT_TABLE)}").rowcount
+                print(f"  cleared {removed:,} rows from the previous run")
             if config.NM_UPDATE_AUTHOR_TABLE:
                 columns = [r[1] for r in connection.execute("PRAGMA table_info(author)")]
                 if config.AUTHOR_NM_COLUMN not in columns:
@@ -183,6 +203,9 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Final Nm-index (Eq 24-27), local database.")
     parser.add_argument("--dry-run", action="store_true",
                         help="calculate and print a summary, write nothing")
+    parser.add_argument("--cohort", choices=sorted(COHORTS), default="all",
+                        help="reference population for the percentiles: all (cloud behaviour), "
+                             "done (pub_finished authors), eligible (>=5 papers and citations > 0)")
     return parser.parse_args()
 
 
@@ -195,7 +218,7 @@ def main() -> None:
     print(f"Started: {datetime.now()}")
     started = time.time()
 
-    metrics = get_data_from_database()
+    metrics = get_data_from_database(arguments.cohort)
     metric_names = list(config.LOG_METRICS) + list(config.RANK_METRICS)
 
     print()
@@ -230,7 +253,7 @@ def main() -> None:
         print("\nDry run: nothing written to the database.")
         return
 
-    write_results(results)
+    write_results(results, clear_first=(arguments.cohort != "all"))
     print()
     print("=" * 60)
     print("DONE")

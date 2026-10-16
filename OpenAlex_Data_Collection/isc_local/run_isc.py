@@ -60,8 +60,10 @@ ZERO = Decimal("0")
 ONE = Decimal("1")
 HUNDRED = Decimal("100")
 
-MAX_CITING_PER_CITED = 200
-CITED_BATCH = 100              # cited papers per transaction
+MAX_CITING_PER_CITED = 200     # cloud default; override with --max-citing (0 = no cap)
+CITED_BATCH = 100              # cited papers per transaction (capped runs)
+CITED_BATCH_NO_CAP = 5         # cited papers per transaction when every citing paper is used
+FLUSH_ROWS = 200_000           # write rows to the database in chunks of this size
 SQL_IN_CHUNK = 500
 SLOTS = range(1, 11)
 
@@ -304,12 +306,15 @@ def main():
                         help="calculate and print, write nothing to the database")
     parser.add_argument("--cited-pub-id", action="append", dest="cited_pub_ids",
                         help="process only this cited paper (repeatable)")
-    parser.add_argument("--targets", choices=["done", "all"], default="all",
+    parser.add_argument("--targets", choices=["done", "all"], default="done",
                         help="which authors of a cited paper are target authors")
     parser.add_argument("--redo", action="store_true",
                         help="recompute cited papers that already have rows")
     parser.add_argument("--epsilon-zero", type=Decimal, default=Decimal("0.90"))
     parser.add_argument("--weight-tolerance", type=Decimal, default=Decimal("0.02"))
+    parser.add_argument("--max-citing", type=int, default=MAX_CITING_PER_CITED,
+                        help="at most N randomly chosen citing papers per cited paper "
+                             "(cloud default 200). 0 = use ALL citing papers, as in Eq 9 of the paper")
     parser.add_argument("--seed", type=int, default=42,
                         help="seed for the random choice of the 200 citing papers")
     args = parser.parse_args()
@@ -351,13 +356,18 @@ def main():
           f"already done, {len(todo):,} to process in this run\n", flush=True)
 
     rng = random.Random(args.seed)
+    batch_size = CITED_BATCH if args.max_citing else CITED_BATCH_NO_CAP
     processed_pairs = skipped_pairs = rows_saved = 0
     skip_reasons = {}
     started = time.time()
 
-    for start in range(0, len(todo), CITED_BATCH):
-        batch = todo[start:start + CITED_BATCH]
+    for start in range(0, len(todo), batch_size):
+        batch = todo[start:start + batch_size]
         marks = ",".join("?" * len(batch))
+        if not args.dry_run:
+            # rows of these cited papers are rebuilt from scratch (rows are flushed in chunks)
+            conn.execute(f"DELETE FROM influential_self_citations "
+                         f"WHERE cited_pub_id IN ({marks})", batch)
 
         # citing papers per cited paper (distinct, not self-citing, has a weight row)
         pairs_by_cited = {}
@@ -370,8 +380,8 @@ def main():
         valid_citing = has_weight_row(conn, all_citing)
         for cited in pairs_by_cited:
             qs = sorted(q for q in pairs_by_cited[cited] if q in valid_citing)
-            if len(qs) > MAX_CITING_PER_CITED:
-                qs = sorted(rng.sample(qs, MAX_CITING_PER_CITED))
+            if args.max_citing and len(qs) > args.max_citing:
+                qs = sorted(rng.sample(qs, args.max_citing))
             pairs_by_cited[cited] = qs
 
         weights = fetch_author_weights(conn, set(batch) | {q for qs in pairs_by_cited.values() for q in qs})
@@ -426,6 +436,10 @@ def main():
                                       f"adjusted={result.adjusted_citation:.6f}")
                     out_rows.extend(isc_row(r) for r in pair_rows)
                     processed_pairs += 1
+                    if not args.dry_run and len(out_rows) >= FLUSH_ROWS:
+                        conn.executemany(INSERT_ISC, out_rows)
+                        rows_saved += len(out_rows)     # (dry run: all rows; real run: the last chunk)
+                        out_rows = []
                 except Exception as error:
                     skipped_pairs += 1
                     reason = str(error).split(" for ")[0][:60]
@@ -435,9 +449,6 @@ def main():
 
         if not args.dry_run:
             with conn:
-                conn.executemany("DELETE FROM influential_self_citations "
-                                 "WHERE cited_pub_id = ? AND citing_pub_id = ?",
-                                 [(r[0], r[1]) for r in {(x[0], x[1]) for x in out_rows}])
                 conn.executemany(INSERT_ISC, out_rows)
                 # Eq 9 for this batch of cited papers
                 conn.execute(f"DELETE FROM author_paper_adjusted_citations "
@@ -452,7 +463,7 @@ def main():
                     "GROUP BY cited_pub_id, target_author_id", batch)
         rows_saved += len(out_rows)
 
-        done_cited = len(already) + min(start + CITED_BATCH, len(todo))
+        done_cited = len(already) + min(start + batch_size, len(todo))
         elapsed = time.time() - started
         print(f"  cited papers: {done_cited:,} / {total_candidates:,} "
               f"({done_cited / max(total_candidates, 1) * 100:.2f}%) | "
