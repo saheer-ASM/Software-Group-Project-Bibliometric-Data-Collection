@@ -15,10 +15,19 @@ For every laureate name:
 Authors whose pub_finished is not "done" are the ones the publication
 collection scripts still have to process.
 
+--csv reads another author list instead (needs a display_name / author_name /
+name column, or an openalex_id / author_id column). Each CSV gets its own
+lookup checkpoint in cache/.
+
+--replace makes this CSV the ONLY target cohort: every other 'done' author is
+set to 'no need' (rows and their publications are kept, nothing is deleted),
+so the --cohort done calculations only pick up the authors of this CSV.
+
 Usage:
     python add_laureate_authors.py            # full run
     python add_laureate_authors.py --limit 5  # test on 5 authors
     python add_laureate_authors.py --dry-run  # search + report, write nothing
+    python add_laureate_authors.py --csv ../Author_extraction/output/staff_merged.csv --replace
 """
 
 import argparse
@@ -43,15 +52,24 @@ CHECKPOINT = os.path.join(base.CACHE_DIR, "laureate_fill_checkpoint.jsonl")
 
 NEEDS_UPDATE = "need to update"
 DONE = "done"
+NO_NEED = "no need"      # same value collect_co_authors.py uses for non-target authors
 NAME_COLUMNS = ("display_name", "author_name", "name")
 ID_COLUMNS = ("openalex_id", "author_id")
 
 
-def load_checkpoint():
+def checkpoint_path(input_csv):
+    """The laureate CSV keeps its old checkpoint; any other CSV gets its own."""
+    if os.path.normcase(os.path.abspath(input_csv)) == os.path.normcase(INPUT_CSV):
+        return CHECKPOINT
+    stem = os.path.splitext(os.path.basename(input_csv))[0]
+    return os.path.join(base.CACHE_DIR, f"{stem}_fill_checkpoint.jsonl")
+
+
+def load_checkpoint(checkpoint):
     done = {}
-    if not os.path.exists(CHECKPOINT):
+    if not os.path.exists(checkpoint):
         return done
-    with open(CHECKPOINT, encoding="utf-8") as handle:
+    with open(checkpoint, encoding="utf-8") as handle:
         for line in handle:
             try:
                 record = json.loads(line)
@@ -61,23 +79,23 @@ def load_checkpoint():
     return done
 
 
-def append_checkpoint(record):
+def append_checkpoint(checkpoint, record):
     os.makedirs(base.CACHE_DIR, exist_ok=True)
-    with open(CHECKPOINT, "a", encoding="utf-8") as handle:
+    with open(checkpoint, "a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def read_entries():
+def read_entries(input_csv):
     """[(openalex_id or None, display_name or None)], de-duplicated. A row
     with an openalex_id is looked up by id; otherwise by display name."""
-    with open(INPUT_CSV, encoding="utf-8-sig") as handle:
+    with open(input_csv, encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         fields = reader.fieldnames or []
         name_col = next((c for c in NAME_COLUMNS if c in fields), None)
         id_col = next((c for c in ID_COLUMNS if c in fields), None)
         if name_col is None and id_col is None:
             sys.exit(f"Need an id column ({', '.join(ID_COLUMNS)}) or a name "
-                     f"column ({', '.join(NAME_COLUMNS)}) in {INPUT_CSV}; found: {fields}")
+                     f"column ({', '.join(NAME_COLUMNS)}) in {input_csv}; found: {fields}")
         entries = []
         for r in reader:
             oid = base.short_id((r.get(id_col) or "").strip()) if id_col else None
@@ -128,22 +146,28 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--csv", default=INPUT_CSV,
+                        help="author list to read (default: laureate_authors.csv)")
+    parser.add_argument("--replace", action="store_true",
+                        help="set every 'done' author NOT in this CSV to 'no need'")
     args = parser.parse_args()
+    input_csv = os.path.abspath(args.csv)
+    checkpoint_file = checkpoint_path(input_csv)
 
     if not os.path.exists(DB_PATH):
         sys.exit(f"Local database not found: {DB_PATH}")
-    if not os.path.exists(INPUT_CSV):
-        sys.exit(f"Input CSV not found: {INPUT_CSV}")
+    if not os.path.exists(input_csv):
+        sys.exit(f"Input CSV not found: {input_csv}")
 
-    names = read_entries()
+    names = read_entries(input_csv)
     if args.limit:
         names = names[:args.limit]
-    print(f"{len(names)} laureate(s) from {INPUT_CSV}")
+    print(f"{len(names)} author(s) from {input_csv}")
 
     conn = get_conn()
     sheet = load_authors(conn)
     print(f"{len(sheet)} authors already in {DB_PATH}")
-    checkpoint = load_checkpoint()
+    checkpoint = load_checkpoint(checkpoint_file)
 
     to_append = []      # (author_id, author_name, pub_finished) new rows
     to_flag = []        # author_ids of existing rows to set to 'need to update'
@@ -164,8 +188,11 @@ def main():
                 "author_id": base.short_id(match["id"]) if match else None,
                 "author_name": match.get("display_name") if match else None,
             }
+            if match:
+                print(f"    -> {record['author_id']}  {record['author_name']}  "
+                      f"(works: {match.get('works_count')})")
             if not args.dry_run:
-                append_checkpoint(record)
+                append_checkpoint(checkpoint_file, record)
             time.sleep(base.REQUEST_DELAY_SECONDS)
 
         if not record["found"]:
@@ -198,17 +225,27 @@ def main():
     print(f"in table, need to update:      {flagged}  ({len(to_flag)} rows changed)")
     assert len(names) == not_found + duplicates + new + already_done + flagged
 
+    # --replace: the old cohort leaves the 'done' set (rows and papers are kept)
+    to_demote = []
+    if args.replace:
+        to_demote = [aid for aid, pf in sheet.items()
+                     if pf.lower() == DONE and aid not in seen_ids]
+        print(f"old 'done' authors -> '{NO_NEED}': {len(to_demote)}  (--replace)")
+
     if args.dry_run:
         print("\n[dry run] nothing written to the database or checkpoint")
         return
 
     with conn:   # one transaction: all-or-nothing
         conn.executemany("UPDATE author SET pub_finished = ? WHERE author_id = ?",
+                         [(NO_NEED, aid) for aid in to_demote])
+        conn.executemany("UPDATE author SET pub_finished = ? WHERE author_id = ?",
                          [(NEEDS_UPDATE, aid) for aid in to_flag])
         conn.executemany("INSERT OR IGNORE INTO author "
                          "(author_id, author_name, pub_finished) VALUES (?, ?, ?)",
                          to_append)
-    print(f"  set {len(to_flag)} existing row(s) to '{NEEDS_UPDATE}', "
+    print(f"  set {len(to_demote)} old row(s) to '{NO_NEED}', "
+          f"{len(to_flag)} existing row(s) to '{NEEDS_UPDATE}', "
           f"inserted {len(to_append)} new row(s)")
     conn.close()
 
