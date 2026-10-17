@@ -23,7 +23,7 @@ import time
 from .db_connection import get_connection
 from .db_setup import create_equation_16_table
 
-RAW_H_SQL = """
+RAW_H_TEMPLATE = """
 SELECT
     author_id,
     field_name,
@@ -36,10 +36,16 @@ FROM (
                ORDER BY effective_citation DESC
            ) AS rn
     FROM author_paper_field_effective_citation
-    WHERE effective_citation IS NOT NULL
+    WHERE effective_citation IS NOT NULL{cohort_filter}
 )
 GROUP BY author_id, field_name
 """
+
+COHORT_FILTER = {
+    "all": "",
+    "done": " AND author_id IN (SELECT author_id FROM author WHERE pub_finished = 'done')",
+}
+RAW_H_SQL = RAW_H_TEMPLATE.format(cohort_filter="")
 
 RESULT_SQL = """
 SELECT
@@ -62,10 +68,12 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Calculate Equation 16.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-table-setup", action="store_true")
+    parser.add_argument("--cohort", choices=["all", "done"], default="all",
+                        help="all authors (cloud behaviour) or only pub_finished = done authors")
     return parser.parse_args()
 
 
-def run(*, dry_run=False, skip_table_setup=False):
+def run(*, dry_run=False, skip_table_setup=False, cohort="all"):
     connection = get_connection()
     started = time.time()
 
@@ -90,7 +98,8 @@ def run(*, dry_run=False, skip_table_setup=False):
 
         connection.execute("DROP TABLE IF EXISTS temp.tmp_eq16_raw")
         connection.execute("DROP TABLE IF EXISTS temp.tmp_eq16_norm")
-        connection.execute("CREATE TEMP TABLE tmp_eq16_raw AS " + RAW_H_SQL)
+        connection.execute("CREATE TEMP TABLE tmp_eq16_raw AS " + RAW_H_TEMPLATE.format(
+            cohort_filter=COHORT_FILTER[cohort]))
         stamp("raw h-values per (author, field) computed")
         connection.execute(
             "CREATE TEMP TABLE tmp_eq16_norm AS "
@@ -112,6 +121,8 @@ def run(*, dry_run=False, skip_table_setup=False):
             return
 
         with connection:
+            if cohort != "all":
+                connection.execute("DELETE FROM author_field_modified_hindex")  # no mixed populations
             connection.execute(
                 "INSERT OR REPLACE INTO author_field_modified_hindex (author_id, "
                 "field_name, raw_h_value, papers_used, field_normalization, "
@@ -124,4 +135,5 @@ def run(*, dry_run=False, skip_table_setup=False):
 
 if __name__ == "__main__":
     arguments = parse_arguments()
-    run(dry_run=arguments.dry_run, skip_table_setup=arguments.skip_table_setup)
+    run(dry_run=arguments.dry_run, skip_table_setup=arguments.skip_table_setup,
+        cohort=arguments.cohort)

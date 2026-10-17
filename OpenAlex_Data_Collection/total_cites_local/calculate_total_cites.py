@@ -262,6 +262,7 @@ SELECT
             THEN 'ZERO_FIELD_YEAR_AVERAGE'
 
         WHEN fya.data_coverage_ratio < 1
+             OR COALESCE(fya.benchmark_method, 'exact') <> 'exact'
             THEN 'READY_PROVISIONAL_BENCHMARK'
 
         ELSE 'READY'

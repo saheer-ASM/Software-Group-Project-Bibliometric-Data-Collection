@@ -130,6 +130,7 @@ STEPS = [
     LEFT JOIN expected_pairs AS ep ON ep.cited_pub_id = p.pub_id
     LEFT JOIN processed_pairs AS pp ON pp.cited_pub_id = p.pub_id
     LEFT JOIN paper_adjusted_totals AS pat ON pat.cited_pub_id = p.pub_id
+    /*POPULATION*/
     """,
     "CREATE INDEX temp.idx_tmp_fy_ps_pub ON tmp_fy_paper_status(pub_id)",
 
@@ -199,7 +200,58 @@ STEPS = [
 ]
 
 
-def refresh_field_year_average() -> None:
+POPULATION_FILTER = {
+    # papers whose citing papers were collected -- the only papers whose citation count is known
+    "updated": "WHERE p.update_status = 'updated'",
+    # cloud behaviour: every publication (citing papers count as zero-cited -> benchmark far too small)
+    "all": "",
+}
+MIN_GROUP_SIZE = 10     # a (field, year) group with fewer papers is smoothed
+YEAR_WINDOW = 2         # pool the same field over +-2 years, then fall back to the whole field
+
+
+def smooth_thin_groups(connection, min_group: int, window: int) -> dict:
+    """Replace the average of thin (field, year) groups. NOT in the paper: it avoids
+    averages of 1-4 papers. Smoothed rows get benchmark_method 'window' / 'field', which
+    Equation 11 reports as READY_PROVISIONAL_BENCHMARK."""
+    rows = connection.execute(
+        "SELECT field_name, publication_year, complete_publication_count, "
+        "sum_adjusted_citations FROM field_year_adjusted_citation_average").fetchall()
+    by_field = {}
+    for field, year, n, total in rows:
+        by_field.setdefault(field, {})[year] = (n, total)
+    counts = {"exact": 0, "window": 0, "field": 0, "none": 0}
+    for field, years in by_field.items():
+        field_n = sum(n for n, _ in years.values())
+        field_sum = sum(t for _, t in years.values())
+        for year, (n, total) in years.items():
+            if n >= min_group:
+                counts["exact"] += 1
+                connection.execute(
+                    "UPDATE field_year_adjusted_citation_average SET benchmark_method = 'exact', "
+                    "benchmark_papers = ? WHERE field_name = ? AND publication_year = ?",
+                    (n, field, year))
+                continue
+            pool = [years[y] for y in range(year - window, year + window + 1) if y in years]
+            pooled_n = sum(x[0] for x in pool)
+            if pooled_n >= min_group:
+                method, used_n, average = "window", pooled_n, sum(x[1] for x in pool) / pooled_n
+            elif field_n > 0:
+                method, used_n, average = "field", field_n, field_sum / field_n
+            else:
+                counts["none"] += 1
+                continue
+            counts[method] += 1
+            connection.execute(
+                "UPDATE field_year_adjusted_citation_average SET benchmark_method = ?, "
+                "benchmark_papers = ?, citation_avg_field_and_year = ? "
+                "WHERE field_name = ? AND publication_year = ?",
+                (method, used_n, average, field, year))
+    return counts
+
+
+def refresh_field_year_average(population: str = "updated", min_group: int = MIN_GROUP_SIZE,
+                               window: int = YEAR_WINDOW) -> None:
     """
     Rebuild TC-bar(f,y,adj) from the latest database state.
 
@@ -215,11 +267,17 @@ def refresh_field_year_average() -> None:
 
     try:
         with connection:
+            print(f"  benchmark population: {population}", flush=True)
             for number, statement in enumerate(STEPS, start=1):
                 if "CREATE TEMP TABLE" in statement or statement.lstrip().startswith("INSERT"):
                     print(f"  step {number}/{len(STEPS)} ...", flush=True)
+                statement = statement.replace("/*POPULATION*/", POPULATION_FILTER[population])
                 connection.execute(statement, parameters if ":" in statement and
                                    ("decimal_tolerance" in statement) else ())
+            counts = smooth_thin_groups(connection, min_group, window)
+            print(f"  groups: {counts['exact']} exact (>= {min_group} papers), "
+                  f"{counts['window']} pooled over +-{window} years, "
+                  f"{counts['field']} field-only, {counts['none']} without data")
 
             group_count, average_coverage, minimum_coverage = connection.execute(
                 """

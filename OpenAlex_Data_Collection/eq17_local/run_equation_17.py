@@ -25,10 +25,17 @@ from .db_connection import get_connection
 from .db_setup import create_equation_17_table
 
 
-def _authors() -> str:
+COHORT_FILTER = {
+    "all": "",
+    "done": " AND author{n}id IN (SELECT author_id FROM author WHERE pub_finished = 'done')",
+}
+
+
+def _authors(cohort: str = "all") -> str:
     return "\n UNION ALL \n".join(
         f"SELECT pub_id, author{n}id AS author_id FROM author_contribution_weight "
-        f"WHERE author{n}id IS NOT NULL" for n in range(1, 11))
+        f"WHERE author{n}id IS NOT NULL" + COHORT_FILTER[cohort].format(n=n)
+        for n in range(1, 11))
 
 
 def _fields() -> str:
@@ -38,10 +45,11 @@ def _fields() -> str:
         f"WHERE field{n}_name IS NOT NULL AND field{n}_weight IS NOT NULL" for n in (1, 2, 3))
 
 
-PREPARE = [
+def prepare_steps(cohort: str = "all") -> list:
+  return [
     "DROP TABLE IF EXISTS temp.tmp_eq17_paper_authors",
     "DROP TABLE IF EXISTS temp.tmp_eq17_author_field_weight",
-    f"CREATE TEMP TABLE tmp_eq17_paper_authors AS {_authors()}",
+    f"CREATE TEMP TABLE tmp_eq17_paper_authors AS {_authors(cohort)}",
     "CREATE INDEX temp.idx_tmp_eq17_pa ON tmp_eq17_paper_authors(pub_id)",
     f"""
     CREATE TEMP TABLE tmp_eq17_author_field_weight AS
@@ -52,7 +60,10 @@ PREPARE = [
     GROUP BY pa.author_id, pf.field_name
     """,
     "CREATE INDEX temp.idx_tmp_eq17_afw ON tmp_eq17_author_field_weight(author_id, field_name)",
-]
+  ]
+
+
+PREPARE = prepare_steps("all")
 
 RESULT_SQL = """
 SELECT
@@ -86,10 +97,12 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Calculate Equation 17 (final Hf_a).")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-table-setup", action="store_true")
+    parser.add_argument("--cohort", choices=["all", "done"], default="all",
+                        help="all authors (cloud behaviour) or only pub_finished = done authors")
     return parser.parse_args()
 
 
-def run(*, dry_run=False, skip_table_setup=False):
+def run(*, dry_run=False, skip_table_setup=False, cohort="all"):
     connection = get_connection()
     started = time.time()
 
@@ -107,10 +120,11 @@ def run(*, dry_run=False, skip_table_setup=False):
             print("No Equation 16 results found. Run the Equation 16 pipeline first.")
             return
 
-        for number, statement in enumerate(PREPARE, start=1):
+        steps = prepare_steps(cohort)
+        for number, statement in enumerate(steps, start=1):
             connection.execute(statement)
             if "CREATE TEMP TABLE" in statement:
-                stamp(f"prepared temp table (step {number}/{len(PREPARE)})")
+                stamp(f"prepared temp table (step {number}/{len(steps)})")
 
         counts = dict(connection.execute(
             f"SELECT calculation_status, COUNT(*) FROM ({RESULT_SQL}) GROUP BY 1").fetchall())
@@ -132,6 +146,8 @@ def run(*, dry_run=False, skip_table_setup=False):
             return
 
         with connection:
+            if cohort != "all":
+                connection.execute("DELETE FROM author_modified_hindex")  # no mixed populations
             connection.execute(
                 "INSERT OR REPLACE INTO author_modified_hindex (author_id, "
                 "weighted_numerator_sum, total_field_weight_sum, modified_hindex_final, "
@@ -144,4 +160,5 @@ def run(*, dry_run=False, skip_table_setup=False):
 
 if __name__ == "__main__":
     arguments = parse_arguments()
-    run(dry_run=arguments.dry_run, skip_table_setup=arguments.skip_table_setup)
+    run(dry_run=arguments.dry_run, skip_table_setup=arguments.skip_table_setup,
+        cohort=arguments.cohort)

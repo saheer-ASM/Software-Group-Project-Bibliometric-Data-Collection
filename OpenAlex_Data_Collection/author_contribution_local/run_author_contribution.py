@@ -95,6 +95,9 @@ def main():
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH)
     parser.add_argument("--dry-run", action="store_true",
                         help="calculate and print, write nothing to the database")
+    parser.add_argument("--recompute", action="store_true",
+                        help="recalculate rows that already have weights (use this once after "
+                             "the duplicate-name fix)")
     args = parser.parse_args()
 
     if not os.path.exists(DB_PATH):
@@ -116,14 +119,15 @@ def main():
     total = conn.execute("SELECT COUNT(*) FROM author_contribution_weight").fetchone()[0]
     done_before = (conn.execute("SELECT COUNT(*) FROM author_contribution_weight "
                                 "WHERE author_ordering_norm IS NOT NULL").fetchone()[0]
-                   if has_norm else 0)
+                   if has_norm and not args.recompute else 0)
     print(f"Author contribution weights so far: {done_before:,} done / {total:,} total "
           f"({done_before / total * 100:.2f}%), {total - done_before:,} left\n")
 
     calculator = AuthorContributionCalculator()
     select_sql = (f"SELECT rowid, pub_id, {', '.join(AUTHOR_COLS)} "
                   f"FROM author_contribution_weight WHERE rowid > ? "
-                  + ("AND author_ordering_norm IS NULL " if has_norm else "")
+                  + ("AND author_ordering_norm IS NULL "
+                     if has_norm and not args.recompute else "")
                   + "ORDER BY rowid LIMIT ?")
     update_sql = ("UPDATE author_contribution_weight SET author_ordering_norm = ?, "
                   + ", ".join(f"{c} = ?" for c in WEIGHT_COLS) + " WHERE pub_id = ?")
@@ -156,24 +160,37 @@ def main():
                 no_authors += 1
                 continue
 
-            # same as the cloud script: only authors whose name exists
-            author_names = [names[a] for a in author_ids if names.get(a)]
             fields = fields_by_pub.get(pub_id) or {}
             if not fields:
                 no_fields += 1
                 continue
 
-            result = calculator.calculate_total_author_contributions(
-                paper_id=pub_id, author_list=author_names, fields_data=fields)
+            # DUPLICATE-NAME FIX. The cloud script keys every weight by author NAME, so two
+            # authors with the same name were merged and their weights added (totals > 100,
+            # which breaks Lemma 5/6 of the paper). Here the weights are taken BY POSITION
+            # from the unchanged calculator methods, so every author id keeps its own share.
+            # The ordering norm is detected exactly as before (from the names that exist).
+            author_names = [names[a] for a in author_ids if names.get(a)]
+            ordering = calculator.detect_ordering_norm(author_names, pub_id)
+            n_authors = len(author_ids)
+            by_position = [0.0] * n_authors
+            for field, field_weight in fields.items():
+                if ordering == "alphabetical":
+                    per_position = calculator.calculate_alphabetical_weights(
+                        pub_id, field, field_weight, n_authors)
+                else:
+                    per_position = calculator.calculate_relative_weights(
+                        pub_id, field, field_weight, n_authors)
+                for position, value in per_position.items():
+                    by_position[position - 1] += value
 
-            weights = [result["author_contributions"].get(names.get(a), 0)
-                       for a in author_ids]
-            weights += [None] * (10 - len(weights))
-            updates.append((result["ordering_norm"], *weights, pub_id))
-            norms[result["ordering_norm"]] += 1
+            result = {"ordering_norm": ordering}
+            weights = by_position + [None] * (10 - n_authors)
+            updates.append((ordering, *weights, pub_id))
+            norms[ordering] += 1
 
             if args.dry_run and processed + len(updates) <= 5:
-                print(f"{pub_id}: {result['ordering_norm']}, fields={fields}")
+                print(f"{pub_id}: {ordering}, fields={fields}")
                 for a, w in zip(author_ids, weights):
                     print(f"    {a}  {names.get(a)!r:40} {w}")
 

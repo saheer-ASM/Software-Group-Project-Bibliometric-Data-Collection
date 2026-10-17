@@ -47,6 +47,12 @@ def _fields() -> str:
         for n in (1, 2, 3))
 
 
+COHORT_FILTER = {
+    "all": "",
+    "done": " AND e.author_id IN (SELECT author_id FROM author WHERE pub_finished = 'done')",
+}
+
+
 STEPS = [
     "DROP TABLE IF EXISTS temp.tmp_g_fields",
     "DROP TABLE IF EXISTS temp.tmp_g_author_field",
@@ -84,7 +90,7 @@ STEPS = [
               AND e.capped_adjusted_citation IS NOT NULL
               AND e.author_field_weight > 0
               AND e.career_factor > 0
-              AND f.field_weight > 0
+              AND f.field_weight > 0/*COHORT*/
         )
         WINDOW w AS (PARTITION BY author_id, field_id ORDER BY tc_eff DESC)
     )
@@ -136,6 +142,8 @@ STEPS = [
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Modified g-index (Eq 20-22), local database.")
+    parser.add_argument("--cohort", choices=["all", "done"], default="all",
+                        help="all authors (cloud behaviour) or only pub_finished = done authors")
     parser.add_argument("--dry-run", action="store_true",
                         help="calculate and print a summary, write nothing")
     return parser.parse_args()
@@ -166,6 +174,7 @@ def main():
 
         print("\nSTEP 1/3: Calculating (author, field) raw g-values ...")
         for number, statement in enumerate(STEPS, start=1):
+            statement = statement.replace("/*COHORT*/", COHORT_FILTER[arguments.cohort])
             connection.execute(statement)
             if "CREATE TEMP TABLE" in statement:
                 stamp(f"step {number}/{len(STEPS)} done")
@@ -201,6 +210,10 @@ def main():
             columns = [r[1] for r in connection.execute("PRAGMA table_info(author)")]
             if "modified_g_index" not in columns:
                 connection.execute("ALTER TABLE author ADD COLUMN modified_g_index REAL")
+            if arguments.cohort != "all":   # no mixed populations
+                connection.execute("UPDATE author SET modified_g_index = NULL "
+                                   "WHERE modified_g_index IS NOT NULL "
+                                   "AND author_id NOT IN (SELECT author_id FROM tmp_g_result)")
             connection.execute(
                 "UPDATE author SET modified_g_index = "
                 "(SELECT r.modified_g_index FROM tmp_g_result r "
@@ -211,6 +224,8 @@ def main():
         print("\nSTEP 3/3: Populating modified_g_index_results ...")
         create_modified_g_index_tables(connection)
         with connection:
+            if arguments.cohort != "all":
+                connection.execute("DELETE FROM modified_g_index_results")
             connection.execute(
                 "INSERT OR REPLACE INTO modified_g_index_results (author_id, "
                 "field_row_count, included_field_row_count, skipped_field_row_count, "
