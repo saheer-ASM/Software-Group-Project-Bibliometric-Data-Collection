@@ -1,0 +1,16 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*
+config/*.env
+!config/config.example.env
+results/*
+!results/.gitkeep
+figures/*
+!figures/.gitkeep
+logs/*
+!logs/.gitkeep
+.cache/
