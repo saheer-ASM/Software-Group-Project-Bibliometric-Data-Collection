@@ -158,3 +158,11 @@ login_clean.py
 
 feildclassification/
 asjc-finetuning/
+
+# Isolated NM-index validation project local configuration and outputs
+/NM-Index-Empirical-Validation/.env.*
+/NM-Index-Empirical-Validation/config/*.env
+!/NM-Index-Empirical-Validation/config/config.example.env
+/NM-Index-Empirical-Validation/.cache/
+/NM-Index-Empirical-Validation/figures/*
+!/NM-Index-Empirical-Validation/figures/.gitkeep

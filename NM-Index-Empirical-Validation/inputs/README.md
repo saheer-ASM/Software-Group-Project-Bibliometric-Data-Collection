@@ -1,0 +1,7 @@
+# Optional local research inputs
+
+Place verified award labels, annual score snapshots, prospective outcomes, scenario variables, or approved subgroup labels here. The CLI accepts only files inside this validation project. Do not place credentials here or infer sensitive attributes from author names. Required CSV columns are checked by [`src/external_inputs.py`](../src/external_inputs.py). No real input datasets have been added yet.
+
+For later real runs, `portfolio_verification.csv` requires `author_id,portfolio_verified,evidence_reference`. Its evidence must independently establish each author's complete publication portfolio; a true flag without evidence will not grant eligibility. `subgroup_labels.csv` requires `author_id,gender,region,approved_for_analysis,evidence_reference`; no label is inferred from names. `percentile_scores.csv` requires `author_id` and named columns such as `nm_index_percentile` and `h_index_percentile`; missing metric percentiles remain pending. The reference population and conversion method must be documented before these are treated as real research inputs. All fixture data live in `tests/fixtures/` and must not be copied into this directory.
+
+For the limited-author pilot, add `pilot_author_ids.csv` with exactly one `author_id` column and distinct stable database IDs. Supply a separate `portfolio_verification.csv` covering every selected ID. See [the pilot protocol](../results/limited_author_pilot_protocol.md). Do not substitute names, fixture IDs or unverified true flags.
