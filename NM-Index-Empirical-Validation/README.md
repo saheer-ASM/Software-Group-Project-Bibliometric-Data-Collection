@@ -4,6 +4,8 @@ This is an isolated, reproducible validation framework for the NM-index. The lat
 
 **No empirical validation has been completed.** The current database is incomplete. [Phase 4.5](results/phase4_5_completion.md) found author links for only 816 of 56,768 publications and unresolved citation-source/methodology questions. The framework is for a later, fully populated and verified database. Do not run `--all` against the current pilot or treat current records as final evidence.
 
+**Database-first input status:** Real runs now inspect the fetched research data before selecting a verified local fallback for portfolio verification, the RQ1/RQ4 reference scores, or the RQ7 bundle. `input_source_status.csv` and `run_metadata.json` record `DATABASE`, `VERIFIED_FALLBACK`, or `UNAVAILABLE` with reasons and counts. Fallback flags remain `--input portfolio_verification=...`, `--input reference_scores=...`, and `--rq07-bundle ...`; these files are loaded only if the database source is unusable. The currently mapped research schema does **not** provide a complete author-portfolio attestation, an approved raw C-score reference, or all RQ7 graph/benchmark/scenario inputs, so a database-only 995-author run will mark the affected work unavailable until those sources are verified and mapped. See [implementation report](results/database_first_implementation_report.md). Older sections below describe the fallback contracts, not a claim that the mapped database can already replace them.
+
 ## Architecture
 
 | Package | Role |

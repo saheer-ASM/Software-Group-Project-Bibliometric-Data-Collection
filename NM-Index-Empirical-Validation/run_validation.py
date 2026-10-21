@@ -95,16 +95,17 @@ def main(argv=None):
         if '=' not in item:
             parser.error('--input must be KIND=CSV')
         kind, path = item.split('=', 1)
-        if kind not in SCHEMAS or kind in extra:
+        if kind not in SCHEMAS or kind in extra or kind in extra.get('_fallback_paths', {}):
             parser.error(f'Unsupported or duplicate --input kind: {kind}')
-        extra[kind] = load_csv(kind, path)
+        if kind in {'portfolio_verification', 'reference_scores'}:
+            extra.setdefault('_fallback_paths', {})[kind] = path
+        else:
+            extra[kind] = load_csv(kind, path)
     if args.data_source == 'cohort':
         from src.phase6_readiness import read_cohort
-        from src.rq07_bundle import load_bundle
         _, ids = read_cohort()
         if args.rq07_bundle:
-            extra['graph_inputs'], extra['frozen_benchmarks'], extra['nm_parameters'] = load_bundle(
-                args.rq07_bundle, ids)
+            extra['rq07_bundle_path'] = args.rq07_bundle
         destination = run_cohort(experiment_names=names, extra_inputs=extra)
     elif args.data_source == 'pilot':
         if not args.pilot_author_ids:
