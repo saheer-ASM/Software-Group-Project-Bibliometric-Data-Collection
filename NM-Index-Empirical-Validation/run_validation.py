@@ -18,6 +18,8 @@ def main(argv=None):
                         help='mock uses TEST DATA ONLY and never opens PostgreSQL')
     parser.add_argument('--pilot-author-ids', help='pilot only: local CSV containing one author_id column')
     parser.add_argument('--rq07-bundle', help='cohort only: complete local graph and frozen-reference bundle')
+    parser.add_argument('--exclude-missing-year-publications', action='store_true',
+                        help='cohort only: drop papers without a valid year, listed in excluded_publications.csv')
     parser.add_argument('--pilot-design-reference',
                         help='pilot only: documented approval of selected cohort and reduced sample scope')
     parser.add_argument('--input', action='append', default=[], metavar='KIND=CSV',
@@ -58,6 +60,8 @@ def main(argv=None):
         parser.error('--pilot-author-ids and --pilot-design-reference require --data-source pilot')
     if args.rq07_bundle and args.data_source != 'cohort':
         parser.error('--rq07-bundle requires --data-source cohort')
+    if args.exclude_missing_year_publications and args.data_source != 'cohort':
+        parser.error('--exclude-missing-year-publications requires --data-source cohort')
     if args.data_source == 'mock':
         if args.input:
             parser.error('Mock runs use only bundled synthetic inputs; --input is not accepted')
@@ -105,6 +109,10 @@ def main(argv=None):
         from src.phase6_readiness import read_cohort
         _, ids = read_cohort()
         if args.rq07_bundle:
+            extra['graph_inputs'], extra['frozen_benchmarks'], extra['nm_parameters'] = load_bundle(
+                args.rq07_bundle, ids)
+        destination = run_cohort(experiment_names=names, extra_inputs=extra,
+                                 exclude_missing_years=args.exclude_missing_year_publications)
             extra['rq07_bundle_path'] = args.rq07_bundle
         destination = run_cohort(experiment_names=names, extra_inputs=extra)
     elif args.data_source == 'pilot':

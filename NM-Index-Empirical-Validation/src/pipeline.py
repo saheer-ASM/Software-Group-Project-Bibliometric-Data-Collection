@@ -5,7 +5,7 @@ import importlib
 import importlib.metadata
 import json
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,7 +15,7 @@ from analysis.descriptive import describe
 from metrics.inputs import prepare_data
 from metrics import total_cites, h_index, hf_index, g_index
 from nm_index.loader import load as load_nm
-from .config import PROJECT_ROOT, load_config, load_validation_config
+from .config import PROJECT_ROOT, SQLiteConfig, load_config, load_validation_config
 from .data_quality import check, to_markdown
 from .database_first import inspect_mapped_extracts, resolve_real_inputs
 from .eligibility import EligibilityRules
@@ -103,10 +103,19 @@ def _write_csv(frame, path, classification=None):
     output.to_csv(path, index=False)
 
 
+def _database_isolation(source_kind):
+    if not source_kind.startswith('SELECT_ONLY_POSTGRESQL'):
+        return 'NOT_APPLICABLE'
+    if isinstance(load_config(), SQLiteConfig):
+        return 'SQLITE FILE mode=ro, query_only, single read transaction'
+    return 'REPEATABLE READ, READ ONLY'
+
+
 def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
                       output_directory=None, allow_incomplete=False, extra_inputs=None,
                       generate_figures=True, metric_strategies=None,
                       source_kind='SUPPLIED_DATAFRAMES', _source_token=None,
+                      excluded_publications=None):
                       database_candidates=None):
     """Mockable integration seam. Never connects to a database itself."""
     settings = settings or load_validation_config()
@@ -147,6 +156,8 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
     _write_csv(quality_report, destination/'data_quality_report.csv', classification)
     (destination/'data_quality_report.md').write_text(
         f'# {classification}\n\n'+to_markdown(quality_report), encoding='utf-8')
+    if excluded_publications is not None:
+        _write_csv(excluded_publications, destination/'excluded_publications.csv', classification)
     blocker_names = {'duplicate_author_ids', 'duplicate_publication_ids',
                      'orphan_link_authors', 'orphan_link_publications',
                      'authors_without_linked_publications',
@@ -302,6 +313,8 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
                     source_sha256=source_hashes(), author_rows=len(dataset),
                     code_sha256=code_hash(), python_version=sys.version.split()[0],
                     eligible_authors=int(dataset.eligible_for_validation.sum()),
+                    excluded_publications=(None if excluded_publications is None
+                                           else int(len(excluded_publications))),
                     metric_coverage={name:int(dataset[name].notna().sum()) for name in BASELINE_COLUMNS},
                     experiments=names,
                     experiment_status={name:_experiment_status(output) for name, output in experiment_outputs.items()},
@@ -319,6 +332,7 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
                     cohort_sha256=(hashlib.sha256((PROJECT_ROOT/'995_authors.csv').read_bytes()).hexdigest()
                         if source_kind == 'SELECT_ONLY_POSTGRESQL_COHORT' else None),
                     source=source_kind,
+                    database_isolation=_database_isolation(source_kind),
                     input_sources={item.input_name:item.as_record() for item in source_decisions},
                     database_isolation=('REPEATABLE READ, READ ONLY'
                                         if source_kind.startswith('SELECT_ONLY_POSTGRESQL') else 'NOT_APPLICABLE'),
@@ -571,7 +585,7 @@ def run_pilot(*, author_ids, experiment_names=(), extra_inputs=None):
                              _source_token=_DATABASE_SOURCE_TOKEN)
 
 
-def run_cohort(*, experiment_names=(), extra_inputs=None):
+def run_cohort(*, experiment_names=(), extra_inputs=None, exclude_missing_years=False):
     """Use the immutable 995-ID cohort against a later populated read-only DB."""
     from .phase6_readiness import read_cohort
     from .repository import load_selected_author_ids
@@ -580,8 +594,38 @@ def run_cohort(*, experiment_names=(), extra_inputs=None):
     if not evidence.get('database_ready_reference') or not evidence.get('citation_source_reference'):
         raise ValueError('DATA_REQUIRED: populated database and citation-source evidence needed before connection')
     names = tuple(experiment_names) or tuple(EXPERIMENT_MODULES)
+    graphs, frozen, parameters = (evidence.get('graph_inputs'),
+                                  evidence.get('frozen_benchmarks'),
+                                  evidence.get('nm_parameters'))
+    # Without any RQ7 bundle, RQ7 itself reports DATA_REQUIRED; a supplied bundle must be complete.
+    if 'rq07' in names and (graphs, frozen, parameters) != (None, None, None):
+        if graphs is None or frozen is None or parameters is None or set(graphs) != set(ids):
+            raise ValueError('DATA_REQUIRED: complete per-author RQ7 graphs and frozen original reference required')
+        if frozen.original_author_count != 100000:
+            raise ValueError('DATA_REQUIRED: real RQ7 requires the original 100000-author reference')
     load_config()
     extracts = load_selected_author_ids(ids)
+    excluded = None
+    if exclude_missing_years:
+        extracts, excluded = _exclude_missing_year_publications(extracts)
     return run_from_extracts(extracts, experiment_names=names,
                              extra_inputs=evidence, source_kind='SELECT_ONLY_POSTGRESQL_COHORT',
-                             _source_token=_DATABASE_SOURCE_TOKEN)
+                             _source_token=_DATABASE_SOURCE_TOKEN, excluded_publications=excluded)
+
+
+def _exclude_missing_year_publications(extracts):
+    """Drop papers without a valid year and return every dropped pub_id with its cohort authors."""
+    year = pd.to_numeric(extracts.publications.year, errors='coerce')
+    invalid = year.isna() | ~year.between(1000, 9999)
+    excluded = extracts.publications.loc[invalid, ['pub_id', 'year', 'total_citation']].copy()
+    dropped = set(excluded.pub_id)
+    slots = extracts.authorship.loc[extracts.authorship.pub_id.isin(dropped)]
+    authors = slots.set_index('pub_id')[[f'author{i}id' for i in range(1, 11)]].apply(
+        lambda row: ';'.join(sorted(set(row.dropna().astype(str)))), axis=1)
+    excluded['cohort_author_ids'] = excluded.pub_id.map(authors.groupby(level=0).first())
+    excluded['reason'] = 'missing_or_invalid_publication_year'
+
+    def keep(frame):
+        return frame.loc[~frame.pub_id.isin(dropped)].reset_index(drop=True)
+    return replace(extracts, publications=keep(extracts.publications), citations=keep(extracts.citations),
+                   authorship=keep(extracts.authorship), fields=keep(extracts.fields)), excluded

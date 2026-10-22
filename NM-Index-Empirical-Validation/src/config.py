@@ -11,6 +11,7 @@ from dotenv import dotenv_values
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ENV_FILE = PROJECT_ROOT / "config" / "config.env"
 CONFIG_KEYS = (
+    "DB_ENGINE", "DB_PATH",
     "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSLMODE",
 )
 
@@ -35,7 +36,18 @@ class DatabaseConfig:
             raise ValueError("DB_SSLMODE must be require, verify-ca, or verify-full.")
 
 
-def load_config(env_file: Optional[Union[str, Path]] = None) -> DatabaseConfig:
+@dataclass(frozen=True)
+class SQLiteConfig:
+    """Local SQLite database file, always opened read-only; the path is excluded from repr."""
+
+    path: Path = field(repr=False)
+
+    def __post_init__(self):
+        if not isinstance(self.path, Path) or not self.path.is_file():
+            raise ValueError("DB_PATH must name an existing SQLite database file.")
+
+
+def load_config(env_file: Optional[Union[str, Path]] = None) -> Union[DatabaseConfig, SQLiteConfig]:
     """Read only this project's env file, with no ambient credential discovery.
 
     Relative paths resolve against PROJECT_ROOT. Parent-directory env discovery
@@ -52,6 +64,17 @@ def load_config(env_file: Optional[Union[str, Path]] = None) -> DatabaseConfig:
 
     values = dotenv_values(path, interpolate=False) if path.is_file() else {}
     values = {key: values.get(key) for key in CONFIG_KEYS}
+    engine = (values.get("DB_ENGINE") or "postgresql").strip().lower()
+    if engine == "sqlite":
+        if not values.get("DB_PATH"):
+            raise ValueError("Missing configuration keys: DB_PATH")
+        # Relative paths resolve against PROJECT_ROOT; the file itself may live outside it.
+        db_path = Path(values["DB_PATH"])
+        if not db_path.is_absolute():
+            db_path = PROJECT_ROOT / db_path
+        return SQLiteConfig(path=db_path.resolve())
+    if engine != "postgresql":
+        raise ValueError("DB_ENGINE must be postgresql or sqlite.")
     required = ("DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD")
     missing = [key for key in required if not values.get(key)]
     if missing:

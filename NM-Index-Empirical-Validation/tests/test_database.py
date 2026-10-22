@@ -1,12 +1,17 @@
 """Offline safety tests: no real connections, SQL, or credentials."""
 
+import sqlite3
+import tempfile
 import unittest
+from contextlib import closing
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import psycopg2
 
-from src.config import DatabaseConfig
-from src.database import DatabaseAccessError, UnsafeQueryError, execute_select, execute_select_batch, validate_select
+from src.config import DatabaseConfig, SQLiteConfig
+from src.database import (DatabaseAccessError, UnsafeQueryError, _sqlite_batch, execute_select,
+                          execute_select_batch, validate_select)
 from src import inspect_schema
 
 
@@ -132,6 +137,40 @@ class DatabaseTests(unittest.TestCase):
             raise DatabaseAccessError()
         with patch('src.inspect_schema.load_config', return_value=CONFIG), patch('src.inspect_schema.execute_select', side_effect=check), patch('builtins.print'):
             self.assertEqual(inspect_schema.main(), 1)
+
+
+class SQLiteTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / 'probe.db'
+        with closing(sqlite3.connect(path)) as connection:
+            connection.execute('CREATE TABLE author (author_id TEXT PRIMARY KEY, author_name TEXT)')
+            connection.executemany('INSERT INTO author VALUES (?, ?)', [('A1', 'One'), ('A2', 'Two'), ('A3', 'Three')])
+            connection.commit()
+        self.config = SQLiteConfig(path)
+
+    def test_binds_placeholders_and_any_lists(self):
+        rows = execute_select_batch({
+            'one': ('SELECT author_id FROM public.author WHERE author_id = %s', ('A2',)),
+            'many': ('SELECT author_id FROM public.author WHERE author_id = ANY(%s) ORDER BY author_id',
+                     (["'; DELETE FROM author; --", 'A1', 'A3'],)),
+        }, config=self.config)
+        self.assertEqual(rows['one'], [{'author_id': 'A2'}])
+        self.assertEqual(rows['many'], [{'author_id': 'A1'}, {'author_id': 'A3'}])
+
+    def test_exposes_information_schema_columns(self):
+        rows = execute_select('SELECT table_name, column_name FROM information_schema.columns '
+                              'WHERE table_schema = %s ORDER BY ordinal_position', ('public',), config=self.config)
+        self.assertEqual(rows, [{'table_name': 'author', 'column_name': 'author_id'},
+                                {'table_name': 'author', 'column_name': 'author_name'}])
+
+    def test_rejects_writes_and_leaves_file_unchanged(self):
+        with self.assertRaises(UnsafeQueryError):
+            execute_select('DELETE FROM author', config=self.config)
+        with self.assertRaises(DatabaseAccessError):
+            _sqlite_batch({'write': 'DELETE FROM author'}, self.config)
+        self.assertEqual(len(execute_select('SELECT author_id FROM public.author', config=self.config)), 3)
 
 
 if __name__ == '__main__':
