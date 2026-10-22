@@ -1,13 +1,14 @@
-"""SELECT-only PostgreSQL access; no connection is opened at import time."""
+"""SELECT-only PostgreSQL or read-only SQLite access; no connection is opened at import time."""
 
 import json
 import re
+import sqlite3
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from pglast import parser
 
-from .config import DatabaseConfig, load_config
+from .config import DatabaseConfig, SQLiteConfig, load_config
 
 
 class UnsafeQueryError(ValueError):
@@ -82,6 +83,77 @@ def validate_select(query):
     visit(statements)
 
 
+_SQLITE_TOKEN = re.compile(
+    r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|--[^\n]*|/\*[\s\S]*?\*/|=\s*ANY\s*\(\s*%s\s*\)|%s|\bpublic\."
+)
+
+
+def _sqlite_statement(query, params):
+    """Rewrite a validated PostgreSQL SELECT for SQLite without interpolating values.
+
+    The public schema is SQLite's main database, %s becomes ?, and = ANY(%s)
+    becomes a JSON-array membership test so a long ID list binds one value.
+    """
+    values = list(params or ())
+    bound = []
+
+    def replace(match):
+        token = match.group()
+        if token[0] in '\'"-/':
+            return token
+        if token == 'public.':
+            return ''
+        if len(bound) >= len(values):
+            raise UnsafeQueryError("Fewer parameters than placeholders.")
+        value = values[len(bound)]
+        if token == '%s':
+            bound.append(value)
+            return '?'
+        bound.append(json.dumps(list(value)))
+        return 'IN (SELECT value FROM json_each(?))'
+    return _SQLITE_TOKEN.sub(replace, query), bound
+
+
+def _attach_information_schema(connection):
+    """Expose SQLite table columns in the information_schema.columns shape."""
+    connection.execute("ATTACH DATABASE ':memory:' AS information_schema")
+    connection.execute('CREATE TABLE information_schema.columns (table_schema TEXT, table_name TEXT, '
+                       'column_name TEXT, data_type TEXT, is_nullable TEXT, ordinal_position INTEGER)')
+    tables = [row[0] for row in connection.execute(
+        "SELECT name FROM main.sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'")]
+    for table in tables:
+        columns = connection.execute(
+            'SELECT cid, name, type, "notnull" FROM pragma_table_info(?, \'main\')', (table,)).fetchall()
+        connection.executemany('INSERT INTO information_schema.columns VALUES (?, ?, ?, ?, ?, ?)', [
+            ('public', table, name, (kind or '').lower(), 'NO' if notnull else 'YES', cid + 1)
+            for cid, name, kind, notnull in columns])
+
+
+def _sqlite_batch(queries, settings):
+    """Read SQLite extracts in one transaction on a mode=ro, query_only connection."""
+    connection = None
+    try:
+        connection = sqlite3.connect(settings.path.as_uri() + '?mode=ro', uri=True,
+                                     timeout=10, isolation_level=None)
+        _attach_information_schema(connection)
+        connection.execute('PRAGMA query_only = ON')
+        if connection.execute('PRAGMA query_only').fetchone()[0] != 1:
+            raise DatabaseAccessError('READ_ONLY_NOT_ENFORCED')
+        connection.row_factory = sqlite3.Row
+        connection.execute('BEGIN')
+        output = {}
+        for name, item in queries.items():
+            query, params = item if isinstance(item, tuple) else (item, None)
+            rows = connection.execute(*_sqlite_statement(query, params)).fetchall()
+            output[name] = [dict(row) for row in rows]
+        return output
+    except sqlite3.Error as error:
+        raise DatabaseAccessError(getattr(error, 'sqlite_errorname', None)) from None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
 def execute_select(query, params=None, *, config=None):
     """Return dictionaries from a SELECT in a verified read-only transaction.
 
@@ -90,6 +162,8 @@ def execute_select(query, params=None, *, config=None):
     """
     validate_select(query)
     settings = config if config is not None else load_config()
+    if isinstance(settings, SQLiteConfig):
+        return _sqlite_batch({'rows': (query, params)}, settings)['rows']
     if not isinstance(settings, DatabaseConfig):
         raise TypeError("config must be a DatabaseConfig instance.")
     connection = None
@@ -128,6 +202,8 @@ def execute_select_batch(queries, *, config=None):
         query = item[0] if isinstance(item, tuple) else item
         validate_select(query)
     settings = config if config is not None else load_config()
+    if isinstance(settings, SQLiteConfig):
+        return _sqlite_batch(queries, settings)
     if not isinstance(settings, DatabaseConfig):
         raise TypeError('config must be a DatabaseConfig instance.')
     connection = None

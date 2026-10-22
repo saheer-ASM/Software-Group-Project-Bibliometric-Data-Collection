@@ -48,6 +48,9 @@ REQUIRED_COLUMNS = {
     'modified_g_index_results': ('author_id', 'modified_g_index'),
 }
 
+# Publication source text is descriptive only; a database without it reads NULL.
+OPTIONAL_COLUMNS = {('publication', 'source')}
+
 REQUIRED_BY = {
     'author': 'all_metrics;RQ10', 'publication': 'raw_total_cites;h_index;g_index',
     'citation': 'citation_quality_audit', 'author_contribution_weight': 'all_raw_baselines;eligibility',
@@ -70,24 +73,33 @@ class Extracts:
 
 
 def verify_schema(schema_rows=None):
-    """Fail with exact missing source fields before extracting any records."""
+    """Fail with exact missing source fields before extracting any records.
+
+    Returns the visible (table, column) pairs so optional columns can be projected.
+    """
     if schema_rows is None:
         from .data_loader import load_schema
         schema_rows = load_schema()
     visible = {(r['table_name'], r['column_name']) for r in schema_rows}
     missing = [(table, col) for table, cols in REQUIRED_COLUMNS.items()
-               for col in cols if (table, col) not in visible]
+               for col in cols if (table, col) not in visible and (table, col) not in OPTIONAL_COLUMNS]
     if missing:
         raise ValueError('Missing database input(s): ' + '; '.join(
             f'table={table} column={column} required_by={REQUIRED_BY[table]}'
             for table, column in missing))
-    return True
+    return visible
+
+
+def _queries(visible):
+    if ('publication', 'source') in visible:
+        return QUERIES
+    return dict(QUERIES, publications=QUERIES['publications'].replace(', source FROM', ', NULL AS source FROM'))
 
 
 def load_all(*, query=execute_select):
-    verify_schema()
-    records = (execute_select_batch(QUERIES) if query is execute_select else
-               {name: query(sql) for name, sql in QUERIES.items()})
+    queries = _queries(verify_schema())
+    records = (execute_select_batch(queries) if query is execute_select else
+               {name: query(sql) for name, sql in queries.items()})
     return _assemble(records)
 
 
@@ -104,7 +116,7 @@ def load_selected_author_ids(author_ids, *, batch=execute_select_batch):
             not isinstance(value, str) or not value.strip() or value.startswith('TEST_')
             for value in ids):
         raise ValueError('Pilot requires 1–6000 unique, nonempty, real stable author IDs')
-    verify_schema()
+    base = _queries(verify_schema())
     placeholders = ', '.join(['%s'] * len(ids))
     selected = f'author_id IN ({placeholders})'
     linked = ' OR '.join(f'author{i}id IN ({placeholders})' for i in range(1, 11))
@@ -113,16 +125,16 @@ def load_selected_author_ids(author_ids, *, batch=execute_select_batch):
     author_params = ids
     paper_params = ids * 10
     queries = {
-        'authors': (QUERIES['authors'].replace(' ORDER BY author_id', f' WHERE {selected} ORDER BY author_id'), author_params),
-        'publications': (QUERIES['publications'].replace(' ORDER BY pub_id', f' WHERE {paper_where} ORDER BY pub_id'), paper_params),
-        'citations': (QUERIES['citations'].replace(' ORDER BY pub_id, cites_pub_id', f' WHERE {paper_where} ORDER BY pub_id, cites_pub_id'), paper_params),
-        'authorship': (QUERIES['authorship'].replace(' ORDER BY pub_id', f' WHERE {paper_where} ORDER BY pub_id'), paper_params),
-        'fields': (QUERIES['fields'].replace(' ORDER BY pub_id', f' WHERE {paper_where} ORDER BY pub_id'), paper_params),
-        'nm': (QUERIES['nm'].replace(' ORDER BY author_id', f' WHERE {selected} ORDER BY author_id'), author_params),
+        'authors': (base['authors'].replace(' ORDER BY author_id', f' WHERE {selected} ORDER BY author_id'), author_params),
+        'publications': (base['publications'].replace(' ORDER BY pub_id', f' WHERE {paper_where} ORDER BY pub_id'), paper_params),
+        'citations': (base['citations'].replace(' ORDER BY pub_id, cites_pub_id', f' WHERE {paper_where} ORDER BY pub_id, cites_pub_id'), paper_params),
+        'authorship': (base['authorship'].replace(' ORDER BY pub_id', f' WHERE {paper_where} ORDER BY pub_id'), paper_params),
+        'fields': (base['fields'].replace(' ORDER BY pub_id', f' WHERE {paper_where} ORDER BY pub_id'), paper_params),
+        'nm': (base['nm'].replace(' ORDER BY author_id', f' WHERE {selected} ORDER BY author_id'), author_params),
     }
     for name in ('component_t', 'component_s', 'component_u', 'component_hf',
                  'component_hm', 'component_g'):
-        queries[name] = (QUERIES[name].replace(' ORDER BY author_id',
+        queries[name] = (base[name].replace(' ORDER BY author_id',
                                                f' WHERE {selected} ORDER BY author_id'), author_params)
     records = batch(queries)
     extracts = _assemble(records)
