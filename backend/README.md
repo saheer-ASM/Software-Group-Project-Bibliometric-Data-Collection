@@ -83,7 +83,7 @@ project in `REACT_APP_FIREBASE_PROJECT_ID`.
 | Variable | Purpose |
 |---|---|
 | `FIREBASE_SERVICE_ACCOUNT_PATH` **or** `FIREBASE_SERVICE_ACCOUNT_BASE64` | Admin SDK credentials |
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | PostgreSQL (quote values containing `#`) |
+| `OPENALEX_DB_PATH` (optional) | The local SQLite database, opened read-only. Defaults to `../OpenAlex_Data_Collection/database/openalex.db`; needs Node.js 22.13+ |
 | `JWT_SECRET`, `JWT_EXPIRES_IN`, `PORT` | Backend session tokens and port |
 
 `frontend/.env` (see `frontend/.env.example`): `REACT_APP_API_URL` and the six

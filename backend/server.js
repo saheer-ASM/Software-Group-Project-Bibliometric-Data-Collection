@@ -58,16 +58,18 @@ let lastDatabaseFailure = null;
 
 async function checkDatabase() {
   try {
-    await pool.query('SELECT 1');
+    // Reads a real table: SELECT 1 alone would succeed even when the path
+    // points at a file that is not this database.
+    await pool.query('SELECT 1 FROM author LIMIT 1');
     if (lastDatabaseFailure !== null) {
-      console.log(`[db] PostgreSQL at ${pool.dbTarget} is reachable again`);
+      console.log(`[db] database ${pool.dbTarget} is readable again`);
       lastDatabaseFailure = null;
     }
     return true;
   } catch (error) {
     const reason = pool.describeDbError(error);
     if (reason !== lastDatabaseFailure) {
-      console.error(`[db] PostgreSQL at ${pool.dbTarget} is unavailable: ${reason}`);
+      console.error(`[db] database ${pool.dbTarget} is unavailable: ${reason}`);
       lastDatabaseFailure = reason;
     }
     return false;
@@ -100,11 +102,11 @@ const PORT = process.env.PORT || 5005;
 const HOST = process.env.HOST || 'localhost';
 app.listen(PORT, HOST, () => {
   console.log(`Server running on http://${HOST}:${PORT}`);
-  // pg connects lazily, so without this the first sign of a bad database
-  // setting would be a failed request. Logged, not fatal: a transient outage
-  // should not crash-loop the container, and /api/health keeps reporting it.
-  console.log(`[db] PostgreSQL target ${pool.dbTarget}, TLS ${pool.dbTls}`);
+  // The database opens lazily, so without this the first sign of a bad path
+  // would be a failed request. Logged, not fatal: /api/health keeps
+  // reporting it, and the next query tries again.
+  console.log(`[db] SQLite database ${pool.dbTarget} (read-only)`);
   checkDatabase().then((ok) => {
-    if (ok) console.log('[db] connected to PostgreSQL');
+    if (ok) console.log('[db] connected to the database');
   });
 });
