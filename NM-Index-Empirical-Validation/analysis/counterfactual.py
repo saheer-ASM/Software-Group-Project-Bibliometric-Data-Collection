@@ -124,8 +124,7 @@ def split_salami_papers(papers, edges, split_assignments, *, target_pub_ids):
     required_paper = {'pub_id', 'authors', 'field_weights', 'year', 'total_citation'}
     required_edge = {'citation_id', 'cited_pub_id', 'citing_pub_id'}
     required_assignment = {'citation_id', 'half'}
-    if (not required_paper <= set(papers) or not ({'field', 'field_weights'} & set(papers))
-            or not required_edge <= set(edges)):
+    if not required_paper <= set(papers) or not required_edge <= set(edges):
         raise MethodologyInputRequired('Complete paper metadata and citation IDs required')
     if not required_assignment <= set(split_assignments):
         raise MethodologyInputRequired('Each citation needs an explicit split half (1 or 2)')

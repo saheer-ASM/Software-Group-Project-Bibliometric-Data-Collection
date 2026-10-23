@@ -88,7 +88,8 @@ class SourceResolutionTests(unittest.TestCase):
         graph.papers.drop(columns='field', inplace=True)
         graph.self_additions.drop(columns='field', inplace=True)
         scenario, _ = run_author_graph('TEST_A', graph, frozen, parameters)
-        self.assertEqual(set(scenario.status), {'OK'})
+        # Table 9's combined row stays pending; the three approved scenarios must recalculate.
+        self.assertEqual(set(scenario.loc[scenario.scenario.ne('combined'), 'status']), {'OK'})
 
     def test_existing_csv_path_is_loaded_only_as_fallback(self):
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT/'inputs') as folder:

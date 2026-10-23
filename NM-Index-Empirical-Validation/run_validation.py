@@ -108,15 +108,10 @@ def main(argv=None):
         else:
             extra[kind] = load_csv(kind, path)
     if args.data_source == 'cohort':
-        from src.phase6_readiness import read_cohort
-        _, ids = read_cohort()
         if args.rq07_bundle:
-            extra['graph_inputs'], extra['frozen_benchmarks'], extra['nm_parameters'] = load_bundle(
-                args.rq07_bundle, ids)
+            extra['rq07_bundle_path'] = args.rq07_bundle
         destination = run_cohort(experiment_names=names, extra_inputs=extra,
                                  exclude_missing_years=args.exclude_missing_year_publications)
-            extra['rq07_bundle_path'] = args.rq07_bundle
-        destination = run_cohort(experiment_names=names, extra_inputs=extra)
     elif args.data_source == 'pilot':
         if not args.pilot_author_ids:
             parser.error('--data-source pilot requires --pilot-author-ids')

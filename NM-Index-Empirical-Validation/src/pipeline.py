@@ -122,8 +122,7 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
                       output_directory=None, allow_incomplete=False, extra_inputs=None,
                       generate_figures=True, metric_strategies=None,
                       source_kind='SUPPLIED_DATAFRAMES', _source_token=None,
-                      excluded_publications=None):
-                      database_candidates=None):
+                      excluded_publications=None, database_candidates=None):
     """Mockable integration seam. Never connects to a database itself."""
     settings = settings or load_validation_config()
     names = tuple(experiment_names) or tuple(EXPERIMENT_MODULES)
@@ -346,6 +345,7 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
                         if source_kind == 'SELECT_ONLY_POSTGRESQL_COHORT' else None),
                     source=source_kind,
                     database_isolation=_database_isolation(source_kind),
+                    input_sources={item.input_name:item.as_record() for item in source_decisions},
                     database_engine=_database_engine(source_kind),
                     packages={name:importlib.metadata.version(name) for name in
                               ('python-dotenv', 'pandas', 'matplotlib', 'psycopg2-binary',
