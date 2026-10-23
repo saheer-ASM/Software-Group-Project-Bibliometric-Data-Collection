@@ -5,7 +5,8 @@ import pandas as pd
 
 from analysis.gaming import SCENARIOS
 from analysis.counterfactual import FrozenBenchmarks
-from analysis.rq07_engine import SCENARIOS as GRAPH_SCENARIOS, run_author_graph
+from analysis.rq07_engine import (SCENARIOS as GRAPH_SCENARIOS, COMBINED_SCENARIO,
+    combined_rows, run_author_graph)
 from nm_index.counterfactual_calculator import NMParameters
 from .common import pending
 
@@ -46,18 +47,32 @@ def run(dataset, comparators, *, paper_inputs=None, frozen_benchmarks=None,
                     benchmark_version=frozen_benchmarks.version,
                     benchmark_sha256=frozen_benchmarks.sha256)
                     for scenario in GRAPH_SCENARIOS)
+                combined, combined_baselines = combined_rows(author, frozen_benchmarks)
+                rows.append(combined)
+                index_rows.extend(combined_baselines)
                 continue
             scenario_frame, baseline_frame = run_author_graph(
                 author, graph, frozen_benchmarks, nm_parameters)
             rows.extend(scenario_frame.to_dict('records'))
             index_rows.extend(baseline_frame.to_dict('records'))
         frame = pd.DataFrame(rows)
-        states = set(frame.status) if len(frame) else set()
-        status = 'OK' if states == {'OK'} else 'INPUT_DATA_REQUIRED' if 'INPUT_DATA_REQUIRED' in states else 'NOT_APPLICABLE'
+        # Status of the three approved scenarios; the combined row is pending by definition.
+        approved = frame.loc[frame.scenario.ne(COMBINED_SCENARIO)] if len(frame) else frame
+        states = set(approved.status) if len(approved) else set()
+        if states == {'OK'}:
+            status = 'METHODOLOGY_PENDING'
+            issue = 'Three approved scenarios recalculated; combined manipulation not approved'
+        elif 'INPUT_DATA_REQUIRED' in states:
+            status = 'INPUT_DATA_REQUIRED'
+            issue = ('At least one selected author/scenario lacks complete graph evidence; '
+                     'combined manipulation not approved')
+        else:
+            status = 'NOT_APPLICABLE'
+            issue = ('At least one scenario has a zero or invalid original percentile; '
+                     'combined manipulation not approved')
         return {'gaming_resistance': frame,
                 'gaming_index_inflation': pd.DataFrame(index_rows),
-                'status': pd.DataFrame([dict(status=status,
-                    issue='' if status == 'OK' else 'At least one selected author/scenario lacks complete graph evidence')])}
+                'status': pd.DataFrame([dict(status=status, issue=issue)])}
     supplied = set(paper_inputs.author_id) if paper_inputs is not None else set()
     rows, index_rows = [], []
     for author in dataset.author_id:

@@ -120,7 +120,8 @@ def add_self_citation_relationships(papers, edges, additions, *, target_author,
 
 def split_salami_papers(papers, edges, split_assignments, *, target_pub_ids):
     """Split papers with source-specified edge allocation and identical metadata."""
-    required_paper = {'pub_id', 'authors', 'field', 'year', 'total_citation'}
+    # Field metadata is the canonical `field_weights` column read by the NM calculator.
+    required_paper = {'pub_id', 'authors', 'field_weights', 'year', 'total_citation'}
     required_edge = {'citation_id', 'cited_pub_id', 'citing_pub_id'}
     required_assignment = {'citation_id', 'half'}
     if not required_paper <= set(papers) or not required_edge <= set(edges):
@@ -175,7 +176,7 @@ def split_salami_papers(papers, edges, split_assignments, *, target_pub_ids):
 
 def add_gift_authorship(papers, assignments, *, target_author, target_portfolio_ids):
     """Add target in an explicitly supplied middle slot on coauthor papers."""
-    if not {'pub_id', 'authors', 'year', 'field', 'total_citation'} <= set(papers):
+    if not {'pub_id', 'authors', 'year', 'field_weights', 'total_citation'} <= set(papers):
         raise MethodologyInputRequired('Gift scenario needs full paper metadata')
     if not {'pub_id', 'position'} <= set(assignments):
         raise MethodologyInputRequired('Gift papers and middle positions must be supplied')

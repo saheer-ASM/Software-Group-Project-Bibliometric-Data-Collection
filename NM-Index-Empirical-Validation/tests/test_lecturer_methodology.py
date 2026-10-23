@@ -129,7 +129,7 @@ class RQ7MethodologyTests(unittest.TestCase):
 
     def test_salami_preserves_authors_field_year_and_balances_real_edges(self):
         papers = pd.DataFrame([dict(pub_id='P0', authors=('A','B'),
-            year=2020, field='F', total_citation=4)])
+            year=2020, field_weights={'F': 1.}, total_citation=4)])
         edges = pd.DataFrame([dict(citation_id=f'E{i}', cited_pub_id='P0',
                                    citing_pub_id=f'Q{i}') for i in range(4)])
         assignments = pd.DataFrame({'citation_id': [f'E{i}' for i in range(4)],
@@ -138,16 +138,16 @@ class RQ7MethodologyTests(unittest.TestCase):
                                             target_pub_ids=['P0'])
         self.assertEqual(output.total_citation.tolist(), [2., 2.])
         self.assertTrue(all(x == ('A','B') for x in output.authors))
-        self.assertEqual(set(output.field), {'F'})
+        self.assertEqual(output.field_weights.tolist(), [{'F': 1.}, {'F': 1.}])
         self.assertEqual(set(output.year), {2020})
         self.assertEqual(links.cited_pub_id.value_counts().tolist(), [2, 2])
         self.assertEqual(papers.iloc[0].total_citation, 4)
 
     def test_gift_authorship_uses_existing_coauthor_papers(self):
         papers = pd.DataFrame([dict(pub_id=f'P{i}', authors=('A','B'),
-            year=2020, field='F', total_citation=2) for i in range(10)] +
+            year=2020, field_weights={'F': 1.}, total_citation=2) for i in range(10)] +
             [dict(pub_id=f'G{i}', authors=('B','C','D'), year=2019,
-                  field='F', total_citation=5) for i in range(3)])
+                  field_weights={'F': 1.}, total_citation=5) for i in range(3)])
         assignments = pd.DataFrame({'pub_id': ['G0','G1','G2'],
                                     'position': [2,2,2]})
         output = add_gift_authorship(papers, assignments,

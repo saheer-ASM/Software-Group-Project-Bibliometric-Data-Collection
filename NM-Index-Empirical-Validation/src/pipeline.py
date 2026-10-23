@@ -110,6 +110,13 @@ def _database_isolation(source_kind):
     return 'REPEATABLE READ, READ ONLY'
 
 
+def _database_engine(source_kind):
+    """The SELECT_ONLY_POSTGRESQL* source labels name the guarded adapter, not the engine."""
+    if not source_kind.startswith('SELECT_ONLY_POSTGRESQL'):
+        return None
+    return 'sqlite' if isinstance(load_config(), SQLiteConfig) else 'postgresql'
+
+
 def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
                       output_directory=None, allow_incomplete=False, extra_inputs=None,
                       generate_figures=True, metric_strategies=None,
@@ -149,12 +156,14 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
         f'# {classification}\n\n'+to_markdown(quality_report), encoding='utf-8')
     if excluded_publications is not None:
         _write_csv(excluded_publications, destination/'excluded_publications.csv', classification)
+    # Missing/invalid years are not a run blocker: the design excludes the affected
+    # *authors* ("incomplete metadata"), which require_complete_publication_metadata does below.
     blocker_names = {'duplicate_author_ids', 'duplicate_publication_ids',
                      'orphan_link_authors', 'orphan_link_publications',
                      'authors_without_linked_publications',
                      'publications_without_author_relationship',
                      'missing_or_non_numeric_citation_counts', 'negative_citation_counts',
-                     'invalid_publication_years', 'duplicate_nm_records', 'orphan_nm_records'}
+                     'duplicate_nm_records', 'orphan_nm_records'}
     blockers = quality_report.loc[quality_report['check'].isin(blocker_names) & quality_report['count'].gt(0), 'check'].tolist()
     if blockers and not allow_incomplete:
         raise ValueError('Incomplete/invalid snapshot; quality report saved. Blockers: '+', '.join(blockers))
@@ -293,6 +302,10 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
                     eligible_authors=int(dataset.eligible_for_validation.sum()),
                     excluded_publications=(None if excluded_publications is None
                                            else int(len(excluded_publications))),
+                    publication_year_policy=('DROP_PAPERS_WITHOUT_VALID_YEAR (not the design rule; '
+                                             'requires lecturer approval)'
+                                             if excluded_publications is not None else
+                                             'EXCLUDE_AUTHORS_WITH_MISSING_YEARS (design selection criterion)'),
                     metric_coverage={name:int(dataset[name].notna().sum()) for name in BASELINE_COLUMNS},
                     experiments=names,
                     experiment_status={name:_experiment_status(output) for name, output in experiment_outputs.items()},
@@ -311,6 +324,7 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
                         if source_kind == 'SELECT_ONLY_POSTGRESQL_COHORT' else None),
                     source=source_kind,
                     database_isolation=_database_isolation(source_kind),
+                    database_engine=_database_engine(source_kind),
                     packages={name:importlib.metadata.version(name) for name in
                               ('python-dotenv', 'pandas', 'matplotlib', 'psycopg2-binary',
                                'pglast', 'pypdf', 'numpy', 'scipy')},

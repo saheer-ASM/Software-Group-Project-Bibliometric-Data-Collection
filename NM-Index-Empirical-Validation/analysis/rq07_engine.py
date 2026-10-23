@@ -17,6 +17,26 @@ SCENARIOS = ('self_citations_plus_50_percent',
              'salami_double_papers_half_citations',
              'gift_authorship_plus_30_percent')
 SUPPORTED_BASELINES = ('raw_total_cites', 'h_index', 'hf_index', 'g_index')
+# Design Table 9 / manuscript Table 17 list a combined row, but neither source nor
+# the lecturer's decision fixes the order or interaction of the three manipulations.
+COMBINED_SCENARIO = 'combined'
+COMBINED_REASON = ('Combined manipulation reported in Table 9, but the order and interaction '
+                   'of the three graph manipulations are not approved')
+
+
+def combined_rows(author_id, frozen, original=None):
+    """Explicit pending Table 9 combined row; never composed from unapproved choices."""
+    nan = float('nan')
+    scenario = dict(author_id=author_id, scenario=COMBINED_SCENARIO,
+        original_nm_index=original['nm_index'] if original else nan,
+        original_nm_percentile=original['nm_percentile'] if original else nan,
+        manipulated_nm_index=nan, manipulated_nm_percentile=nan, nm_inflation_percent=nan,
+        benchmark_version=frozen.version, benchmark_sha256=frozen.sha256,
+        status='METHODOLOGY_PENDING', exclusion_reason=COMBINED_REASON)
+    baselines = [dict(author_id=author_id, scenario=COMBINED_SCENARIO, metric=metric,
+                      status='METHODOLOGY_PENDING', reason=COMBINED_REASON)
+                 for metric in (*SUPPORTED_BASELINES, 'hm_index', 'c_score_raw')]
+    return scenario, baselines
 
 
 @dataclass(frozen=True)
@@ -146,4 +166,7 @@ def run_author_graph(author_id, graph, frozen, parameters):
                 nm_inflation_percent=float('nan'), benchmark_version=frozen.version,
                 benchmark_sha256=frozen.sha256, status='INPUT_DATA_REQUIRED',
                 exclusion_reason=str(error)))
+    combined, combined_baselines = combined_rows(author_id, frozen, original)
+    scenario_rows.append(combined)
+    baseline_rows.extend(combined_baselines)
     return pd.DataFrame(scenario_rows), pd.DataFrame(baseline_rows)

@@ -19,7 +19,9 @@ def main(argv=None):
     parser.add_argument('--pilot-author-ids', help='pilot only: local CSV containing one author_id column')
     parser.add_argument('--rq07-bundle', help='cohort only: complete local graph and frozen-reference bundle')
     parser.add_argument('--exclude-missing-year-publications', action='store_true',
-                        help='cohort only: drop papers without a valid year, listed in excluded_publications.csv')
+                        help='cohort only: drop papers without a valid year, listed in excluded_publications.csv. '
+                             'Deviates from the design, which excludes such authors (the default); '
+                             'use only with lecturer approval')
     parser.add_argument('--pilot-design-reference',
                         help='pilot only: documented approval of selected cohort and reduced sample scope')
     parser.add_argument('--input', action='append', default=[], metavar='KIND=CSV',

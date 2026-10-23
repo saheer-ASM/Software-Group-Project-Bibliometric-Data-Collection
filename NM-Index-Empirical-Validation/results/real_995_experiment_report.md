@@ -1,5 +1,10 @@
 # Real 995-author experiment report
 
+> **Superseded.** This 2026-10-19 preflight predates the SQLite-backed run of
+> 2026-10-22 (`results/run_20261022T153122834180Z/`). See
+> [final_995_experiment_review.md](final_995_experiment_review.md) for the
+> current assessment.
+
 **Status: REAL_EXPERIMENT_BLOCKED**
 
 Generated: 2026-10-19T08:58:25.556024+00:00. The fixed cohort contains 995 rows and 995 unique,
