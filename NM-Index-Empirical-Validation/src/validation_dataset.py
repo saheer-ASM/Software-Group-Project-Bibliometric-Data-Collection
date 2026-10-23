@@ -3,6 +3,7 @@
 import pandas as pd
 
 from nm_index.loader import load as load_nm
+from .data_quality import stored_nm_flags_complete
 from .eligibility import EligibilityRules, evaluate
 from .metric_registry import REGISTRY
 
@@ -19,6 +20,9 @@ def build(authors: pd.DataFrame, nm: pd.DataFrame, metric_series: dict,
     data = data.merge(load_nm(nm), on='author_id', how='left', validate='one_to_one')
     if components is not None:
         data = data.merge(components, on='author_id', how='left', validate='one_to_one')
+    # Reported for interpretation only; eligibility still uses the six stored percentiles.
+    data['nm_stored_calculation_complete'] = data.author_id.map(
+        stored_nm_flags_complete(components)).astype('boolean')
     data['nm_index_available'] = data.nm_index.notna()
     for name in BASELINE_COLUMNS:
         values = metric_series.get(name)

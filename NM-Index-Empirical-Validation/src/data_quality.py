@@ -14,6 +14,21 @@ def authorship_pairs(frame):
     return pd.DataFrame(rows, columns=['author_id', 'pub_id', 'position', 'contribution_weight'])
 
 
+def stored_nm_flags_complete(components):
+    """Per-author production completeness of stored NM components.
+
+    True when every available flag is set, False when any is unset, NA when the
+    source has no flags. Booleans and 0/1 integers are both accepted.
+    """
+    flags = [column for column in components if column.startswith('nm_flag_')] if components is not None else []
+    if not flags:
+        return pd.Series(pd.NA, index=pd.Index([] if components is None else components.author_id),
+                         dtype='boolean')
+    values = components.set_index('author_id')[flags].apply(lambda column: pd.to_numeric(
+        column.map(lambda value: int(value) if isinstance(value, bool) else value), errors='coerce'))
+    return values.eq(1).all(axis=1).astype('boolean').where(values.notna().all(axis=1))
+
+
 def check(extracts):
     a, p, n = extracts.authors, extracts.publications, extracts.nm
     links = authorship_pairs(extracts.authorship)
@@ -44,6 +59,9 @@ def check(extracts):
     add('null_nm_scores', n.nm_index.isna().sum(), 'INCOMPLETE', 'Stored NM row with unavailable score')
     add('duplicate_nm_records', n.author_id.duplicated().sum(), 'ERROR', 'Duplicate NM author key')
     add('orphan_nm_records', (~n.author_id.isin(a.author_id)).sum(), 'ERROR', 'NM author absent from author')
+    add('stored_nm_components_flagged_incomplete',
+        stored_nm_flags_complete(extracts.components).eq(False).sum(), 'WARNING',
+        'Production flags a stored NM component calculation incomplete; NM is provisional (not an eligibility rule)')
     edges = extracts.citations.groupby('pub_id').size()
     comparison = p[['pub_id', 'total_citation']].copy()
     comparison['edges'] = comparison.pub_id.map(edges).fillna(0)

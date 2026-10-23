@@ -51,6 +51,16 @@ REQUIRED_COLUMNS = {
 # Publication source text is descriptive only; a database without it reads NULL.
 OPTIONAL_COLUMNS = {('publication', 'source')}
 
+# Production's own completeness flag for each stored NM component that has one
+# (Hf' has only a status label and Hm' none). Reported, never used for eligibility;
+# a database without the column reads NULL.
+COMPLETENESS_FLAGS = {
+    'component_t': ('author_total_cites', 'calculation_complete', 'nm_flag_t'),
+    'component_s': ('author_citations_per_paper', 'calculation_complete', 'nm_flag_s'),
+    'component_u': ('author_citation_rate', 'calculation_complete', 'nm_flag_u'),
+    'component_g': ('modified_g_index_results', 'calculation_complete', 'nm_flag_g'),
+}
+
 REQUIRED_BY = {
     'author': 'all_metrics;RQ10', 'publication': 'raw_total_cites;h_index;g_index',
     'citation': 'citation_quality_audit', 'author_contribution_weight': 'all_raw_baselines;eligibility',
@@ -91,9 +101,13 @@ def verify_schema(schema_rows=None):
 
 
 def _queries(visible):
-    if ('publication', 'source') in visible:
-        return QUERIES
-    return dict(QUERIES, publications=QUERIES['publications'].replace(', source FROM', ', NULL AS source FROM'))
+    queries = dict(QUERIES)
+    if ('publication', 'source') not in visible:
+        queries['publications'] = queries['publications'].replace(', source FROM', ', NULL AS source FROM')
+    for name, (table, column, alias) in COMPLETENESS_FLAGS.items():
+        source = column if (table, column) in visible else 'NULL'
+        queries[name] = queries[name].replace(' FROM public.', f', {source} AS {alias} FROM public.', 1)
+    return queries
 
 
 def load_all(*, query=execute_select):
@@ -177,7 +191,8 @@ def _assemble(records):
         source = frames.pop(name)
         if source.author_id.duplicated().any():
             raise ValueError(f'Duplicate stored NM component author_id in {name}')
-        components = components.merge(source[['author_id', original]].rename(columns={original: renamed}),
+        flags = [column for column in source if column.startswith('nm_flag_')]
+        components = components.merge(source[['author_id', original, *flags]].rename(columns={original: renamed}),
                                       on='author_id', how='left', validate='one_to_one')
     frames['components'] = components
     return Extracts(**frames)

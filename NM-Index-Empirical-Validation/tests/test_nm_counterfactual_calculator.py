@@ -191,6 +191,55 @@ class NMEquationTests(unittest.TestCase):
         self.assertNotEqual(gift['original_nm_index'], gift['manipulated_nm_index'])
         pd.testing.assert_frame_equal(papers, before)
 
+    def test_canonical_bundle_schema_without_legacy_field_runs_salami_and_gift(self):
+        # The handover papers.csv contract carries field_weights only, never `field`.
+        papers, edges, frozen = fixture()
+        papers = papers.drop(columns='field')
+        assignments = pd.DataFrame({'citation_id': ['E0', 'E1'],
+                                    'half': [1, 2], 'citing_half': [None, 1]})
+        graph = AuthorGraphInput(papers=papers, edges=edges, career_start_year=2020,
+                                 salami_assignments=assignments)
+        scenarios, _ = run_author_graph('TEST_A', graph, frozen, NMParameters(as_of_year=2025))
+        self.assertEqual(scenarios.set_index('scenario').loc[
+            'salami_double_papers_half_citations', 'status'], 'OK')
+        gift_papers = pd.DataFrame([
+            dict(pub_id=f'P{i}', authors=('TEST_A','TEST_B'), year=2020,
+                 field_weights={'F': 1.}, contribution_mode='uniform',
+                 total_citation=0) for i in range(10)] +
+            [dict(pub_id=f'G{i}', authors=('TEST_B','TEST_C'), year=2021,
+                  field_weights={'F': 1.}, contribution_mode='uniform',
+                  total_citation=0) for i in range(3)])
+        graph = AuthorGraphInput(papers=gift_papers, edges=edges.iloc[:0],
+            career_start_year=2020, gift_assignments=pd.DataFrame(
+                {'pub_id': [f'G{i}' for i in range(3)], 'position': [2]*3}))
+        scenarios, _ = run_author_graph('TEST_A', graph, frozen, NMParameters(as_of_year=2025))
+        self.assertEqual(scenarios.set_index('scenario').loc[
+            'gift_authorship_plus_30_percent', 'status'], 'OK')
+
+    def test_combined_manipulation_is_explicitly_pending_not_composed(self):
+        papers, edges, frozen = fixture()
+        graph = AuthorGraphInput(papers=papers, edges=edges, career_start_year=2020)
+        scenarios, baselines = run_author_graph('TEST_A', graph, frozen,
+                                                NMParameters(as_of_year=2025))
+        combined = scenarios.set_index('scenario').loc['combined']
+        self.assertEqual(combined['status'], 'METHODOLOGY_PENDING')
+        self.assertTrue(pd.isna(combined['manipulated_nm_percentile']))
+        self.assertFalse(pd.isna(combined['original_nm_percentile']))
+        self.assertTrue(baselines.loc[baselines.scenario.eq('combined'), 'status']
+                        .eq('METHODOLOGY_PENDING').all())
+        self.assertEqual(set(baselines.loc[baselines.scenario.eq('combined'), 'metric']),
+                         {'raw_total_cites', 'h_index', 'hf_index', 'g_index',
+                          'hm_index', 'c_score_raw'})
+        result = run_rq07(pd.DataFrame({'author_id': ['TEST_A', 'TEST_B']}), [],
+            graph_inputs={'TEST_A': graph}, frozen_benchmarks=frozen,
+            nm_parameters=NMParameters(as_of_year=2025))
+        output = result['gaming_resistance']
+        self.assertEqual(output.groupby('author_id').size().to_dict(), {'TEST_A': 4, 'TEST_B': 4})
+        self.assertTrue(output.loc[output.scenario.eq('combined'), 'status']
+                        .eq('METHODOLOGY_PENDING').all())
+        self.assertEqual(result['status'].iloc[0]['status'], 'INPUT_DATA_REQUIRED')
+        self.assertIn('combined', result['status'].iloc[0]['issue'])
+
     def test_local_bundle_loader_uses_fixed_ids_and_no_database(self):
         papers, edges, frozen = fixture()
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temporary:
