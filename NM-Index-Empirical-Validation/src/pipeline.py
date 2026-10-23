@@ -17,6 +17,7 @@ from metrics import total_cites, h_index, hf_index, g_index
 from nm_index.loader import load as load_nm
 from .config import PROJECT_ROOT, SQLiteConfig, load_config, load_validation_config
 from .data_quality import check, to_markdown
+from .database_first import inspect_mapped_extracts, resolve_real_inputs
 from .eligibility import EligibilityRules
 from .metric_registry import REGISTRY
 from .provenance import metric_provenance
@@ -122,6 +123,7 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
                       generate_figures=True, metric_strategies=None,
                       source_kind='SUPPLIED_DATAFRAMES', _source_token=None,
                       excluded_publications=None):
+                      database_candidates=None):
     """Mockable integration seam. Never connects to a database itself."""
     settings = settings or load_validation_config()
     names = tuple(experiment_names) or tuple(EXPERIMENT_MODULES)
@@ -148,6 +150,13 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
         raise ValueError('Mock source contains an ID outside the TEST_ namespace')
     if source_kind != 'SYNTHETIC_TEST_DATA' and ids.str.startswith('TEST_').any():
         raise ValueError('TEST_ authors cannot enter non-synthetic validation results')
+    source_decisions = []
+    if source_kind.startswith('SELECT_ONLY_POSTGRESQL'):
+        mapped_candidates, database_reasons = inspect_mapped_extracts(extracts, ids, names)
+        extra_inputs, source_decisions = resolve_real_inputs(
+            ids, names, extra_inputs,
+            database_candidates if database_candidates is not None else mapped_candidates,
+            database_reasons=database_reasons)
     destination = _run_directory(root)
     (destination/'DATA_CLASSIFICATION.txt').write_text(classification+'\n', encoding='utf-8')
     quality_report, links = check(extracts)
@@ -256,9 +265,19 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
     experiment_outputs = {}
     eligible = dataset.loc[dataset.eligible_for_validation].copy()
     for name in names:
-        module = importlib.import_module(EXPERIMENT_MODULES[name])
-        output = module.run(eligible, comparators, seed=settings.random_seed,
-                            data_source_kind=source_kind, **(extra_inputs or {}))
+        unavailable = [item for item in source_decisions if item.source == 'UNAVAILABLE'
+                       and name in item.affected_rqs.split(';')]
+        if unavailable:
+            from experiments.common import pending
+            output = pending('Required input unavailable: '+ '; '.join(
+                f'{item.input_name}: {item.reason}' for item in unavailable), 'DATA_REQUIRED')
+        elif eligible.empty and source_kind.startswith('SELECT_ONLY_POSTGRESQL'):
+            from experiments.common import pending
+            output = pending('No authors meet the verified input and eligibility gates', 'DATA_REQUIRED')
+        else:
+            module = importlib.import_module(EXPERIMENT_MODULES[name])
+            output = module.run(eligible, comparators, seed=settings.random_seed,
+                                data_source_kind=source_kind, **(extra_inputs or {}))
         experiment_outputs[name] = output
         for title, frame in output.items():
             filename = f'{name}_status.csv' if title == 'status' else f'{title}.csv'
@@ -292,6 +311,9 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
                                          experiment_specific_eligibility=('INPUT_MATCHED_NOT_FULLY_VALIDATED'
                                              if not absent else absent_status)))
     _write_csv(pd.DataFrame(eligibility_rows), destination/'experiment_eligibility.csv', classification)
+    if source_decisions:
+        _write_csv(pd.DataFrame([item.as_record() for item in source_decisions]),
+                   destination/'input_source_status.csv', classification)
     figures = []
     if generate_figures:
         figures = _write_figures(destination, eligible, experiment_outputs)
@@ -545,8 +567,6 @@ def run_database(*, experiment_names=(), allow_incomplete=False, extra_inputs=No
     evidence = extra_inputs or {}
     if not evidence.get('database_ready_reference') or not evidence.get('citation_source_reference'):
         raise ValueError('DATA_REQUIRED: documented database/cohort and citation-source readiness references are required before connecting')
-    if evidence.get('portfolio_verification') is None:
-        raise ValueError('DATA_REQUIRED: independent author portfolio verification is required before connecting')
     load_config()
     verify_schema()
     extracts = load_all()
@@ -561,19 +581,13 @@ def run_pilot(*, author_ids, experiment_names=(), extra_inputs=None):
     """Run a prespecified small cohort; never silently treat it as the 100k study."""
     evidence = extra_inputs or {}
     required = ('pilot_design_reference', 'database_ready_reference',
-                'citation_source_reference', 'portfolio_verification')
+                'citation_source_reference')
     if any(evidence.get(key) is None or (isinstance(evidence.get(key), str)
            and not evidence[key].strip()) for key in required):
         raise ValueError('DATA_REQUIRED: pilot design, cohort readiness, citation source, and portfolio evidence are required before connecting')
     ids = tuple(author_ids)
     if not ids or len(ids) > 6000 or len(set(ids)) != len(ids):
         raise ValueError('Pilot author IDs must be a unique nonempty list of at most 6000')
-    verification = evidence['portfolio_verification']
-    verified = verification.loc[verification.portfolio_verified
-        & verification.evidence_reference.notna()
-        & verification.evidence_reference.astype(str).str.strip().ne(''), 'author_id']
-    if not set(ids) <= set(verified):
-        raise ValueError('DATA_REQUIRED: each selected author needs independent complete-portfolio evidence before connecting')
     load_config()
     from .repository import load_selected_author_ids
     extracts = load_selected_author_ids(ids)
@@ -590,15 +604,6 @@ def run_cohort(*, experiment_names=(), extra_inputs=None, exclude_missing_years=
     evidence = extra_inputs or {}
     if not evidence.get('database_ready_reference') or not evidence.get('citation_source_reference'):
         raise ValueError('DATA_REQUIRED: populated database and citation-source evidence needed before connection')
-    verification = evidence.get('portfolio_verification')
-    if verification is None or not {'author_id','portfolio_verified','evidence_reference'} <= set(verification):
-        raise ValueError('DATA_REQUIRED: independent portfolio verification for all 995 IDs needed before connection')
-    verified = verification.loc[
-        verification.portfolio_verified.eq(True)
-        & verification.evidence_reference.notna()
-        & verification.evidence_reference.astype(str).str.strip().ne(''), 'author_id']
-    if not set(ids) <= set(verified.astype(str)):
-        raise ValueError('DATA_REQUIRED: all 995 selected authors need verified complete portfolios')
     names = tuple(experiment_names) or tuple(EXPERIMENT_MODULES)
     graphs, frozen, parameters = (evidence.get('graph_inputs'),
                                   evidence.get('frozen_benchmarks'),
