@@ -4,6 +4,19 @@ const pool = require('../config/database');
 const router = express.Router();
 const numeric = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
+// The selected authors' publications. The ten author slots have no index, so
+// this is a full scan of author_contribution_weight. In SQLite CROSS JOIN
+// fixes the join order: that table is scanned once (not once per author),
+// each row is checked against the MATERIALIZED authors, and only the rows
+// that match are looked up in publication.
+const SELECTED_PUBLICATIONS_SQL = `
+  FROM author_contribution_weight acw
+  CROSS JOIN selected_authors selected
+  CROSS JOIN publication p ON p.pub_id = acw.pub_id
+  WHERE selected.author_id IN (acw.author1id, acw.author2id, acw.author3id,
+    acw.author4id, acw.author5id, acw.author6id, acw.author7id,
+    acw.author8id, acw.author9id, acw.author10id)`;
+
 router.get('/', async (req, res) => {
   const authorIds = String(req.query.authorIds || '')
     .split(',')
@@ -17,36 +30,30 @@ router.get('/', async (req, res) => {
 
   try {
     const summaryResult = await pool.query(
-      `WITH selected_authors AS (
-         SELECT id AS author_id, position
-         FROM unnest($1::text[]) WITH ORDINALITY AS selected(id, position)
+      `WITH selected_authors AS MATERIALIZED (
+         SELECT value AS author_id, key + 1 AS position
+         FROM json_each(?1)
        ),
-       author_publications AS (
+       author_publications AS MATERIALIZED (
          SELECT selected.author_id, selected.position, p.pub_id,
-           COALESCE(p.total_citation, 0)::numeric AS total_citation
-         FROM selected_authors selected
-         JOIN public.author_contribution_weight acw
-           ON selected.author_id = ANY(ARRAY[acw.author1id, acw.author2id, acw.author3id,
-             acw.author4id, acw.author5id, acw.author6id, acw.author7id,
-             acw.author8id, acw.author9id, acw.author10id])
-         JOIN public.publication p ON p.pub_id = acw.pub_id
+           COALESCE(p.total_citation, 0) AS total_citation
+         ${SELECTED_PUBLICATIONS_SQL}
        ),
        publication_totals AS (
          SELECT ap.author_id,
-           COUNT(*)::int AS publications,
+           COUNT(*) AS publications,
            COALESCE(SUM(ap.total_citation), 0) AS citations,
            COALESCE(SUM(apac.total_adjusted_citation), 0) AS adjusted_citations
          FROM author_publications ap
-         LEFT JOIN public.author_paper_adjusted_citations apac
+         LEFT JOIN author_paper_adjusted_citations apac
            ON apac.cited_pub_id = ap.pub_id AND apac.target_author_id = ap.author_id
          GROUP BY ap.author_id
        ),
        self_citation_totals AS (
          SELECT ap.author_id,
-           COUNT(DISTINCT (isc.cited_pub_id, isc.citing_pub_id))
-             FILTER (WHERE isc.citing_pub_id IS NOT NULL)::int AS self_citations
+           COUNT(DISTINCT isc.cited_pub_id || '|' || isc.citing_pub_id) AS self_citations
          FROM author_publications ap
-         LEFT JOIN public.influential_self_citations isc
+         LEFT JOIN influential_self_citations isc
            ON isc.cited_pub_id = ap.pub_id
           AND isc.target_author_id = ap.author_id
           AND isc.isc_value > 0
@@ -61,59 +68,64 @@ router.get('/', async (req, res) => {
          total_cites.career_factor,
          nm.nm_index
        FROM selected_authors selected
-       JOIN public.author author ON author.author_id = selected.author_id
+       JOIN author author ON author.author_id = selected.author_id
        LEFT JOIN publication_totals totals ON totals.author_id = selected.author_id
        LEFT JOIN self_citation_totals self_totals ON self_totals.author_id = selected.author_id
-       LEFT JOIN public.author_total_cites total_cites ON total_cites.author_id = selected.author_id
-       LEFT JOIN public.author_nm_index nm ON nm.author_id = selected.author_id
+       LEFT JOIN author_total_cites total_cites ON total_cites.author_id = selected.author_id
+       LEFT JOIN author_nm_index nm ON nm.author_id = selected.author_id
        ORDER BY selected.position`,
-      [uniqueAuthorIds]
+      [JSON.stringify(uniqueAuthorIds)]
     );
 
     if (summaryResult.rows.length !== uniqueAuthorIds.length) {
       return res.status(404).json({ message: 'One or more selected authors were not found.' });
     }
 
+    // The CROSS JOINs below make SQLite start from the selected publications
+    // and look up their citations, rather than scan the whole citation and
+    // influential_self_citations tables. The yearly h-index is a correlated
+    // subquery per (author, year), as SQLite has no LATERAL join;
+    // total_citation comes along in selected_publications instead of through
+    // a second join to publication. DESC NULLS FIRST is PostgreSQL's default
+    // order, which SQLite reverses.
     const trendResult = await pool.query(
-      `WITH selected_publications AS (
-         SELECT selected.author_id, p.pub_id, p.year
-         FROM unnest($1::text[]) AS selected(author_id)
-         JOIN public.author_contribution_weight acw
-           ON selected.author_id = ANY(ARRAY[acw.author1id, acw.author2id, acw.author3id,
-             acw.author4id, acw.author5id, acw.author6id, acw.author7id,
-             acw.author8id, acw.author9id, acw.author10id])
-         JOIN public.publication p ON p.pub_id = acw.pub_id
+      `WITH selected_authors AS MATERIALIZED (
+         SELECT value AS author_id FROM json_each(?1)
+       ),
+       selected_publications AS MATERIALIZED (
+         SELECT selected.author_id, p.pub_id, p.year, p.total_citation
+         ${SELECTED_PUBLICATIONS_SQL}
        ),
        publication_years AS (
-         SELECT author_id, year, COUNT(*)::int AS publications
+         SELECT author_id, year, COUNT(*) AS publications
          FROM selected_publications WHERE year IS NOT NULL GROUP BY author_id, year
        ),
        citation_years AS (
          SELECT selected.author_id, citing.year,
-           COUNT(DISTINCT (citation.pub_id, citation.cites_pub_id))::int AS citations
+           COUNT(DISTINCT citation.pub_id || '|' || citation.cites_pub_id) AS citations
          FROM selected_publications selected
-         JOIN public.citation citation ON citation.pub_id = selected.pub_id
-         JOIN public.publication citing ON citing.pub_id = citation.cites_pub_id
+         CROSS JOIN citation citation ON citation.pub_id = selected.pub_id
+         CROSS JOIN publication citing ON citing.pub_id = citation.cites_pub_id
          WHERE citing.year IS NOT NULL GROUP BY selected.author_id, citing.year
        ),
        adjusted_years AS (
          SELECT selected.author_id, citing.year,
            COALESCE(SUM(isc.adjusted_citation), 0) AS adjusted_citations
          FROM selected_publications selected
-         JOIN public.influential_self_citations isc
+         CROSS JOIN influential_self_citations isc
            ON isc.cited_pub_id = selected.pub_id AND isc.target_author_id = selected.author_id
-         JOIN public.publication citing ON citing.pub_id = isc.citing_pub_id
+         CROSS JOIN publication citing ON citing.pub_id = isc.citing_pub_id
          WHERE citing.year IS NOT NULL GROUP BY selected.author_id, citing.year
        ),
        self_citation_years AS (
          SELECT selected.author_id, citing.year,
-           COUNT(DISTINCT (isc.cited_pub_id, isc.citing_pub_id))::int AS self_citations
+           COUNT(DISTINCT isc.cited_pub_id || '|' || isc.citing_pub_id) AS self_citations
          FROM selected_publications selected
-         JOIN public.influential_self_citations isc
+         CROSS JOIN influential_self_citations isc
            ON isc.cited_pub_id = selected.pub_id
           AND isc.target_author_id = selected.author_id
           AND isc.isc_value > 0
-         JOIN public.publication citing ON citing.pub_id = isc.citing_pub_id
+         CROSS JOIN publication citing ON citing.pub_id = isc.citing_pub_id
          WHERE citing.year IS NOT NULL GROUP BY selected.author_id, citing.year
        ),
        keys AS (
@@ -127,25 +139,21 @@ router.get('/', async (req, res) => {
          COALESCE(citation_years.citations, 0) AS citations,
          COALESCE(adjusted_years.adjusted_citations, 0) AS adjusted_citations,
          COALESCE(self_citation_years.self_citations, 0) AS self_citations,
-         COALESCE(yearly_h.h_index, 0) AS h_index
+         (SELECT COALESCE(MAX(citation_rank), 0)
+          FROM (
+            SELECT total_citation,
+              ROW_NUMBER() OVER (ORDER BY total_citation DESC NULLS FIRST) AS citation_rank
+            FROM selected_publications publications
+            WHERE publications.author_id = keys.author_id AND publications.year <= keys.year
+          ) ranked
+          WHERE total_citation >= citation_rank) AS h_index
        FROM keys
        LEFT JOIN publication_years USING (author_id, year)
        LEFT JOIN citation_years USING (author_id, year)
        LEFT JOIN adjusted_years USING (author_id, year)
        LEFT JOIN self_citation_years USING (author_id, year)
-       LEFT JOIN LATERAL (
-         SELECT COALESCE(MAX(citation_rank), 0)::int AS h_index
-         FROM (
-           SELECT total_citation,
-             ROW_NUMBER() OVER (ORDER BY total_citation DESC)::int AS citation_rank
-           FROM selected_publications publications
-           JOIN public.publication paper ON paper.pub_id = publications.pub_id
-           WHERE publications.author_id = keys.author_id AND publications.year <= keys.year
-         ) ranked
-         WHERE total_citation >= citation_rank
-       ) yearly_h ON TRUE
        ORDER BY keys.year`,
-      [uniqueAuthorIds]
+      [JSON.stringify(uniqueAuthorIds)]
     );
 
     const trendsByAuthor = new Map(uniqueAuthorIds.map((id) => [id, []]));

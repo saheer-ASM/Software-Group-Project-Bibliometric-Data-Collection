@@ -28,7 +28,10 @@ COPY frontend/package.json frontend/package-lock.json ./
 # concurrent sockets plus retries makes the install survive it.
 RUN npm config set fetch-retries 5  && npm config set fetch-retry-maxtimeout 120000  && npm config set maxsockets 3
 
-RUN npm ci
+# npm's cache is a BuildKit cache mount, kept between builds: a build that
+# fails part-way on this slow network, or any rebuild, reuses every package
+# already downloaded instead of fetching them all again.
+RUN --mount=type=cache,target=/root/.npm npm ci --prefer-offline --no-audit --no-fund
 
 COPY frontend/ ./
 

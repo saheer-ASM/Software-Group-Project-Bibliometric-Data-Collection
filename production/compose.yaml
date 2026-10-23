@@ -1,14 +1,15 @@
 # Production stack for ScholarMetrics.
 #
-#   Internet -> Cloudflare Tunnel -> nginx :80 -> frontend | backend -> PostgreSQL
+#   Internet -> Cloudflare Tunnel -> nginx :80 -> frontend | backend -> openalex.db
 #
 # Run from the REPOSITORY ROOT; all values come from production/.env:
 #
 #   docker compose --env-file production/.env -f production/compose.yaml up -d --build
 #
-# PostgreSQL is a REMOTE AWS server and is deliberately NOT a service here. The
-# backend container dials it directly over the internet; it is never routed
-# through nginx or the Cloudflare Tunnel.
+# The database is the OpenAlex pipeline's local SQLite file on this PC,
+# OpenAlex_Data_Collection/database/openalex.db, and is deliberately NOT a
+# service here. The backend container reads it in place through a read-only
+# bind mount; it is never routed through nginx or the Cloudflare Tunnel.
 #
 # Only `nginx` publishes a host port. frontend and backend are reachable solely
 # over the internal `appnet` bridge, by service name.
@@ -78,22 +79,10 @@ services:
       # and would make nginx unable to reach it.
       HOST: 0.0.0.0
 
-      # --- PostgreSQL: remote AWS server, outside this stack -----------
-      # Names match backend/config/database.js exactly -- no renaming, no
-      # production-only aliases. Values come from production/.env.
-      # Every setting is required: an empty one is a compose error here, not
-      # a silent fallback to localhost inside the container.
-      DB_HOST: ${DB_HOST:?DB_HOST must be set in production/.env}
-      DB_PORT: ${DB_PORT:-5432}
-      DB_NAME: ${DB_NAME:?DB_NAME must be set in production/.env}
-      DB_USER: ${DB_USER:?DB_USER must be set in production/.env}
-      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in production/.env}
-      # Empty => TLS without certificate verification, which is what the
-      # remote AWS instance expects. "require" is the same, stated explicitly.
-      # "verify-full" also checks the certificate (needs the RDS CA bundle and
-      # the RDS endpoint name). "disable" turns TLS off -- only ever for a
-      # database on this machine.
-      DB_SSLMODE: ${DB_SSLMODE-}
+      # --- Bibliometric data: the local SQLite file -------------------
+      # Where the volume below puts it. The backend opens it read-only too,
+      # so nothing in this stack can change the data.
+      OPENALEX_DB_PATH: /data/openalex.db
 
       # --- auth tokens ------------------------------------------------
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in production/.env}
@@ -107,10 +96,16 @@ services:
       # still sends Origin on POST, and the original allow-list only accepted
       # http://localhost:<port> -- which would reject your real domain.
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+    volumes:
+      # The folder, not just the file: SQLite also looks for the journal file
+      # a pipeline script keeps next to the database while it writes. Docker
+      # Desktop reads Windows drives more slowly than Node on the host does,
+      # so the first queries after a start are slower than with `npm start`.
+      - ../OpenAlex_Data_Collection/database:/data:ro
     healthcheck:
-      # /api/health is defined in server.js and returns 503 when the remote
-      # PostgreSQL or Firebase Admin is unreachable, so nginx only starts once
-      # the backend can actually serve requests.
+      # /api/health is defined in server.js and returns 503 when the database
+      # or Firebase Admin is unavailable, so nginx only starts once the
+      # backend can actually serve requests.
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5005/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
