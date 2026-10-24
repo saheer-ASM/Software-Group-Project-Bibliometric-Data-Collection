@@ -1,5 +1,6 @@
 const express = require('express');
-const admin = require('firebase-admin');
+const { getApps } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 const authMiddleware = require('../middleware/auth');
 const userStore = require('../services/firebaseUserStore');
 const sessionToken = require('../services/sessionToken');
@@ -42,9 +43,9 @@ function sendError(res, err, fallbackMessage) {
 // are unchanged, since their email is vouched for by the provider.
 async function verifyFirebaseToken(idToken, { requireVerifiedEmail = true } = {}) {
   if (!idToken) throw httpError(400, 'Firebase token is required');
-  if (!admin.apps.length) throw httpError(503, 'Firebase admin is not configured on the backend');
+  if (!getApps().length) throw httpError(503, 'Firebase admin is not configured on the backend');
 
-  const decoded = await admin.auth().verifyIdToken(idToken);
+  const decoded = await getAuth().verifyIdToken(idToken);
   if (!decoded.email) throw httpError(400, 'No email in token');
 
   // Google sign-ins always carry email_verified: true (Google owns the address),
@@ -59,7 +60,7 @@ async function verifyFirebaseToken(idToken, { requireVerifiedEmail = true } = {}
 // True while the Firebase Auth user still exists.
 async function firebaseUserExists(uid) {
   try {
-    await admin.auth().getUser(uid);
+    await getAuth().getUser(uid);
     return true;
   } catch (err) {
     if (err.code === 'auth/user-not-found') return false;
@@ -119,9 +120,9 @@ function createIncompleteProfile(decoded) {
 // Email/password records are never touched.
 async function removeUnregisteredGoogleUser(uid) {
   try {
-    const firebaseUser = await admin.auth().getUser(uid);
+    const firebaseUser = await getAuth().getUser(uid);
     const providers = firebaseUser.providerData.map((p) => p.providerId);
-    if (!providers.includes('password')) await admin.auth().deleteUser(uid);
+    if (!providers.includes('password')) await getAuth().deleteUser(uid);
   } catch (err) {
     console.warn('Could not remove unregistered Firebase user:', err.message);
   }
@@ -140,7 +141,7 @@ const profileSummary = (user) => ({ username: user.username, email: user.email, 
 // Verification is Firebase's own emailVerified on the user record, never a
 // value sent by the browser.
 async function registrationState(user, uid) {
-  const firebaseUser = await admin.auth().getUser(uid);
+  const firebaseUser = await getAuth().getUser(uid);
   const hasPassword = firebaseUser.providerData.some((p) => p.providerId === 'password');
   const verified = firebaseUser.emailVerified === true;
 

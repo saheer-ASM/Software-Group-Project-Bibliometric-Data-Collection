@@ -4,7 +4,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const admin = require('firebase-admin');
+const { getApps } = require('firebase-admin/app');
 const pool = require('./config/database');
 const authRoutes = require('./routes/auth');
 const authorRoutes = require('./routes/authors');
@@ -105,7 +105,7 @@ app.get('/api/health', async (_req, res) => {
 
   const dependencies = {
     database,
-    firebaseAdmin: admin.apps.length ? 'configured' : 'not_configured',
+    firebaseAdmin: getApps().length ? 'configured' : 'not_configured',
   };
   const healthy = Object.values(dependencies).every((value) =>
     value === 'connected' || value === 'configured');

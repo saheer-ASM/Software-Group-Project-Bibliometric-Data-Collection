@@ -36,7 +36,9 @@ const fakeAdmin = {
     async deleteUser(uid) { firebaseUsers.delete(uid); },
   }),
 };
-stub(require.resolve('firebase-admin', { paths: [backend] }), fakeAdmin);
+// The modules routes/auth.js loads (firebase-admin's modular API).
+stub(require.resolve('firebase-admin/app', { paths: [backend] }), { getApps: () => fakeAdmin.apps });
+stub(require.resolve('firebase-admin/auth', { paths: [backend] }), { getAuth: fakeAdmin.auth });
 stub(require.resolve(path.join(backend, 'config/firebase')), null);
 
 const userStore = require(path.join(backend, 'services/firebaseUserStore'));
