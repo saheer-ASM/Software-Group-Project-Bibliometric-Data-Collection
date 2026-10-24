@@ -8,8 +8,8 @@ const { AUTHOR_ID_PATTERN } = require('../services/libraryAuthors');
 const router = express.Router();
 
 // Every author lookup here scans author_contribution_weight (about 3M rows)
-// and blocks the process while it runs, so: signed-in users only, within the
-// shared search budget. The Data Explorer is a signed-in page and sends its
+// and holds a database worker while it runs, so: signed-in users only, within
+// the shared search budget. The Data Explorer is a signed-in page and sends its
 // session token.
 router.use(authMiddleware, heavyQueryLimit);
 const numeric = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
@@ -91,14 +91,16 @@ async function tableColumns(client, table) {
 }
 
 // Every publication of the author, as the JSON array AUTHOR_PUBLICATIONS_SQL
-// reads.
+// reads. Cached until the database changes, so "Load More" and filter changes
+// for the same author do not repeat the full scan.
 async function fetchAuthorPublicationIds(client, authorId) {
   const result = await client.query(
     `SELECT p.pub_id
      FROM author_contribution_weight acw
      JOIN publication p ON p.pub_id = acw.pub_id
      WHERE ${AUTHOR_MATCH_SQL}`,
-    [authorId]
+    [authorId],
+    { cache: true }
   );
   return JSON.stringify(result.rows.map((row) => row.pub_id));
 }

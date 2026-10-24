@@ -6,8 +6,8 @@ const { AUTHOR_ID_PATTERN } = require('../services/libraryAuthors');
 
 const router = express.Router();
 
-// A comparison scans author_contribution_weight and blocks the process while
-// it runs: signed-in users only, within the shared search budget.
+// A comparison scans author_contribution_weight and holds a database worker
+// while it runs: signed-in users only, within the shared search budget.
 router.use(authMiddleware, heavyQueryLimit);
 const numeric = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 

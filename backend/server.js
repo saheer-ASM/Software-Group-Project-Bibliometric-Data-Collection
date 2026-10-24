@@ -74,8 +74,9 @@ let lastDatabaseFailure = null;
 async function checkDatabase() {
   try {
     // Reads a real table: SELECT 1 alone would succeed even when the path
-    // points at a file that is not this database.
-    await pool.query('SELECT 1 FROM author LIMIT 1');
+    // points at a file that is not this database. Goes ahead of queued
+    // searches, so a busy pool does not read as a dead database.
+    await pool.query('SELECT 1 FROM author LIMIT 1', [], { priority: true });
     if (lastDatabaseFailure !== null) {
       console.log(`[db] database ${pool.dbTarget} is readable again`);
       lastDatabaseFailure = null;

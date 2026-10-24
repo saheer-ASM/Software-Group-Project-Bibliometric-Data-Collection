@@ -6,8 +6,8 @@ const { parseAuthorQuery } = require('../services/authorQuery');
 
 const router = express.Router();
 
-// Name lookups scan the whole author table and block the process while they
-// run: signed-in users only, within the shared search budget.
+// Name lookups scan the whole author table and hold a database worker while
+// they run: signed-in users only, within the shared search budget.
 router.use(authMiddleware, heavyQueryLimit);
 
 // GET /api/authors?q=<name>

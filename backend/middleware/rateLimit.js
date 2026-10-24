@@ -81,8 +81,8 @@ const rateLimit = createRateLimit({
 });
 
 // The routes that scan the bibliometric tables (search, compare, author
-// suggestions). Each such query blocks the process for its whole run -- the
-// SQLite driver is synchronous -- so they get a much smaller budget, shared
+// suggestions). Each such query holds one of the few database workers for its
+// whole run (config/database.js), so they get a much smaller budget, shared
 // between them. Mounted after authMiddleware, so it counts per account: one
 // account cannot spread its requests over several addresses.
 const heavyQueryLimit = createRateLimit({
