@@ -51,24 +51,47 @@ async function verifyFirebaseToken(idToken, { requireVerifiedEmail = true } = {}
   return decoded;
 }
 
+// True while the Firebase Auth user still exists.
+async function firebaseUserExists(uid) {
+  try {
+    await admin.auth().getUser(uid);
+    return true;
+  } catch (err) {
+    if (err.code === 'auth/user-not-found') return false;
+    throw err;
+  }
+}
+
 // One profile per Firebase account. Firebase links Google and email/password
 // for the same email into ONE uid, so look the profile up by uid first, then by
 // email (accounts created before uids were stored). Never creates a profile.
+//
+// Only a VERIFIED email proves the caller owns a profile found by email:
+// anyone can create an unverified Firebase account with somebody else's
+// address. So an unverified token never claims a profile by email and never
+// writes anything. A verified one may claim a profile whose Firebase account
+// no longer exists, but never one that another live account still holds.
 async function findProfile(decoded) {
+  const verified = decoded.email_verified === true;
   let user = await userStore.findByFirebaseUid(decoded.uid);
-  if (!user) user = await userStore.findByEmail(decoded.email);
-  if (!user) return null;
+  if (!user) {
+    const byEmail = await userStore.findByEmail(decoded.email);
+    if (!byEmail) return null;
+    if (!verified || (byEmail.firebaseUid && await firebaseUserExists(byEmail.firebaseUid))) {
+      throw httpError(409, 'An account already exists with this email address.');
+    }
+    user = byEmail;
+  }
+  if (!verified) return user;
 
   const updates = {};
-  // The token proves ownership of this verified email, so it is safe to point
-  // the profile at the current Firebase uid.
+  // The verified email proves ownership, so the profile can point at the
+  // current Firebase uid.
   if (user.firebaseUid !== decoded.uid) updates.firebaseUid = decoded.uid;
   // Keep the stored email equal to the verified Firebase email (repairs profiles
   // edited before the email became read-only).
   if (user.email !== decoded.email.toLowerCase()) updates.email = decoded.email;
-  if (user.emailVerified !== (decoded.email_verified === true)) {
-    updates.emailVerified = decoded.email_verified === true;
-  }
+  if (user.emailVerified !== true) updates.emailVerified = true;
   return Object.keys(updates).length ? userStore.updateUser(user.id, updates) : user;
 }
 
@@ -372,7 +395,8 @@ router.post('/reset-password', async (req, res) => {
   try {
     const decoded = await verifyFirebaseToken(req.body.idToken);
 
-    const user = await userStore.findByEmail(decoded.email);
+    // Same ownership rules as sign-in: never a profile another live account holds.
+    const user = await findProfile(decoded);
     if (!user) return res.status(404).json({ message: 'No account found for this email' });
 
     sendSession(res, await revokeSessions(user, { password: null }));
