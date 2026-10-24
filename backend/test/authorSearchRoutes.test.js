@@ -99,8 +99,19 @@ test('profile lookup by name: short or oversized names never reach the database'
   assert.equal(connects, 0, 'no database connection was opened');
 });
 
-test('profile lookup: a valid name, or any id, is looked up', async () => {
+test('profile lookup: a valid name, or a well-formed id, is looked up', async () => {
   assert.equal((await get(`/api/search?author=${q("  Yi'ang Li ")}`)).status, 404); // reached the (stub) database
   assert.equal((await get('/api/search?authorId=A5050585435&author=A')).status, 404, 'with an id the name is only a label');
   assert.equal(connects, 2);
+});
+
+// Any author id, real or not, costs a full scan of author_contribution_weight,
+// so a malformed one must be refused before the database.
+test('malformed author ids never reach the database', async () => {
+  for (const id of ['x', 'A', 'A12x', '1234', `A${'1'.repeat(21)}`, "A1' OR 1=1"]) {
+    assert.equal((await get(`/api/search?authorId=${q(id)}&author=X`)).status, 400, id);
+    assert.equal((await get(`/api/search/publications?authorId=${q(id)}`)).status, 400, id);
+  }
+  assert.equal((await get('/api/search/publications?authorId=A1&authorId=A2')).status, 400, 'repeated parameter');
+  assert.equal(connects, 0, 'no database connection was opened');
 });

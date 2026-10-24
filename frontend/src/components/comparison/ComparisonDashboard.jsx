@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { API_BASE_URL } from '../../config/api';
+import { API_BASE_URL, authHeaders } from '../../config/api';
 import AuthorSelector from './AuthorSelector';
 import ComparisonChart from './ComparisonChart';
 import MetricComparison from './MetricComparison';
@@ -21,7 +21,9 @@ export default function ComparisonDashboard({ initialAuthor }) {
     setError('');
     try {
       const ids = selectedAuthors.map((author) => author.id).join(',');
-      const response = await fetch(`${API_BASE_URL}/api/compare?authorIds=${encodeURIComponent(ids)}`);
+      const response = await fetch(`${API_BASE_URL}/api/compare?authorIds=${encodeURIComponent(ids)}`, {
+        headers: authHeaders(),
+      });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.message || 'Unable to compare authors.');
       setComparison(payload);
