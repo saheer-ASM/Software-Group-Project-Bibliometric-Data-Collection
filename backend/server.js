@@ -15,6 +15,10 @@ const libraryRoutes = require('./routes/library');
 const rateLimit = require('./middleware/rateLimit');
 
 const app = express();
+// Do not advertise the framework (X-Powered-By: Express). The other security
+// headers are set once, for the whole site, by the edge nginx
+// (production/nginx/default.conf).
+app.disable('x-powered-by');
 
 // Which proxies may report the client address in X-Forwarded-For. Unset (local
 // development, no proxy) leaves req.ip as the socket address. Behind the
