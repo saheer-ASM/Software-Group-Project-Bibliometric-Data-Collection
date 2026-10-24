@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { API_BASE_URL } from '../config/api';
+import { API_BASE_URL, authHeaders } from '../config/api';
 import PublicationCard from './PublicationCard';
 
 /**
@@ -42,7 +42,7 @@ export default function PublicationDetailsDialog({
     }
     const controller = new AbortController();
     const params = new URLSearchParams({ authorId: paper.authorId, pubId: paper.id });
-    fetch(`${API_BASE_URL}/api/search/publications?${params.toString()}`, { signal: controller.signal })
+    fetch(`${API_BASE_URL}/api/search/publications?${params.toString()}`, { signal: controller.signal, headers: authHeaders() })
       .then(async (response) => {
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.message || 'Could not load this publication.');

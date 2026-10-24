@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { API_BASE_URL } from './config/api';
+import { API_BASE_URL, authHeaders } from './config/api';
 import PublicationCard from './components/PublicationCard';
 import {
   AUTHOR_QUERY_MAX, AUTHOR_QUERY_TOO_SHORT, AUTHOR_SUGGESTION_DELAY_MS,
@@ -202,6 +202,7 @@ const DataExplorer = ({
       if (authorIdOverride) params.set('authorId', authorIdOverride);
       const response = await fetch(`${API_BASE_URL}/api/search?${params.toString()}`, {
         signal: controller.signal,
+        headers: authHeaders(),
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
@@ -239,7 +240,9 @@ const DataExplorer = ({
       params.set('authorId', data.authorId);
       params.set('page', String(paging.page + 1));
       params.set('limit', String(paging.limit));
-      const response = await fetch(`${API_BASE_URL}/api/search/publications?${params.toString()}`);
+      const response = await fetch(`${API_BASE_URL}/api/search/publications?${params.toString()}`, {
+        headers: authHeaders(),
+      });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.message || 'Could not load more publications');
@@ -325,7 +328,7 @@ const DataExplorer = ({
         params.set('page', '1');
         const response = await fetch(
           `${API_BASE_URL}/api/search/publications?${params.toString()}`,
-          { signal: controller.signal }
+          { signal: controller.signal, headers: authHeaders() }
         );
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}));
@@ -370,7 +373,9 @@ const DataExplorer = ({
       params.set('authorId', authorId);
       params.set('page', String(page));
       params.set('limit', '50');
-      const response = await fetch(`${API_BASE_URL}/api/search/publications?${params.toString()}`);
+      const response = await fetch(`${API_BASE_URL}/api/search/publications?${params.toString()}`, {
+        headers: authHeaders(),
+      });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.message || 'Could not collect publications for export');

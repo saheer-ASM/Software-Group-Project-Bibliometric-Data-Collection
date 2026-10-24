@@ -1,9 +1,14 @@
 const express       = require('express');
 const authMiddleware = require('../middleware/auth');
+const { heavyQueryLimit } = require('../middleware/rateLimit');
 const authorService  = require('../services/authorSearchService');
 const { parseAuthorQuery } = require('../services/authorQuery');
 
 const router = express.Router();
+
+// Name lookups scan the whole author table and block the process while they
+// run: signed-in users only, within the shared search budget.
+router.use(authMiddleware, heavyQueryLimit);
 
 // GET /api/authors?q=<name>
 router.get('/', async (req, res) => {
@@ -19,7 +24,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/authors/search?name=<name>
-router.get('/search', authMiddleware, async (req, res) => {
+router.get('/search', async (req, res) => {
   const query = parseAuthorQuery(req.query.name);
   if (query.error) return res.status(400).json({ message: query.error });
 
@@ -32,7 +37,7 @@ router.get('/search', authMiddleware, async (req, res) => {
 });
 
 // GET /api/authors/:id?field=<field>&year=<year>
-router.get('/:id', authMiddleware, async (req, res) => {
+router.get('/:id', async (req, res) => {
   const { id } = req.params;
   const { field, year } = req.query;
 

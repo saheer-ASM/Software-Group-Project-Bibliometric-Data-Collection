@@ -1,0 +1,13 @@
+{
+  "name": "modified_hm_index",
+  "version": "1.0.0",
+  "description": "This module calculates the **Modified Hm-index** for authors using a modified Hm-index methodology that considers:",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}

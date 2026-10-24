@@ -79,6 +79,13 @@ services:
       # and would make nginx unable to reach it.
       HOST: 0.0.0.0
 
+      # --- client address ---------------------------------------------
+      # Trust X-Forwarded-For from the edge nginx (a private appnet address),
+      # which sets it to the visitor's real IP (nginx/00-upgrade-map.conf).
+      # Without this every visitor appears as nginx and shares a single
+      # rate-limit counter, so one client could get the whole site a 429.
+      TRUST_PROXY: uniquelocal
+
       # --- Bibliometric data: the local SQLite file -------------------
       # Where the volume below puts it. The backend opens it read-only too,
       # so nothing in this stack can change the data.

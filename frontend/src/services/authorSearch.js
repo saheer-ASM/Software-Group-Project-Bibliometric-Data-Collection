@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '../config/api';
+import { API_BASE_URL, authHeaders } from '../config/api';
 
 // Rules for the author-name searches on the Dashboard and in the Data Explorer.
 // Mirrored on the server in backend/services/authorQuery.js.
@@ -35,7 +35,7 @@ export async function fetchAuthorSuggestions(query, { signal } = {}) {
     cache.set(key, cached); // most recently used last
     return cached;
   }
-  const response = await fetch(`${API_BASE_URL}/api/authors?q=${encodeURIComponent(query)}`, { signal });
+  const response = await fetch(`${API_BASE_URL}/api/authors?q=${encodeURIComponent(query)}`, { signal, headers: authHeaders() });
   if (!response.ok) throw new Error('Author lookup failed');
   const results = await response.json();
   cache.set(key, results);

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { API_BASE_URL } from '../../config/api';
+import { API_BASE_URL, authHeaders } from '../../config/api';
 
 export default function AuthorSelector({ selectedAuthors, onChange, onCompare, loading }) {
   const [query, setQuery] = useState('');
@@ -19,7 +19,7 @@ export default function AuthorSelector({ selectedAuthors, onChange, onCompare, l
       controllerRef.current = controller;
       setSearching(true);
       try {
-        const response = await fetch(`${API_BASE_URL}/api/authors?q=${encodeURIComponent(value)}`, { signal: controller.signal });
+        const response = await fetch(`${API_BASE_URL}/api/authors?q=${encodeURIComponent(value)}`, { signal: controller.signal, headers: authHeaders() });
         if (!response.ok) throw new Error('Author search failed');
         const authors = await response.json();
         setSuggestions(authors.filter((author) => !selectedAuthors.some((item) => item.id === author.id)));

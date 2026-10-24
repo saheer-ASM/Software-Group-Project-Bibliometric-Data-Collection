@@ -1,8 +1,17 @@
 const express = require('express');
 const pool = require('../config/database');
+const authMiddleware = require('../middleware/auth');
+const { heavyQueryLimit } = require('../middleware/rateLimit');
 const { parseAuthorQuery, lowerFunctionFor } = require('../services/authorQuery');
+const { AUTHOR_ID_PATTERN } = require('../services/libraryAuthors');
 
 const router = express.Router();
+
+// Every author lookup here scans author_contribution_weight (about 3M rows)
+// and blocks the process while it runs, so: signed-in users only, within the
+// shared search budget. The Data Explorer is a signed-in page and sends its
+// session token.
+router.use(authMiddleware, heavyQueryLimit);
 const numeric = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
 // SQLite keeps booleans as 0/1 and CURRENT_TIMESTAMP as UTC text
@@ -494,6 +503,9 @@ router.get('/', async (req, res) => {
     if (!authorId && typeof req.query.author !== 'string') {
       return res.status(400).json({ message: 'Author name or ID is required' });
     }
+    if (authorId && !AUTHOR_ID_PATTERN.test(authorId)) {
+      return res.status(400).json({ message: 'authorId must be an author id such as A1234567' });
+    }
     const name = parseAuthorQuery(req.query.author, { required: !authorId });
     if (name.error) return res.status(400).json({ message: name.error });
     const data = await fetchAuthorData(name.value, authorId || undefined);
@@ -512,12 +524,14 @@ router.get('/', async (req, res) => {
 
 // Paginated publications for an author. The Data Explorer calls this for
 // "Load More"; page 1 already arrives with the author payload from GET /.
-// Auth posture deliberately matches GET / on this router -- changing it here
-// would break the Data Explorer, which calls both with the same credentials.
 router.get('/publications', async (req, res) => {
-  const authorId = (req.query.authorId || '').trim();
+  const authorId = typeof req.query.authorId === 'string' ? req.query.authorId.trim() : '';
   if (!authorId) {
     return res.status(400).json({ message: 'authorId is required' });
+  }
+  // Checked before the database: any id, real or not, costs a full scan.
+  if (!AUTHOR_ID_PATTERN.test(authorId)) {
+    return res.status(400).json({ message: 'authorId must be an author id such as A1234567' });
   }
   // A malformed pubId must fail loudly: ignoring it would quietly return the
   // author's first page instead of the one publication that was asked for.

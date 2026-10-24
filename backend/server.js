@@ -15,6 +15,21 @@ const rateLimit = require('./middleware/rateLimit');
 
 const app = express();
 
+// Which proxies may report the client address in X-Forwarded-For. Unset (local
+// development, no proxy) leaves req.ip as the socket address. Behind the
+// production nginx it must be set (production/compose.yaml), or req.ip is
+// nginx's own address and every visitor shares one rate-limit counter.
+// Accepts a hop count ("1"), "true", or Express's address list
+// ("loopback, uniquelocal").
+function parseTrustProxy(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return false;
+  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+  if (trimmed === 'true' || trimmed === 'false') return trimmed === 'true';
+  return trimmed;
+}
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
+
 // Extra origins allowed in deployed environments, comma-separated, e.g.
 // CORS_ALLOWED_ORIGINS=https://scholarmetrics.example.com
 // Unset (the default) leaves the original localhost-only behaviour untouched.

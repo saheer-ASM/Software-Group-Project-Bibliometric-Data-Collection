@@ -1,7 +1,14 @@
 const express = require('express');
 const pool = require('../config/database');
+const authMiddleware = require('../middleware/auth');
+const { heavyQueryLimit } = require('../middleware/rateLimit');
+const { AUTHOR_ID_PATTERN } = require('../services/libraryAuthors');
 
 const router = express.Router();
+
+// A comparison scans author_contribution_weight and blocks the process while
+// it runs: signed-in users only, within the shared search budget.
+router.use(authMiddleware, heavyQueryLimit);
 const numeric = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
 // The selected authors' publications. The ten author slots have no index, so
@@ -26,6 +33,9 @@ router.get('/', async (req, res) => {
 
   if (uniqueAuthorIds.length < 2 || uniqueAuthorIds.length > 3) {
     return res.status(400).json({ message: 'Select between 2 and 3 unique authors.' });
+  }
+  if (!uniqueAuthorIds.every((id) => AUTHOR_ID_PATTERN.test(id))) {
+    return res.status(400).json({ message: 'Author ids must look like A1234567.' });
   }
 
   try {
