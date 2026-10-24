@@ -6,8 +6,14 @@ const sessionToken = require('../services/sessionToken');
 
 const router = express.Router();
 
-function signToken(id) {
-  return sessionToken.sign(id);
+function signToken(user) {
+  return sessionToken.sign(user);
+}
+
+// Ends every session issued to this account so far: raising tokenVersion makes
+// all older tokens fail in middleware/auth.js. Returns the updated profile.
+function revokeSessions(user, updates = {}) {
+  return userStore.updateUser(user.id, { ...updates, tokenVersion: (user.tokenVersion || 0) + 1 });
 }
 
 function httpError(status, message, code) {
@@ -129,7 +135,7 @@ async function registrationState(user, uid) {
 // Response for a registration state. Only COMPLETED gets the session JWT.
 function sendState(res, { user, status, step }) {
   if (status === 'COMPLETED') {
-    return res.json({ status, profileCompleted: true, token: signToken(user.id), user: userStore.publicUser(user) });
+    return res.json({ status, profileCompleted: true, token: signToken(user), user: userStore.publicUser(user) });
   }
   if (status === 'COMPLETED_UNVERIFIED') {
     return res.json({ status, code: 'EMAIL_NOT_VERIFIED', email: user.email });
@@ -143,7 +149,7 @@ function sendSession(res, user) {
   if (!isProfileComplete(user)) {
     return res.json({ status: 'INCOMPLETE', profileCompleted: false, profile: profileSummary(user) });
   }
-  return res.json({ status: 'COMPLETED', profileCompleted: true, token: signToken(user.id), user: userStore.publicUser(user) });
+  return res.json({ status: 'COMPLETED', profileCompleted: true, token: signToken(user), user: userStore.publicUser(user) });
 }
 
 const notRegistered = (res) => res.status(404).json({
@@ -360,7 +366,8 @@ router.post('/social', async (req, res) => {
 // POST /api/auth/reset-password
 // Called after the user completes Firebase's "forgot password" email flow
 // (confirmPasswordReset + sign-in on the frontend). Firebase already holds the
-// new password, so this only clears any legacy password hash and starts a session.
+// new password, so this clears any legacy password hash, ends every existing
+// session (a reset often follows a stolen password) and starts a new one.
 router.post('/reset-password', async (req, res) => {
   try {
     const decoded = await verifyFirebaseToken(req.body.idToken);
@@ -368,11 +375,22 @@ router.post('/reset-password', async (req, res) => {
     const user = await userStore.findByEmail(decoded.email);
     if (!user) return res.status(404).json({ message: 'No account found for this email' });
 
-    if (user.password) await userStore.updateUser(user.id, { password: null });
-
-    sendSession(res, user);
+    sendSession(res, await revokeSessions(user, { password: null }));
   } catch (err) {
     sendError(res, err, 'Password reset failed');
+  }
+});
+
+// POST /api/auth/logout  (protected)
+// Signs the account out everywhere: every session token issued so far stops
+// working, so a copied token is useless after logout.
+router.post('/logout', authMiddleware, async (req, res) => {
+  try {
+    await revokeSessions(req.user);
+    res.status(204).end();
+  } catch (err) {
+    console.error('Logout failed:', err);
+    res.status(500).json({ message: 'Could not sign out on the server' });
   }
 });
 

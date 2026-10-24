@@ -39,8 +39,22 @@ test('the server refuses to start with a weak secret', () => {
 });
 
 test('a token it signed verifies', () => {
-  const payload = sessionToken.verify(sessionToken.sign('user-1'));
+  const payload = sessionToken.verify(sessionToken.sign({ id: 'user-1' }));
   assert.equal(payload.id, 'user-1');
+});
+
+test('a token is current only while its version matches the account', () => {
+  const payload = sessionToken.verify(sessionToken.sign({ id: 'user-1', tokenVersion: 2 }));
+  assert.equal(payload.tv, 2);
+  assert.equal(sessionToken.isCurrent(payload, { tokenVersion: 2 }), true);
+  assert.equal(sessionToken.isCurrent(payload, { tokenVersion: 3 }), false, 'ended by logout or reset');
+});
+
+test('tokens from before token versions existed stay valid until the first revocation', () => {
+  const old = sessionToken.verify(jwt.sign({ id: 'user-1' }, SECRET));
+  assert.equal(sessionToken.isCurrent(old, {}), true);
+  assert.equal(sessionToken.isCurrent(old, { tokenVersion: 0 }), true);
+  assert.equal(sessionToken.isCurrent(old, { tokenVersion: 1 }), false);
 });
 
 test("a token forged with the old default 'dev-secret' is refused", () => {

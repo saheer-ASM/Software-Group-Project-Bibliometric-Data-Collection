@@ -22,10 +22,13 @@ function loadSecret(env = process.env) {
 // Read once, when the server starts: a missing or weak secret stops it there.
 const secret = loadSecret();
 
-function sign(id) {
-  return jwt.sign({ id }, secret, {
+// Each token carries the account's tokenVersion (tv). Logout and password reset
+// raise the stored version, which ends every session issued before. Tokens
+// from before this field existed have no tv and count as version 0.
+function sign(user) {
+  return jwt.sign({ id: user.id, tv: user.tokenVersion || 0 }, secret, {
     algorithm: 'HS256',
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+    expiresIn: process.env.JWT_EXPIRES_IN || '1d',
   });
 }
 
@@ -34,4 +37,9 @@ function verify(token) {
   return jwt.verify(token, secret, { algorithms: ['HS256'] });
 }
 
-module.exports = { MIN_SECRET_LENGTH, loadSecret, sign, verify };
+/** False once the account's sessions were ended after this token was issued. */
+function isCurrent(payload, user) {
+  return (payload.tv || 0) === (user.tokenVersion || 0);
+}
+
+module.exports = { MIN_SECRET_LENGTH, loadSecret, sign, verify, isCurrent };

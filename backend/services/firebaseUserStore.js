@@ -29,6 +29,8 @@ function userFromDoc(doc) {
     emailVerified: data.emailVerified === true,
     // Profiles created before this field existed are complete.
     profileCompleted: data.profileCompleted !== false,
+    // Raised to end every session issued so far (services/sessionToken.js).
+    tokenVersion: Number.isInteger(data.tokenVersion) ? data.tokenVersion : 0,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
   };
