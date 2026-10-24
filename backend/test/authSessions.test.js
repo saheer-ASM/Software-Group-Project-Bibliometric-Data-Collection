@@ -121,3 +121,19 @@ test('sessions issued before this change keep working until the first logout', a
   assert.equal((await call('POST', '/logout', { token: old })).status, 204);
   assert.equal((await call('GET', '/profile', { token: old })).status, 401);
 });
+
+// The old password endpoint is retired (security review, finding 6): it had no
+// per-account lockout, so passwords could be guessed. Even a legacy account
+// with a stored bcrypt hash and the right password gets no session.
+test('the legacy password login never issues a session', async () => {
+  // A legacy account: the old createUser stored a bcrypt hash of the password.
+  await userStore.createUser({
+    username: 'legacy-user', email: 'legacy-login@example.com', designation: 'Researcher', password: 'correct-horse',
+  });
+  for (const password of ['correct-horse', 'wrong-guess']) {
+    const r = await call('POST', '/login', { body: { username: 'legacy-user', password } });
+    assert.equal(r.status, 410, password);
+    assert.equal(r.body.token, undefined);
+  }
+  assert.equal((await call('POST', '/login', { body: {} })).status, 410);
+});

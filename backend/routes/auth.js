@@ -344,34 +344,15 @@ router.post('/register', (_req, res) => {
   });
 });
 
-// POST /api/auth/login
-router.post('/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
-
-    if (!username || !password) {
-      return res.status(400).json({ message: 'Username and password are required' });
-    }
-
-    const user = await userStore.findByUsername(username);
-    if (!user || !(await userStore.comparePassword(user, password))) {
-      return res.status(401).json({ message: 'Invalid username or password' });
-    }
-    if (user.firebaseUid && admin.apps.length) {
-      const firebaseUser = await admin.auth().getUser(user.firebaseUid).catch(() => null);
-      const isPasswordAccount = firebaseUser?.providerData.some((p) => p.providerId === 'password');
-      if (isPasswordAccount && !firebaseUser.emailVerified) {
-        return res.status(403).json({
-          message: 'Please verify your email address before signing in.',
-          code: 'EMAIL_NOT_VERIFIED',
-        });
-      }
-    }
-
-    sendSession(res, user);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
+// POST /api/auth/login  (legacy, disabled)
+// It checked bcrypt password hashes stored in Firestore, with no lockout or
+// delay per account, so passwords could be guessed; each try also cost about
+// 250 ms of CPU. The website never calls it: every account signs in through
+// Firebase Authentication (/firebase-login), where Firebase limits attempts.
+router.post('/login', (_req, res) => {
+  res.status(410).json({
+    message: 'This sign-in endpoint is no longer available. Please sign in through the website.',
+  });
 });
 
 // POST /api/auth/social  (Google / GitHub sign-in)
