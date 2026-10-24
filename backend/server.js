@@ -1,5 +1,6 @@
-const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '..', 'env') });
+// Configuration comes from backend/.env (or the container's environment) only.
+// A second load from a file named "env" in the repository root was removed: a
+// stray file there could silently inject settings such as JWT_SECRET.
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');

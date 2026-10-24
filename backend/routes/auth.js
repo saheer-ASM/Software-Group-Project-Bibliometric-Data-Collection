@@ -1,16 +1,13 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin');
 const authMiddleware = require('../middleware/auth');
 const userStore = require('../services/firebaseUserStore');
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
+const sessionToken = require('../services/sessionToken');
 
 const router = express.Router();
 
 function signToken(id) {
-  return jwt.sign({ id }, JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  });
+  return sessionToken.sign(id);
 }
 
 function httpError(status, message, code) {

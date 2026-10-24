@@ -1,6 +1,5 @@
-const jwt = require('jsonwebtoken');
 const userStore = require('../services/firebaseUserStore');
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
+const sessionToken = require('../services/sessionToken');
 
 module.exports = async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -10,7 +9,7 @@ module.exports = async function authMiddleware(req, res, next) {
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = sessionToken.verify(token);
     req.user = await userStore.findById(decoded.id);
     if (!req.user) return res.status(401).json({ message: 'User not found' });
     next();
