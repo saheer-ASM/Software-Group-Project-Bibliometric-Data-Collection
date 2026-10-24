@@ -126,14 +126,25 @@ test('sessions issued before this change keep working until the first logout', a
 // per-account lockout, so passwords could be guessed. Even a legacy account
 // with a stored bcrypt hash and the right password gets no session.
 test('the legacy password login never issues a session', async () => {
-  // A legacy account: the old createUser stored a bcrypt hash of the password.
-  await userStore.createUser({
-    username: 'legacy-user', email: 'legacy-login@example.com', designation: 'Researcher', password: 'correct-horse',
+  // A legacy account, as the old createUser stored it: a bcrypt hash of
+  // 'correct-horse' in the profile.
+  const legacy = await userStore.createFirebaseUser({
+    username: 'legacy-user', email: 'legacy-login@example.com', designation: 'Researcher', firebaseUid: 'legacy-uid',
   });
+  await userStore.updateUser(legacy.id, { password: '$2a$12$2XAbT7H44guG.HWTvd5qjOsosyWmgl7P4BIDdHMl.wc/7Wy.iya0y' });
   for (const password of ['correct-horse', 'wrong-guess']) {
     const r = await call('POST', '/login', { body: { username: 'legacy-user', password } });
     assert.equal(r.status, 410, password);
     assert.equal(r.body.token, undefined);
   }
   assert.equal((await call('POST', '/login', { body: {} })).status, 410);
+});
+
+// Dead code removed (security review, finding 10). ensureFirebaseAuthUser, used
+// by createUser, overwrote an existing Firebase user's password with Admin
+// rights: re-wiring any of these would have been an account takeover.
+test('the user store no longer offers password-setting functions', () => {
+  for (const name of ['createUser', 'ensureFirebaseAuthUser', 'updatePassword', 'comparePassword', 'findOrCreateSocialUser']) {
+    assert.equal(userStore[name], undefined, name);
+  }
 });

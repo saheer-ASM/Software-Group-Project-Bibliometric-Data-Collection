@@ -36,23 +36,9 @@ router.get('/search', async (req, res) => {
   }
 });
 
-// GET /api/authors/:id?field=<field>&year=<year>
-router.get('/:id', async (req, res) => {
-  const { id } = req.params;
-  const { field, year } = req.query;
-
-  try {
-    const result = await authorService.getAuthorDetails(id, {
-      field: field || null,
-      year:  year  ? parseInt(year, 10) : null,
-    });
-
-    if (!result) return res.status(404).json({ message: 'Author not found' });
-
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to load author', error: err.message });
-  }
-});
+// There is no GET /api/authors/:id. It read the old authors/publications schema,
+// which openalex.db does not have, so every call failed and returned the SQLite
+// error to the client; it also tried to write metrics to a read-only database.
+// An author's profile comes from GET /api/search?authorId=.
 
 module.exports = router;

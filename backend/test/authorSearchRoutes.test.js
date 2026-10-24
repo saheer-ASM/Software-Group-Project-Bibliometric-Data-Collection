@@ -16,7 +16,6 @@ const stub = (relative, exports) => {
 const serviceCalls = [];
 stub('services/authorSearchService', {
   searchByName: async (name) => { serviceCalls.push(name); return [{ id: 'A1', name }]; },
-  getAuthorDetails: async () => null,
 });
 stub('middleware/auth', (req, res, next) => { req.user = { id: 'u1' }; next(); });
 
@@ -113,5 +112,14 @@ test('malformed author ids never reach the database', async () => {
     assert.equal((await get(`/api/search/publications?authorId=${q(id)}`)).status, 400, id);
   }
   assert.equal((await get('/api/search/publications?authorId=A1&authorId=A2')).status, 400, 'repeated parameter');
+  assert.equal(connects, 0, 'no database connection was opened');
+});
+
+// GET /api/authors/:id is gone (security review, finding 10): it queried
+// tables openalex.db does not have and leaked the SQLite error.
+test('there is no /api/authors/:id route', async () => {
+  const response = await fetch(`${base}/api/authors/A5050585435`);
+  assert.equal(response.status, 404);
+  assert.deepEqual(serviceCalls, []);
   assert.equal(connects, 0, 'no database connection was opened');
 });
