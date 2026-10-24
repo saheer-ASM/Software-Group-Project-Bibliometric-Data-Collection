@@ -23,7 +23,8 @@ const fakeAdmin = {
   auth: () => ({
     async verifyIdToken(idToken) {
       const decoded = idTokens.get(idToken);
-      if (!decoded) throw new Error('invalid Firebase ID token');
+      // A message with internal details, which must never reach the client.
+      if (!decoded) throw new Error('Firebase ID token has invalid signature (project internal-project-id)');
       return decoded;
     },
   }),
@@ -146,5 +147,26 @@ test('the legacy password login never issues a session', async () => {
 test('the user store no longer offers password-setting functions', () => {
   for (const name of ['createUser', 'ensureFirebaseAuthUser', 'updatePassword', 'comparePassword', 'findOrCreateSocialUser']) {
     assert.equal(userStore[name], undefined, name);
+  }
+});
+
+// Internal error texts stay in the server log (security review, finding 9).
+test('a rejected Firebase token does not return the Firebase error text', async () => {
+  const r = await call('POST', '/firebase-login', { body: { idToken: 'not-a-real-token' } });
+  assert.equal(r.status, 401);
+  assert.deepEqual(r.body, { message: 'Sign-in failed' });
+});
+
+test('a failed profile update does not return the Firestore error text', async () => {
+  const { idToken } = await account();
+  const token = await signIn(idToken);
+  const realUpdate = userStore.updateUser;
+  userStore.updateUser = async () => { throw new Error('Firestore: projects/internal-project-id/databases/(default) unavailable'); };
+  try {
+    const r = await call('PUT', '/profile', { token, body: { designation: 'Professor' } });
+    assert.equal(r.status, 500);
+    assert.deepEqual(r.body, { message: 'Server error' });
+  } finally {
+    userStore.updateUser = realUpdate;
   }
 });

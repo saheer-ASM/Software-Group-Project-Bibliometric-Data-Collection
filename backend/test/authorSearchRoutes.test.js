@@ -15,7 +15,13 @@ const stub = (relative, exports) => {
 
 const serviceCalls = [];
 stub('services/authorSearchService', {
-  searchByName: async (name) => { serviceCalls.push(name); return [{ id: 'A1', name }]; },
+  searchByName: async (name) => {
+    serviceCalls.push(name);
+    // Failures with internal details, which must never reach the client.
+    if (name === 'boom-error') throw new Error('SQLITE_ERROR: no such column: a.secret_column');
+    if (name === 'busy-error') throw Object.assign(new Error('database is locked'), { unavailable: true });
+    return [{ id: 'A1', name }];
+  },
 });
 stub('middleware/auth', (req, res, next) => { req.user = { id: 'u1' }; next(); });
 
@@ -25,6 +31,7 @@ stub('config/database', {
   // these tests only care whether the database was reached at all.
   connect: async () => { connects += 1; return { query: async () => ({ rowCount: 0, rows: [] }), release() {} }; },
   query: async () => ({ rows: [] }),
+  isUnavailable: (error) => Boolean(error && error.unavailable),
 });
 
 const authorsRouter = require(path.join(backend, 'routes/authors'));
@@ -122,4 +129,16 @@ test('there is no /api/authors/:id route', async () => {
   assert.equal(response.status, 404);
   assert.deepEqual(serviceCalls, []);
   assert.equal(connects, 0, 'no database connection was opened');
+});
+
+// Database errors stay in the server log (security review, finding 9).
+test('a failed name search does not return the database error', async () => {
+  const failed = await get('/api/authors?q=boom-error');
+  assert.equal(failed.status, 500);
+  assert.deepEqual(failed.body, { message: 'Search failed' });
+
+  const busy = await get('/api/authors/search?name=busy-error');
+  assert.equal(busy.status, 503);
+  assert.equal(busy.body.error, undefined);
+  assert.doesNotMatch(JSON.stringify(busy.body), /locked/);
 });

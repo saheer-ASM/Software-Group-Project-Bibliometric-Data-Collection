@@ -23,11 +23,16 @@ function httpError(status, message, code) {
   return err;
 }
 
+// Errors made with httpError are written for the user and sent as they are.
+// Anything else -- a rejected Firebase token, a Firestore failure -- is logged
+// here, and the client gets only the generic message: those texts can name the
+// Firebase project and other internals.
 function sendError(res, err, fallbackMessage) {
   if (err.status) {
     return res.status(err.status).json({ message: err.message, ...(err.code ? { code: err.code } : {}) });
   }
-  return res.status(401).json({ message: fallbackMessage, error: err.message });
+  console.warn(`${fallbackMessage}:`, err.code || '', err.message);
+  return res.status(401).json({ message: fallbackMessage });
 }
 
 // Verifies a Firebase ID token with the Admin SDK (signature, expiry, audience).
@@ -437,7 +442,8 @@ router.put('/profile', authMiddleware, async (req, res) => {
 
     res.json(userStore.publicUser(updated));
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    console.error('Profile update failed:', err);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 

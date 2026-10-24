@@ -13,6 +13,7 @@ const statsRoutes = require('./routes/stats');
 const compareRoutes = require('./routes/compare');
 const libraryRoutes = require('./routes/library');
 const rateLimit = require('./middleware/rateLimit');
+const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 // Do not advertise the framework (X-Powered-By: Express). The other security
@@ -114,6 +115,9 @@ app.get('/api/health', async (_req, res) => {
     dependencies,
   });
 });
+
+// Last, after every route: errors no route answered itself.
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 5005;
 // Defaults to localhost so local development is unchanged. In a container this

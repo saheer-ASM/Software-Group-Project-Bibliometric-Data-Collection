@@ -1,4 +1,5 @@
 const express       = require('express');
+const pool          = require('../config/database');
 const authMiddleware = require('../middleware/auth');
 const { heavyQueryLimit } = require('../middleware/rateLimit');
 const authorService  = require('../services/authorSearchService');
@@ -10,6 +11,18 @@ const router = express.Router();
 // they run: signed-in users only, within the shared search budget.
 router.use(authMiddleware, heavyQueryLimit);
 
+// The SQLite message stays in the server log, as in routes/search.js; the
+// client gets a generic one (503 when the database is only busy or offline).
+function searchFailed(res, err) {
+  console.error('Author name search failed:', err);
+  const unavailable = pool.isUnavailable(err);
+  res.status(unavailable ? 503 : 500).json({
+    message: unavailable
+      ? 'The database is currently unavailable. Please try again shortly.'
+      : 'Search failed',
+  });
+}
+
 // GET /api/authors?q=<name>
 router.get('/', async (req, res) => {
   const query = parseAuthorQuery(req.query.q);
@@ -19,7 +32,7 @@ router.get('/', async (req, res) => {
     const authors = await authorService.searchByName(query.value);
     res.json(authors);
   } catch (err) {
-    res.status(500).json({ message: 'Search failed', error: err.message });
+    searchFailed(res, err);
   }
 });
 
@@ -32,7 +45,7 @@ router.get('/search', async (req, res) => {
     const authors = await authorService.searchByName(query.value);
     res.json({ authors });
   } catch (err) {
-    res.status(500).json({ message: 'Search failed', error: err.message });
+    searchFailed(res, err);
   }
 });
 
