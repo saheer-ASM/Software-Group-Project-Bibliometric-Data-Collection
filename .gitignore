@@ -64,6 +64,11 @@ npm-debug.log
 yarn-error.log
 package-lock.json
 yarn.lock
+# ...except the web app's: production/backend.Dockerfile and
+# frontend.Dockerfile install with `npm ci` from them, so they must be
+# committed for reproducible, audited builds.
+!/backend/package-lock.json
+!/frontend/package-lock.json
 
 # Build directories
 .dist/

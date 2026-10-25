@@ -15,17 +15,30 @@ const stub = (relative, exports) => {
 
 const serviceCalls = [];
 stub('services/authorSearchService', {
-  searchByName: async (name) => { serviceCalls.push(name); return [{ id: 'A1', name }]; },
-  getAuthorDetails: async () => null,
+  searchByName: async (name) => {
+    serviceCalls.push(name);
+    // Failures with internal details, which must never reach the client.
+    if (name === 'boom-error') throw new Error('SQLITE_ERROR: no such column: a.secret_column');
+    if (name === 'busy-error') throw Object.assign(new Error('database is locked'), { unavailable: true });
+    return [{ id: 'A1', name }];
+  },
 });
 stub('middleware/auth', (req, res, next) => { req.user = { id: 'u1' }; next(); });
 
 let connects = 0;
+const queries = []; // { sql, params } of every query sent through connect()
 stub('config/database', {
   // Any author lookup that reaches here finds nobody (404), which is enough:
   // these tests only care whether the database was reached at all.
-  connect: async () => { connects += 1; return { query: async () => ({ rowCount: 0, rows: [] }), release() {} }; },
+  connect: async () => {
+    connects += 1;
+    return {
+      query: async (sql, params) => { queries.push({ sql, params }); return { rowCount: 0, rows: [] }; },
+      release() {},
+    };
+  },
   query: async () => ({ rows: [] }),
+  isUnavailable: (error) => Boolean(error && error.unavailable),
 });
 
 const authorsRouter = require(path.join(backend, 'routes/authors'));
@@ -42,7 +55,7 @@ test.before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
 });
 test.after(() => new Promise((resolve) => server.close(resolve)));
-test.beforeEach(() => { serviceCalls.length = 0; connects = 0; });
+test.beforeEach(() => { serviceCalls.length = 0; connects = 0; queries.length = 0; });
 
 const get = async (url) => {
   const response = await fetch(base + url);
@@ -113,5 +126,75 @@ test('malformed author ids never reach the database', async () => {
     assert.equal((await get(`/api/search/publications?authorId=${q(id)}`)).status, 400, id);
   }
   assert.equal((await get('/api/search/publications?authorId=A1&authorId=A2')).status, 400, 'repeated parameter');
+  assert.equal(connects, 0, 'no database connection was opened');
+});
+
+// GET /api/authors/:id is gone (security review, finding 10): it queried
+// tables openalex.db does not have and leaked the SQLite error.
+test('there is no /api/authors/:id route', async () => {
+  const response = await fetch(`${base}/api/authors/A5050585435`);
+  assert.equal(response.status, 404);
+  assert.deepEqual(serviceCalls, []);
+  assert.equal(connects, 0, 'no database connection was opened');
+});
+
+// Database errors stay in the server log (security review, finding 9).
+test('a failed name search does not return the database error', async () => {
+  const failed = await get('/api/authors?q=boom-error');
+  assert.equal(failed.status, 500);
+  assert.deepEqual(failed.body, { message: 'Search failed' });
+
+  const busy = await get('/api/authors/search?name=busy-error');
+  assert.equal(busy.status, 503);
+  assert.equal(busy.body.error, undefined);
+  assert.doesNotMatch(JSON.stringify(busy.body), /locked/);
+});
+
+// The title filter as SQL actually runs it: the pattern the route built,
+// evaluated by a real (in-memory) SQLite.
+async function titleFilterMatcher(title) {
+  const { DatabaseSync } = require('node:sqlite');
+  queries.length = 0;
+  assert.equal((await get(`/api/search/publications?authorId=A1&query=${q(title)}`)).status, 200);
+  const { sql, params } = queries.find((entry) => /pub_title LIKE/.test(entry.sql));
+  const placeholder = sql.match(/pub_title LIKE \?(\d+) ESCAPE '\\'/);
+  assert.ok(placeholder, 'LIKE uses an ESCAPE clause');
+  const pattern = params[Number(placeholder[1]) - 1];
+  const db = new DatabaseSync(':memory:');
+  return {
+    pattern,
+    matches: (stored) => db.prepare("SELECT ?1 LIKE ?2 ESCAPE '\\' AS hit").get(stored, pattern).hit === 1,
+  };
+}
+
+// Security review, finding 13: % and _ typed in the title filter were LIKE
+// wildcards -- "%" matched every title, and patterns like %_%_%_ cost more.
+test('the title filter matches % and _ literally', async () => {
+  const percent = await titleFilterMatcher('100%');
+  assert.equal(percent.matches('Reaching 100% coverage'), true);
+  assert.equal(percent.matches('Reaching 1000 nodes'), false, '% is not a wildcard');
+
+  const underscore = await titleFilterMatcher('a_b');
+  assert.equal(underscore.matches('the a_b test'), true);
+  assert.equal(underscore.matches('the axb test'), false, '_ is not a wildcard');
+
+  const everything = await titleFilterMatcher('%');
+  assert.equal(everything.matches('Any title at all'), false, 'a lone % no longer matches every title');
+
+  const backslash = await titleFilterMatcher('C:\\data');
+  assert.equal(backslash.matches('Paths like C:\\data here'), true);
+});
+
+test('a whole long title still works as a filter; absurd input is cut, not run', async () => {
+  const realTitle = `${'Long title words '.repeat(100)}end`; // about 1,700 characters, like the longest real titles
+  const real = await titleFilterMatcher(realTitle);
+  assert.equal(real.matches(realTitle), true);
+
+  const huge = await titleFilterMatcher('x'.repeat(5000));
+  assert.ok(huge.pattern.length <= 2002, `pattern cut to 2000 characters (+2 for %), was ${huge.pattern.length}`);
+});
+
+test('a repeated title filter is a 400, not a crash', async () => {
+  assert.equal((await get('/api/search/publications?authorId=A1&query=a&query=b')).status, 400);
   assert.equal(connects, 0, 'no database connection was opened');
 });

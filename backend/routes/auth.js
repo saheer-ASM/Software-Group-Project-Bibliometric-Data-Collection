@@ -1,16 +1,20 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
-const admin = require('firebase-admin');
+const { getApps } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 const authMiddleware = require('../middleware/auth');
 const userStore = require('../services/firebaseUserStore');
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
+const sessionToken = require('../services/sessionToken');
 
 const router = express.Router();
 
-function signToken(id) {
-  return jwt.sign({ id }, JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  });
+function signToken(user) {
+  return sessionToken.sign(user);
+}
+
+// Ends every session issued to this account so far: raising tokenVersion makes
+// all older tokens fail in middleware/auth.js. Returns the updated profile.
+function revokeSessions(user, updates = {}) {
+  return userStore.updateUser(user.id, { ...updates, tokenVersion: (user.tokenVersion || 0) + 1 });
 }
 
 function httpError(status, message, code) {
@@ -20,11 +24,16 @@ function httpError(status, message, code) {
   return err;
 }
 
+// Errors made with httpError are written for the user and sent as they are.
+// Anything else -- a rejected Firebase token, a Firestore failure -- is logged
+// here, and the client gets only the generic message: those texts can name the
+// Firebase project and other internals.
 function sendError(res, err, fallbackMessage) {
   if (err.status) {
     return res.status(err.status).json({ message: err.message, ...(err.code ? { code: err.code } : {}) });
   }
-  return res.status(401).json({ message: fallbackMessage, error: err.message });
+  console.warn(`${fallbackMessage}:`, err.code || '', err.message);
+  return res.status(401).json({ message: fallbackMessage });
 }
 
 // Verifies a Firebase ID token with the Admin SDK (signature, expiry, audience).
@@ -34,9 +43,9 @@ function sendError(res, err, fallbackMessage) {
 // are unchanged, since their email is vouched for by the provider.
 async function verifyFirebaseToken(idToken, { requireVerifiedEmail = true } = {}) {
   if (!idToken) throw httpError(400, 'Firebase token is required');
-  if (!admin.apps.length) throw httpError(503, 'Firebase admin is not configured on the backend');
+  if (!getApps().length) throw httpError(503, 'Firebase admin is not configured on the backend');
 
-  const decoded = await admin.auth().verifyIdToken(idToken);
+  const decoded = await getAuth().verifyIdToken(idToken);
   if (!decoded.email) throw httpError(400, 'No email in token');
 
   // Google sign-ins always carry email_verified: true (Google owns the address),
@@ -48,24 +57,47 @@ async function verifyFirebaseToken(idToken, { requireVerifiedEmail = true } = {}
   return decoded;
 }
 
+// True while the Firebase Auth user still exists.
+async function firebaseUserExists(uid) {
+  try {
+    await getAuth().getUser(uid);
+    return true;
+  } catch (err) {
+    if (err.code === 'auth/user-not-found') return false;
+    throw err;
+  }
+}
+
 // One profile per Firebase account. Firebase links Google and email/password
 // for the same email into ONE uid, so look the profile up by uid first, then by
 // email (accounts created before uids were stored). Never creates a profile.
+//
+// Only a VERIFIED email proves the caller owns a profile found by email:
+// anyone can create an unverified Firebase account with somebody else's
+// address. So an unverified token never claims a profile by email and never
+// writes anything. A verified one may claim a profile whose Firebase account
+// no longer exists, but never one that another live account still holds.
 async function findProfile(decoded) {
+  const verified = decoded.email_verified === true;
   let user = await userStore.findByFirebaseUid(decoded.uid);
-  if (!user) user = await userStore.findByEmail(decoded.email);
-  if (!user) return null;
+  if (!user) {
+    const byEmail = await userStore.findByEmail(decoded.email);
+    if (!byEmail) return null;
+    if (!verified || (byEmail.firebaseUid && await firebaseUserExists(byEmail.firebaseUid))) {
+      throw httpError(409, 'An account already exists with this email address.');
+    }
+    user = byEmail;
+  }
+  if (!verified) return user;
 
   const updates = {};
-  // The token proves ownership of this verified email, so it is safe to point
-  // the profile at the current Firebase uid.
+  // The verified email proves ownership, so the profile can point at the
+  // current Firebase uid.
   if (user.firebaseUid !== decoded.uid) updates.firebaseUid = decoded.uid;
   // Keep the stored email equal to the verified Firebase email (repairs profiles
   // edited before the email became read-only).
   if (user.email !== decoded.email.toLowerCase()) updates.email = decoded.email;
-  if (user.emailVerified !== (decoded.email_verified === true)) {
-    updates.emailVerified = decoded.email_verified === true;
-  }
+  if (user.emailVerified !== true) updates.emailVerified = true;
   return Object.keys(updates).length ? userStore.updateUser(user.id, updates) : user;
 }
 
@@ -88,9 +120,9 @@ function createIncompleteProfile(decoded) {
 // Email/password records are never touched.
 async function removeUnregisteredGoogleUser(uid) {
   try {
-    const firebaseUser = await admin.auth().getUser(uid);
+    const firebaseUser = await getAuth().getUser(uid);
     const providers = firebaseUser.providerData.map((p) => p.providerId);
-    if (!providers.includes('password')) await admin.auth().deleteUser(uid);
+    if (!providers.includes('password')) await getAuth().deleteUser(uid);
   } catch (err) {
     console.warn('Could not remove unregistered Firebase user:', err.message);
   }
@@ -109,7 +141,7 @@ const profileSummary = (user) => ({ username: user.username, email: user.email, 
 // Verification is Firebase's own emailVerified on the user record, never a
 // value sent by the browser.
 async function registrationState(user, uid) {
-  const firebaseUser = await admin.auth().getUser(uid);
+  const firebaseUser = await getAuth().getUser(uid);
   const hasPassword = firebaseUser.providerData.some((p) => p.providerId === 'password');
   const verified = firebaseUser.emailVerified === true;
 
@@ -132,7 +164,7 @@ async function registrationState(user, uid) {
 // Response for a registration state. Only COMPLETED gets the session JWT.
 function sendState(res, { user, status, step }) {
   if (status === 'COMPLETED') {
-    return res.json({ status, profileCompleted: true, token: signToken(user.id), user: userStore.publicUser(user) });
+    return res.json({ status, profileCompleted: true, token: signToken(user), user: userStore.publicUser(user) });
   }
   if (status === 'COMPLETED_UNVERIFIED') {
     return res.json({ status, code: 'EMAIL_NOT_VERIFIED', email: user.email });
@@ -146,7 +178,7 @@ function sendSession(res, user) {
   if (!isProfileComplete(user)) {
     return res.json({ status: 'INCOMPLETE', profileCompleted: false, profile: profileSummary(user) });
   }
-  return res.json({ status: 'COMPLETED', profileCompleted: true, token: signToken(user.id), user: userStore.publicUser(user) });
+  return res.json({ status: 'COMPLETED', profileCompleted: true, token: signToken(user), user: userStore.publicUser(user) });
 }
 
 const notRegistered = (res) => res.status(404).json({
@@ -318,34 +350,15 @@ router.post('/register', (_req, res) => {
   });
 });
 
-// POST /api/auth/login
-router.post('/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
-
-    if (!username || !password) {
-      return res.status(400).json({ message: 'Username and password are required' });
-    }
-
-    const user = await userStore.findByUsername(username);
-    if (!user || !(await userStore.comparePassword(user, password))) {
-      return res.status(401).json({ message: 'Invalid username or password' });
-    }
-    if (user.firebaseUid && admin.apps.length) {
-      const firebaseUser = await admin.auth().getUser(user.firebaseUid).catch(() => null);
-      const isPasswordAccount = firebaseUser?.providerData.some((p) => p.providerId === 'password');
-      if (isPasswordAccount && !firebaseUser.emailVerified) {
-        return res.status(403).json({
-          message: 'Please verify your email address before signing in.',
-          code: 'EMAIL_NOT_VERIFIED',
-        });
-      }
-    }
-
-    sendSession(res, user);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
+// POST /api/auth/login  (legacy, disabled)
+// It checked bcrypt password hashes stored in Firestore, with no lockout or
+// delay per account, so passwords could be guessed; each try also cost about
+// 250 ms of CPU. The website never calls it: every account signs in through
+// Firebase Authentication (/firebase-login), where Firebase limits attempts.
+router.post('/login', (_req, res) => {
+  res.status(410).json({
+    message: 'This sign-in endpoint is no longer available. Please sign in through the website.',
+  });
 });
 
 // POST /api/auth/social  (Google / GitHub sign-in)
@@ -363,19 +376,32 @@ router.post('/social', async (req, res) => {
 // POST /api/auth/reset-password
 // Called after the user completes Firebase's "forgot password" email flow
 // (confirmPasswordReset + sign-in on the frontend). Firebase already holds the
-// new password, so this only clears any legacy password hash and starts a session.
+// new password, so this clears any legacy password hash, ends every existing
+// session (a reset often follows a stolen password) and starts a new one.
 router.post('/reset-password', async (req, res) => {
   try {
     const decoded = await verifyFirebaseToken(req.body.idToken);
 
-    const user = await userStore.findByEmail(decoded.email);
+    // Same ownership rules as sign-in: never a profile another live account holds.
+    const user = await findProfile(decoded);
     if (!user) return res.status(404).json({ message: 'No account found for this email' });
 
-    if (user.password) await userStore.updateUser(user.id, { password: null });
-
-    sendSession(res, user);
+    sendSession(res, await revokeSessions(user, { password: null }));
   } catch (err) {
     sendError(res, err, 'Password reset failed');
+  }
+});
+
+// POST /api/auth/logout  (protected)
+// Signs the account out everywhere: every session token issued so far stops
+// working, so a copied token is useless after logout.
+router.post('/logout', authMiddleware, async (req, res) => {
+  try {
+    await revokeSessions(req.user);
+    res.status(204).end();
+  } catch (err) {
+    console.error('Logout failed:', err);
+    res.status(500).json({ message: 'Could not sign out on the server' });
   }
 });
 
@@ -417,7 +443,8 @@ router.put('/profile', authMiddleware, async (req, res) => {
 
     res.json(userStore.publicUser(updated));
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    console.error('Profile update failed:', err);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 

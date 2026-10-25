@@ -1,4 +1,5 @@
 const express       = require('express');
+const pool          = require('../config/database');
 const authMiddleware = require('../middleware/auth');
 const { heavyQueryLimit } = require('../middleware/rateLimit');
 const authorService  = require('../services/authorSearchService');
@@ -6,9 +7,21 @@ const { parseAuthorQuery } = require('../services/authorQuery');
 
 const router = express.Router();
 
-// Name lookups scan the whole author table and block the process while they
-// run: signed-in users only, within the shared search budget.
+// Name lookups scan the whole author table and hold a database worker while
+// they run: signed-in users only, within the shared search budget.
 router.use(authMiddleware, heavyQueryLimit);
+
+// The SQLite message stays in the server log, as in routes/search.js; the
+// client gets a generic one (503 when the database is only busy or offline).
+function searchFailed(res, err) {
+  console.error('Author name search failed:', err);
+  const unavailable = pool.isUnavailable(err);
+  res.status(unavailable ? 503 : 500).json({
+    message: unavailable
+      ? 'The database is currently unavailable. Please try again shortly.'
+      : 'Search failed',
+  });
+}
 
 // GET /api/authors?q=<name>
 router.get('/', async (req, res) => {
@@ -19,7 +32,7 @@ router.get('/', async (req, res) => {
     const authors = await authorService.searchByName(query.value);
     res.json(authors);
   } catch (err) {
-    res.status(500).json({ message: 'Search failed', error: err.message });
+    searchFailed(res, err);
   }
 });
 
@@ -32,27 +45,13 @@ router.get('/search', async (req, res) => {
     const authors = await authorService.searchByName(query.value);
     res.json({ authors });
   } catch (err) {
-    res.status(500).json({ message: 'Search failed', error: err.message });
+    searchFailed(res, err);
   }
 });
 
-// GET /api/authors/:id?field=<field>&year=<year>
-router.get('/:id', async (req, res) => {
-  const { id } = req.params;
-  const { field, year } = req.query;
-
-  try {
-    const result = await authorService.getAuthorDetails(id, {
-      field: field || null,
-      year:  year  ? parseInt(year, 10) : null,
-    });
-
-    if (!result) return res.status(404).json({ message: 'Author not found' });
-
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to load author', error: err.message });
-  }
-});
+// There is no GET /api/authors/:id. It read the old authors/publications schema,
+// which openalex.db does not have, so every call failed and returned the SQLite
+// error to the client; it also tried to write metrics to a read-only database.
+// An author's profile comes from GET /api/search?authorId=.
 
 module.exports = router;

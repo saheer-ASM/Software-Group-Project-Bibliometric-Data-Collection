@@ -1,4 +1,6 @@
-const admin = require('firebase-admin');
+// firebase-admin's modular API: v14 removed the old namespaced admin.* one.
+const { initializeApp, getApps, cert } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
 const fs = require('fs');
 const path = require('path');
 
@@ -53,16 +55,16 @@ const emulatorProjectId = process.env.FIREBASE_AUTH_EMULATOR_HOST && process.env
 
 const serviceAccount = emulatorProjectId ? null : getServiceAccount();
 
-if (serviceAccount && !admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+if (serviceAccount && !getApps().length) {
+  initializeApp({
+    credential: cert(serviceAccount),
     ...(process.env.FIREBASE_DATABASE_URL
       ? { databaseURL: process.env.FIREBASE_DATABASE_URL }
       : {}),
   });
-} else if (emulatorProjectId && !admin.apps.length) {
-  admin.initializeApp({ projectId: emulatorProjectId });
+} else if (emulatorProjectId && !getApps().length) {
+  initializeApp({ projectId: emulatorProjectId });
 }
 
 const useFirestore = serviceAccount || (emulatorProjectId && process.env.FIRESTORE_EMULATOR_HOST);
-module.exports = useFirestore ? admin.firestore() : null;
+module.exports = useFirestore ? getFirestore() : null;

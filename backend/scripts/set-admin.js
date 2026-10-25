@@ -13,13 +13,14 @@
 // new claim to appear in their token.
 require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
 require('../config/firebase');
-const admin = require('firebase-admin');
+const { getApps } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 
 async function listAdmins() {
   let pageToken;
   const admins = [];
   do {
-    const page = await admin.auth().listUsers(1000, pageToken);
+    const page = await getAuth().listUsers(1000, pageToken);
     admins.push(...page.users.filter((u) => u.customClaims?.admin === true).map((u) => u.email));
     pageToken = page.pageToken;
   } while (pageToken);
@@ -27,7 +28,7 @@ async function listAdmins() {
 }
 
 async function main() {
-  if (!admin.apps.length) {
+  if (!getApps().length) {
     throw new Error('Firebase Admin is not configured. Check FIREBASE_SERVICE_ACCOUNT_* in backend/.env.');
   }
 
@@ -42,12 +43,12 @@ async function main() {
     return;
   }
 
-  const user = await admin.auth().getUserByEmail(email.trim().toLowerCase());
+  const user = await getAuth().getUserByEmail(email.trim().toLowerCase());
   const claims = { ...(user.customClaims || {}) };
   if (remove) delete claims.admin;
   else claims.admin = true;
 
-  await admin.auth().setCustomUserClaims(user.uid, claims);
+  await getAuth().setCustomUserClaims(user.uid, claims);
   console.log(`${remove ? 'Removed admin role from' : 'Granted admin role to'} ${user.email} (uid ${user.uid}).`);
   console.log('They must log out and log in again for the change to take effect.');
 }

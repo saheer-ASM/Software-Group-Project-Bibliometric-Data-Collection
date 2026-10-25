@@ -15,7 +15,7 @@ import { AppShellContext } from './appShell';
 import './App.css';
 import { onIdTokenChanged, signOut } from 'firebase/auth';
 import { auth, hasAdminClaim } from './firebase';
-import { API_BASE_URL } from './config/api';
+import { API_BASE_URL, authHeaders } from './config/api';
 import { syncLibraryFromServer } from './services/researchLibrary';
 
 // URL for each in-app page. The page components are unchanged; they still get
@@ -144,6 +144,11 @@ function App() {
 
   const handleLogout = () => {
     loggingOut.current = true;
+    // Ends the session on the server too, so a copy of the token stops
+    // working. Not awaited: signing out here never waits on the network.
+    if (localStorage.getItem('token')) {
+      fetch(`${API_BASE_URL}/api/auth/logout`, { method: 'POST', headers: authHeaders() }).catch(() => {});
+    }
     localStorage.removeItem('token');
     // End the Firebase session too, so the next person on this browser can't
     // reuse it (e.g. to link sign-in methods).

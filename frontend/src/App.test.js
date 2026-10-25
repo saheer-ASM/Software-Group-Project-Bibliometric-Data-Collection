@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import App from './App';
 
@@ -43,4 +43,29 @@ test('/forgot-password shows the reset-password form', async () => {
 test('/verify-email without a pending registration shows its fallback', async () => {
   renderAt('/verify-email');
   expect(await screen.findByRole('heading', { name: 'No pending verification' })).toBeInTheDocument();
+});
+
+// Logout must end the session on the server too, not only forget the token in
+// this browser: a copied token would otherwise keep working.
+test('logout asks the server to end the session, then forgets the token', async () => {
+  localStorage.setItem('token', 'session-token');
+  global.fetch = jest.fn(async (url) => ({
+    ok: true,
+    status: String(url).endsWith('/api/auth/logout') ? 204 : 200,
+    json: async () => (String(url).endsWith('/api/auth/profile')
+      ? { id: 'u1', username: 'Test User', email: 'test@example.com', designation: 'Researcher' }
+      : {}),
+  }));
+  try {
+    renderAt('/about');
+    fireEvent.click(await screen.findByRole('button', { name: 'Logout' }));
+
+    expect(await screen.findByTestId('path')).toHaveTextContent(/^\/login$/);
+    const logout = global.fetch.mock.calls.find(([url]) => String(url).endsWith('/api/auth/logout'));
+    expect(logout).toBeDefined();
+    expect(logout[1]).toMatchObject({ method: 'POST', headers: { Authorization: 'Bearer session-token' } });
+    expect(localStorage.getItem('token')).toBeNull();
+  } finally {
+    delete global.fetch;
+  }
 });

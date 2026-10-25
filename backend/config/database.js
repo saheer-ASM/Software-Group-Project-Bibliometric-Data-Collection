@@ -1,4 +1,5 @@
 const path = require('path');
+const { Worker } = require('node:worker_threads');
 
 // The bibliometric data is the OpenAlex pipeline's local SQLite database,
 // OpenAlex_Data_Collection/database/openalex.db -- the file the Python scripts
@@ -9,9 +10,8 @@ const DEFAULT_DB_PATH = path.resolve(
   __dirname, '..', '..', 'OpenAlex_Data_Collection', 'database', 'openalex.db'
 );
 
-let DatabaseSync;
 try {
-  ({ DatabaseSync } = require('node:sqlite'));
+  require('node:sqlite');
 } catch {
   throw new Error(
     'The backend reads the local SQLite database through node:sqlite, '
@@ -25,56 +25,148 @@ function resolveDatabasePath(env) {
   return path.isAbsolute(configured) ? configured : path.resolve(__dirname, '..', configured);
 }
 
-const dbPath = resolveDatabasePath(process.env);
+const positive = (value, fallback) => {
+  const number = Number.parseInt(value, 10);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+};
 
-// One connection for the whole process. Node caches this module, so every
-// route that requires it shares it. It is opened on first use rather than at
-// startup, so a missing file is reported by /api/health instead of crashing
-// the server, and is retried on the next query.
-let db = null;
+// Raised by the pool itself rather than by SQLite; both mean "try again later".
+const QUEUE_FULL = 'ERR_DB_QUEUE_FULL';
+const QUERY_TIMEOUT = 'ERR_DB_QUERY_TIMEOUT';
 
-function connection() {
-  if (db) return db;
-  // Read-only: the backend never writes. The pipeline scripts can keep
-  // updating the file meanwhile; busy_timeout makes a read wait for their
-  // commit instead of failing at once.
-  const opened = new DatabaseSync(dbPath, { readOnly: true });
-  opened.exec('PRAGMA busy_timeout = 10000');
-  // SQLite's LOWER() only folds A-Z. Name searches containing other letters
-  // use this instead so they stay case-insensitive (services/authorQuery.js).
-  opened.function('unicode_lower', { deterministic: true },
-    (value) => (value === null ? null : String(value).toLowerCase()));
-  db = opened;
-  return db;
-}
-
-// Prepared statements, keyed by their SQL. Route queries are assembled from a
-// fixed set of fragments, so this stays small; the cap is only a safety net.
-const statements = new Map();
-const MAX_STATEMENTS = 500;
-
-function prepare(sql) {
-  let statement = statements.get(sql);
-  if (!statement) {
-    if (statements.size >= MAX_STATEMENTS) statements.clear();
-    statement = connection().prepare(sql);
-    statements.set(sql, statement);
-  }
-  return statement;
+function poolError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }
 
 /**
- * Runs one statement. Same result shape as pg -- { rows, rowCount } -- so the
- * routes read results the way they always have. Placeholders are SQLite's
- * numbered ?1, ?2, ...: like PostgreSQL's $1, each may appear several times.
+ * Runs queries on `workers` threads, each with its own read-only connection
+ * (config/databaseWorker.js). node:sqlite is synchronous, so on the main
+ * thread one slow scan stalled every request in the process; here it holds
+ * one worker and the rest of the server keeps answering.
+ *
+ * - At most `workers` statements run at once; the rest wait in a queue.
+ * - Past `maxQueue` waiting queries, new ones fail at once (503) instead of
+ *   piling up behind a flood.
+ * - A caller stops waiting after `timeoutMs` (503). SQLite cannot be stopped
+ *   mid-statement from outside, so a running statement still finishes on its
+ *   worker, which then takes the next query; a queued one is dropped.
  */
-async function query(sql, params = []) {
-  const rows = prepare(sql).all(...params);
-  return { rows, rowCount: rows.length };
+function createPool({ dbPath, workers = 2, maxQueue = 64, timeoutMs = 90_000 }) {
+  const live = new Set();
+  const idle = [];
+  const queue = [];
+  let nextId = 1;
+  let closed = false;
+
+  function spawn() {
+    const worker = new Worker(path.join(__dirname, 'databaseWorker.js'), { workerData: { dbPath } });
+    worker.task = null;
+    live.add(worker);
+
+    worker.on('message', ({ id, rows, error }) => {
+      const { task } = worker;
+      worker.task = null;
+      if (task && task.id === id) task.settle(error ? Object.assign(new Error(error.message), error) : null, rows);
+      release(worker);
+    });
+
+    // A crashed worker takes only its own query with it; the next query
+    // that needs a thread starts a replacement.
+    const lost = (error) => {
+      if (worker.lost) return;
+      worker.lost = true;
+      live.delete(worker);
+      const index = idle.indexOf(worker);
+      if (index !== -1) idle.splice(index, 1);
+      const { task } = worker;
+      worker.task = null;
+      if (task) task.settle(error || new Error('The database worker stopped unexpectedly'));
+      dispatch();
+    };
+    worker.on('error', lost);
+    worker.on('exit', () => lost());
+    return worker;
+  }
+
+  // An idle worker does not keep the process alive; one with a query does.
+  function release(worker) {
+    if (worker.lost) return;
+    worker.unref();
+    idle.push(worker);
+    dispatch();
+  }
+
+  function dispatch() {
+    while (queue.length && !closed) {
+      let worker = idle.pop();
+      if (!worker) {
+        if (live.size >= workers) return;
+        worker = spawn();
+      }
+      const task = queue.shift();
+      worker.task = task;
+      worker.ref();
+      worker.postMessage({ id: task.id, sql: task.sql, params: task.params, cache: task.cache });
+    }
+  }
+
+  /**
+   * Runs one statement. Same result shape as pg -- { rows, rowCount } -- so
+   * the routes read results the way they always have. Placeholders are
+   * SQLite's numbered ?1, ?2, ...: like PostgreSQL's $1, each may appear
+   * several times.
+   *
+   * Options: `cache` reuses the result until the database changes (per
+   * worker); `priority` jumps the queue (the health check).
+   */
+  function query(sql, params = [], { cache = false, priority = false } = {}) {
+    if (queue.length >= maxQueue) {
+      return Promise.reject(poolError(QUEUE_FULL, `More than ${maxQueue} database queries are waiting`));
+    }
+    return new Promise((resolve, reject) => {
+      const task = { id: nextId++, sql, params, cache, settled: false };
+      const timer = setTimeout(() => {
+        const index = queue.indexOf(task);
+        if (index !== -1) queue.splice(index, 1);
+        task.settle(poolError(QUERY_TIMEOUT, `The database query did not finish within ${timeoutMs} ms`));
+      }, timeoutMs);
+      timer.unref();
+      task.settle = (error, rows) => {
+        if (task.settled) return;
+        task.settled = true;
+        clearTimeout(timer);
+        if (error) reject(error);
+        else resolve({ rows, rowCount: rows.length });
+      };
+      if (priority) queue.unshift(task);
+      else queue.push(task);
+      dispatch();
+    });
+  }
+
+  // Stops every worker (tests; the server simply exits).
+  function close() {
+    closed = true;
+    return Promise.all([...live].map((worker) => worker.terminate()));
+  }
+
+  return { query, close };
 }
 
-// pg-style client for code that holds one across several queries. The single
-// connection serves every request, so release() has nothing to give back.
+const dbPath = resolveDatabasePath(process.env);
+const pool = createPool({
+  dbPath,
+  workers: positive(process.env.DB_WORKERS, 2),
+  maxQueue: positive(process.env.DB_MAX_QUEUE, 64),
+  timeoutMs: positive(process.env.DB_QUERY_TIMEOUT_MS, 90_000),
+});
+
+const { query } = pool;
+
+// pg-style client for code that holds one across several queries. Every
+// query goes through the shared pool, so release() has nothing to give back.
 async function connect() {
   return { query, release() {} };
 }
@@ -94,15 +186,22 @@ const HINTS = {
   26: 'the file is not a SQLite database -- check OPENALEX_DB_PATH', // SQLITE_NOTADB
 };
 
+// The pool's own "try again later" errors.
+const BUSY = {
+  [QUEUE_FULL]: 'too many queries are waiting for the database',
+  [QUERY_TIMEOUT]: 'a query took longer than DB_QUERY_TIMEOUT_MS',
+};
+
 const resultCode = (error) => (error && Number.isInteger(error.errcode) ? error.errcode & 0xff : null);
 
 /** True when the error means "try again later" (HTTP 503) rather than a failed query. */
 function isUnavailable(error) {
-  return resultCode(error) in UNAVAILABLE;
+  return Boolean(error && error.code in BUSY) || resultCode(error) in UNAVAILABLE;
 }
 
 /** A one-line, log-safe reason for a database failure: the SQLite code, a hint, and the message. */
 function describeDbError(error) {
+  if (error && error.code in BUSY) return `[pool] ${BUSY[error.code]} (${error.message})`;
   const code = resultCode(error);
   const message = String((error && error.message) || error || 'unknown error');
   const hint = HINTS[code];
@@ -114,6 +213,7 @@ module.exports = {
   connect,
   isUnavailable,
   describeDbError,
+  createPool,
   // Where the backend reads from, for log lines.
   dbTarget: dbPath,
 };

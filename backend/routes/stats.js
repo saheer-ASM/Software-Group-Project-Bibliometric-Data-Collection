@@ -22,19 +22,15 @@ const STATS_SQL = `
 
 // The counts scan every publication, author and field classification --
 // several seconds on SQLite -- and change only when a pipeline script writes
-// to the database. PRAGMA data_version changes exactly then, so the last
-// result is reused until it does.
-let cached = null;
+// to the database, so the result is cached until it does. The cache lives in
+// config/database.js: PRAGMA data_version is per connection, and each query
+// may now run on a different worker's connection.
 
 // Read-only aggregate counts for the dashboard Quick Stats cards.
 router.get('/', async (_req, res) => {
   try {
-    const version = (await pool.query('PRAGMA data_version')).rows[0]?.data_version;
-    if (!cached || cached.version !== version) {
-      const result = await pool.query(STATS_SQL);
-      cached = { version, stats: result.rows[0] };
-    }
-    return res.json(cached.stats);
+    const result = await pool.query(STATS_SQL, [], { cache: true });
+    return res.json(result.rows[0]);
   } catch (error) {
     console.error('Dashboard stats query failed:', error);
     const unavailable = pool.isUnavailable(error);

@@ -1,9 +1,10 @@
-const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '..', 'env') });
+// Configuration comes from backend/.env (or the container's environment) only.
+// A second load from a file named "env" in the repository root was removed: a
+// stray file there could silently inject settings such as JWT_SECRET.
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const admin = require('firebase-admin');
+const { getApps } = require('firebase-admin/app');
 const pool = require('./config/database');
 const authRoutes = require('./routes/auth');
 const authorRoutes = require('./routes/authors');
@@ -12,8 +13,13 @@ const statsRoutes = require('./routes/stats');
 const compareRoutes = require('./routes/compare');
 const libraryRoutes = require('./routes/library');
 const rateLimit = require('./middleware/rateLimit');
+const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
+// Do not advertise the framework (X-Powered-By: Express). The other security
+// headers are set once, for the whole site, by the edge nginx
+// (production/nginx/default.conf).
+app.disable('x-powered-by');
 
 // Which proxies may report the client address in X-Forwarded-For. Unset (local
 // development, no proxy) leaves req.ip as the socket address. Behind the
@@ -74,8 +80,9 @@ let lastDatabaseFailure = null;
 async function checkDatabase() {
   try {
     // Reads a real table: SELECT 1 alone would succeed even when the path
-    // points at a file that is not this database.
-    await pool.query('SELECT 1 FROM author LIMIT 1');
+    // points at a file that is not this database. Goes ahead of queued
+    // searches, so a busy pool does not read as a dead database.
+    await pool.query('SELECT 1 FROM author LIMIT 1', [], { priority: true });
     if (lastDatabaseFailure !== null) {
       console.log(`[db] database ${pool.dbTarget} is readable again`);
       lastDatabaseFailure = null;
@@ -98,7 +105,7 @@ app.get('/api/health', async (_req, res) => {
 
   const dependencies = {
     database,
-    firebaseAdmin: admin.apps.length ? 'configured' : 'not_configured',
+    firebaseAdmin: getApps().length ? 'configured' : 'not_configured',
   };
   const healthy = Object.values(dependencies).every((value) =>
     value === 'connected' || value === 'configured');
@@ -108,6 +115,9 @@ app.get('/api/health', async (_req, res) => {
     dependencies,
   });
 });
+
+// Last, after every route: errors no route answered itself.
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 5005;
 // Defaults to localhost so local development is unchanged. In a container this
