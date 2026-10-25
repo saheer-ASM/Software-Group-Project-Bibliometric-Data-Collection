@@ -3,7 +3,6 @@
 // stray file there could silently inject settings such as JWT_SECRET.
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const { getApps } = require('firebase-admin/app');
 const pool = require('./config/database');
 const authRoutes = require('./routes/auth');
@@ -14,6 +13,7 @@ const compareRoutes = require('./routes/compare');
 const libraryRoutes = require('./routes/library');
 const rateLimit = require('./middleware/rateLimit');
 const errorHandler = require('./middleware/errorHandler');
+const createCors = require('./middleware/cors');
 
 const app = express();
 // Do not advertise the framework (X-Powered-By: Express). The other security
@@ -36,30 +36,16 @@ function parseTrustProxy(value) {
 }
 app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
 
-// Extra origins allowed in deployed environments, comma-separated, e.g.
+// Pages on the site's own address (any tunnel link included) and on
+// http://localhost:<port> are always allowed (middleware/cors.js). Only OTHER
+// sites that must call this API need listing, comma-separated, e.g.
 // CORS_ALLOWED_ORIGINS=https://scholarmetrics.example.com
-// Unset (the default) leaves the original localhost-only behaviour untouched.
 const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean);
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (
-        !origin ||
-        /^http:\/\/localhost:\d+$/.test(origin) ||
-        allowedOrigins.includes(origin)
-      ) {
-        return callback(null, true);
-      }
-
-      return callback(new Error('Not allowed by CORS'));
-    },
-    credentials: true,
-  })
-);
+app.use(createCors(allowedOrigins));
 app.use(express.json());
 
 // Applied to the whole API, before the routers, so every endpoint gets the
