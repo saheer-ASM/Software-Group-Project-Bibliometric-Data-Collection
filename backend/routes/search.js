@@ -213,6 +213,14 @@ const CONTRIBUTIONS = new Set(['primary', 'major', 'minor', 'coauthor']);
 // Every pub_id in the database is an OpenAlex work id: "W" followed by digits.
 const PUBLICATION_ID_PATTERN = /^W\d{1,20}$/;
 
+// Longest title filter used. Picking a suggestion puts a whole title in the
+// filter, and real titles reach about 1,800 characters, so longer input is cut
+// to this length rather than refused.
+const MAX_TITLE_FILTER = 2000;
+
+// Escapes LIKE's wildcards (and the escape character itself) for ESCAPE '\'.
+const escapeLike = (text) => text.replace(/[\\%_]/g, '\\$&');
+
 function buildPublicationFilters(query, params) {
   const clauses = [AUTHOR_PUBLICATIONS_SQL];
   const add = (value) => { params.push(value); return `?${params.length}`; };
@@ -224,8 +232,11 @@ function buildPublicationFilters(query, params) {
   if (PUBLICATION_ID_PATTERN.test(pubId)) clauses.push(`p.pub_id = ${add(pubId)}`);
 
   // SQLite's LIKE ignores case for ASCII letters, as PostgreSQL's ILIKE did.
-  const title = (query.query || '').trim();
-  if (title) clauses.push(`p.pub_title LIKE ${add(`%${title}%`)}`);
+  // The text is matched literally, like the browser's own title suggestions:
+  // % and _ typed by the user are escaped, so they are not wildcards that
+  // match everything or make the scan more expensive.
+  const title = typeof query.query === 'string' ? query.query.trim().slice(0, MAX_TITLE_FILTER) : '';
+  if (title) clauses.push(`p.pub_title LIKE ${add(`%${escapeLike(title)}%`)} ESCAPE '\\'`);
 
   const field = (query.field || '').trim();
   if (field) {
@@ -539,6 +550,10 @@ router.get('/publications', async (req, res) => {
   // author's first page instead of the one publication that was asked for.
   if (req.query.pubId !== undefined && !PUBLICATION_ID_PATTERN.test(String(req.query.pubId).trim())) {
     return res.status(400).json({ message: 'pubId must be a publication id such as W1234567' });
+  }
+  // ?query=a&query=b arrives as an array; anything but one string is not a title.
+  if (req.query.query !== undefined && typeof req.query.query !== 'string') {
+    return res.status(400).json({ message: 'The title filter must be a single text value.' });
   }
 
   const { page, limit, offset } = parsePaging(req.query);
