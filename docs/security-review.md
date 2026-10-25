@@ -32,6 +32,8 @@
 
 ## 1. High: the rate limiter treats every user as one client
 
+> **Status: Fixed** in `69d37d5`. Express trusts the proxy (`TRUST_PROXY`), nginx replaces `X-Forwarded-For` with the visitor's IP, and a per-IP limit runs at the edge.
+
 **Where:** `backend/middleware/rateLimit.js:29-34` and `backend/server.js` (no `app.set('trust proxy', …)`)
 
 The request path is Cloudflare → cloudflared → edge nginx → backend. Express doesn't have `trust proxy` set, so `req.ip` is the socket peer, which is the **nginx container's IP on `appnet`**. Every visitor therefore shares one counter: `RATE_LIMIT_MAX_REQUESTS=300` per 60 s.
@@ -47,6 +49,8 @@ The request path is Cloudflare → cloudflared → edge nginx → backend. Expre
 - Add an nginx `limit_req_zone` keyed on the real client IP as a first layer, with a much stricter zone for `/api/auth/`.
 
 ## 2. High: unauthenticated heavy queries block the event loop
+
+> **Status: Fixed** in `69d37d5` and `5bca3a6`. The routes need a session and a per-account limit, and SQLite queries run on worker threads, so a slow query no longer blocks the server: `/api/health` answered in 0.035 s during a slow query (9.9 s before). The scans themselves are still slow; see [Accepted residual risk](#accepted-residual-risk).
 
 **Where:**
 - `backend/config/database.js:41,71-74`: `DatabaseSync` (`node:sqlite`) is **synchronous**.
@@ -69,6 +73,8 @@ A few concurrent anonymous requests with random `authorId` values, or with non-A
 
 ## 3. Medium: unverified tokens can rebind a legacy profile's `firebaseUid`
 
+> **Status: Fixed** in `935a821`. Unverified tokens never claim a profile by email and never write; a profile held by another live account gives 409.
+
 **Where:** `backend/routes/auth.js:54-70` (`findProfile`), called from `/registration-status` (line 239) and `/registration/profile` (line 261), both with `requireVerifiedEmail: false`.
 
 `findProfile` falls back to `findByEmail`. It then **writes** `firebaseUid = decoded.uid` and `emailVerified`, and its comment says this is safe because "the token proves ownership of this verified email". On these two routes the email is **not** verified. `/register-profile` guards against this (`existing.firebaseUid !== decoded.uid → 409`), but these two routes don't.
@@ -89,6 +95,8 @@ No session token is issued, because verification is still required, so this is n
 
 ## 4. Medium: sessions can't be revoked
 
+> **Status: Fixed** in `0e31ab8`. Every token carries a `tokenVersion`; logout and password reset end every session of the account. The token is still kept in `localStorage`, limited by the CSP from finding 7.
+
 **Where:** `backend/routes/auth.js:10-14` (`expiresIn: '7d'`), `backend/middleware/auth.js`, and `frontend/src/AuthForm.jsx:94`, `CompleteProfile.jsx:72`, `ResetPassword.jsx:111` (`localStorage.setItem('token', …)`).
 
 - The backend JWT is valid for 7 days and has no revocation check. Logout (`App.js:145`) only deletes the browser's copy.
@@ -101,6 +109,8 @@ No session token is issued, because verification is still required, so this is n
 
 ## 5. Medium: shared `JWT_SECRET` and an insecure fallback
 
+> **Status: Fixed** in `17998ba`. There is no fallback: the server refuses to start without a `JWT_SECRET` of at least 32 characters. The production secret was rotated on 2026-10-25 and takes effect at the next backend rebuild.
+
 **Where:** `backend/middleware/auth.js:3` and `backend/routes/auth.js:6` (`process.env.JWT_SECRET || 'dev-secret'`), plus `backend/.env` and `production/.env`.
 
 - I compared the two files without printing the values: `backend/.env` and `production/.env` contain the **same** 54-character `JWT_SECRET`. Any token minted by a dev or local backend is accepted in production. That includes any build where a teammate has the dev `.env`, and the in-memory user store where ids are `"1"`, `"2"`, … Anyone holding the dev `.env` can forge production sessions for any user id.
@@ -112,6 +122,8 @@ Also check `backend/server.js:2`. It loads dotenv from `path.resolve(__dirname, 
 
 ## 6. Medium: legacy password login is still live
 
+> **Status: Fixed** in `346c5a4`. The endpoint answers 410.
+
 **Where:** `backend/routes/auth.js:322-349`
 
 `POST /api/auth/login` still checks bcrypt hashes stored in Firestore for legacy users. It has no per-account lockout or delay, and the only limit is the global shared one (finding 1). Each attempt also costs a bcrypt-12 compare, roughly 250 ms of CPU, which adds to finding 2. A 500 response leaks `err.message`.
@@ -119,6 +131,8 @@ Also check `backend/server.js:2`. It loads dotenv from `path.resolve(__dirname, 
 **Fix:** Migrate the remaining legacy users to Firebase. `/reset-password` already clears `user.password`, so you could force a reset. Then return 410 from `/login`, as `/register` and `/change-password` already do. Until then, add a per-username and per-IP failure counter with exponential back-off.
 
 ## 7. Medium: no security headers
+
+> **Status: Fixed** in `3b7d69b`. The edge nginx sends all six headers on every response, the frontend build has no inline script, and `X-Powered-By` is gone. Active after the next production rebuild.
 
 **Where:** `production/nginx/default.conf`, `production/nginx/frontend.conf`, `backend/server.js` (no `helmet`; `X-Powered-By: Express` is sent)
 
@@ -138,6 +152,8 @@ Start with `Content-Security-Policy-Report-Only` and tune it against the Firebas
 
 ## 8. Medium: vulnerable backend dependencies
 
+> **Status: Fixed** in `a9693a9`. firebase-admin 14.5.0 (modular API) and express 4.22.3; `npm audit --omit=dev` finds 0; `backend/package-lock.json` is committed.
+
 `npm audit --omit=dev` in `backend/` reports **3 high, 7 moderate** issues:
 - **body-parser** (high): DoS via trailing bytes after a compressed body. `express.json()` is reachable without authentication.
 - **node-forge** (high, via firebase-admin): RSA PKCS#1 v1.5 signature verification accepts extra nested elements.
@@ -147,6 +163,8 @@ Start with `Content-Security-Policy-Report-Only` and tune it against the Firebas
 
 ## 9. Low: internal error messages returned to clients
 
+> **Status: Fixed** in `bc8cd6d`. Details stay in the server log; a final JSON error handler replaces Express's stack-trace page.
+
 **Where:** `routes/auth.js:27` (`error: err.message` on every Firebase failure), `:347`, `:420`; `routes/authors.js:17,30,49`.
 
 Firebase Admin and SQLite messages can reveal project ids, table names or internal state. `routes/search.js`, `compare.js` and `stats.js` already do this correctly: they log server-side and return a generic message.
@@ -155,6 +173,8 @@ Firebase Admin and SQLite messages can reveal project ids, table names or intern
 
 ## 10. Low: dead code with dangerous capabilities
 
+> **Status: Fixed** in `26c3245`. The listed functions, `services/userStore.js` and the `/:id` route are removed.
+
 - `services/firebaseUserStore.js:114-129` `ensureFirebaseAuthUser`: if the email already exists, it **overwrites that Firebase user's password** using Admin rights. It is reachable only through `createUser`, which no route calls today. If anyone re-wires it, it becomes a direct account takeover.
 - `findOrCreateSocialUser` and `updatePassword(..., {syncFirebase})` are also unused.
 - `GET /api/authors/:id` (`services/authorSearchService.js`, `repositories/authorRepository.js:20-112`) queries tables that don't exist in `openalex.db`, and calls `upsertMetrics` (an `INSERT`) on a read-only handle. Every call errors and leaks the SQLite message (finding 9).
@@ -162,6 +182,8 @@ Firebase Admin and SQLite messages can reveal project ids, table names or intern
 **Fix:** Delete these functions and the `/:id` route, or put them behind a feature flag.
 
 ## 11. Low: local secret hygiene
+
+> **Status: Partly fixed** (2026-10-25). The production `JWT_SECRET` is rotated; on the remediation PC there is no `.env.bak` and the repository is outside OneDrive. Still open: the Postgres credentials, the service-account key and teammates' OneDrive copies; see [Open items](#open-items-owner-actions).
 
 None of these files are in git, but they are on disk:
 - `backend/serviceAccountKey.json` is a Firebase **service-account private key**, with full Admin rights over Auth and Firestore. It sits in `OneDrive\Desktop\…`, so it is synced to Microsoft cloud storage and to every device on that OneDrive account.
@@ -176,17 +198,23 @@ None of these files are in git, but they are on disk:
 
 ## 12. Low: nginx trusts client-supplied headers
 
+> **Status: Fixed** in `7a721e2`. `X-Forwarded-Proto` is believed only from Cloudflare and only as `http`/`https`, `frontend.conf` trusts private ranges only, and `frontend/deploy/nginx.conf` is removed.
+
 - `production/nginx/00-upgrade-map.conf:16-19`: `$forwarded_proto` passes the client's own `X-Forwarded-Proto` through unchanged. Nothing reads it today, but if the backend ever builds absolute URLs or secure-cookie logic from it, a client can spoof it. Overwrite it with the value Cloudflare guarantees: `proxy_set_header X-Forwarded-Proto https;`.
 - `production/nginx/frontend.conf:13`: `set_real_ip_from 0.0.0.0/0` trusts `X-Forwarded-For` from anyone, which only affects log accuracy. Restrict it to the `appnet` subnet.
 - `frontend/deploy/nginx.conf` is an older stand-alone config without `server_tokens off` and the hardening above. Delete it, or keep it in sync, so nobody deploys it by mistake.
 
 ## 13. Low: `LIKE` wildcard injection
 
+> **Status: Fixed** in `e3fcf42`. Wildcards are escaped; the filter is cut at 2,000 characters rather than 200, because real titles reach 1,790.
+
 **Where:** `backend/routes/search.js:216-217`. `` `%${title}%` `` is bound safely, so this is not SQL injection. However, `%` and `_` in user input act as wildcards, and patterns such as `%_%_%_%…` make the scan more expensive (see finding 2).
 
 **Fix:** Escape them: `title.replace(/[\\%_]/g, '\\$&')` together with `LIKE ? ESCAPE '\'`, and cap `title` at around 200 characters.
 
 ## 14. Info: frontend dependency audit
+
+> **Status: Mitigated** in `f868984`. Build tools are `devDependencies` and axios is gone: runtime findings went from 55 to 4, all `@grpc/grpc-js`, which is not in the browser bundle. The build-tool findings need a move to Vite.
 
 `npm audit --omit=dev` in `frontend/` reports **2 critical, 28 high**. Almost all come from `react-scripts@5.0.1` (webpack-dev-server, svgo, serialize-javascript, shell-quote, launch-editor, …), which is **build or dev-server tooling** and doesn't ship in the production bundle. However, because `react-scripts` is listed under `dependencies`, the audit counts it as runtime. The runtime-relevant entries are:
 - `firebase` → `@grpc/grpc-js`, which affects the Node transport, not browsers;
@@ -199,6 +227,8 @@ None of these files are in git, but they are on disk:
 - Never expose `npm start` (webpack-dev-server) on a network.
 
 ## 15. Medium: Semantic Scholar API key committed in a public repository
+
+> **Status: File untracked** in the commit after `b292f99`. **The key must still be replaced**: it stays readable in the repository history.
 
 *Found on 2026-10-25 during remediation, outside the original scope.*
 
@@ -240,11 +270,11 @@ Branch `security-fixes`, one commit per finding. Every fix has automated tests (
 | 8 | `a9693a9` | firebase-admin 12.7.0 → 14.5.0 (code moved to the modular API), express ≥ 4.22.3, bcryptjs dropped. `backend/package-lock.json` is committed. | `npm audit --omit=dev`: 9 → 0. Read-only calls against the real Firebase project; Docker image built with `npm ci`. |
 | 9 | `bc8cd6d` | Error details stay in the server log. A final JSON error handler replaces Express's stack-trace page. | The old code returned Firebase error text, and stack traces with file paths. |
 | 10 | `26c3245` | Removed `ensureFirebaseAuthUser`/`createUser`, `updatePassword`, `comparePassword`, `findOrCreateSocialUser`, `services/userStore.js`, `GET /api/authors/:id` and the legacy repository and metric code behind it. | On the real database the old route returned the SQLite error; the route is now gone. |
-| 11 | this commit | Production `JWT_SECRET` rotated (see 5). No `.env.bak` exists and the repository is outside OneDrive on the remediation PC. The rest is owner actions, listed below. | No secret file is tracked; Compose still accepts `production/.env`. |
+| 11 | — (local files) | Production `JWT_SECRET` rotated (see 5). No `.env.bak` exists and the repository is outside OneDrive on the remediation PC. The rest is owner actions, listed below. | No secret file is tracked; Compose still accepts `production/.env`. |
 | 12 | `7a721e2` | `X-Forwarded-Proto` is believed only from Cloudflare, and only as `http`/`https`. `frontend.conf` trusts private ranges only. The stale `frontend/deploy/nginx.conf` is removed. | In containers the old map passed `https`, `javascript` and `evil` through; the new one does not. |
 | 13 | `e3fcf42` | `%`, `_` and `\` are escaped (`LIKE … ESCAPE '\'`). The filter is cut to 2,000 characters instead of the suggested 200, because picking a suggestion inserts a whole title and 25,982 real titles are longer than 200 characters. A repeated parameter gets 400. | Real author: `%` and `_` each matched 32 of 32 publications before, 0 after. |
 | 14 | `f868984` | Build and test tools moved to `devDependencies`; unused `axios` and `services/apiService.js` removed; firebase 12.19.0. `frontend/package-lock.json` is committed. | Runtime audit 55 → 4. The production frontend image builds with `npm ci` and contains no gRPC or axios code. |
-| 15 | this commit | `data-collection-for-tunning/.env` is no longer tracked; the file stays on disk. | — |
+| 15 | after `b292f99` | `data-collection-for-tunning/.env` is no longer tracked; the file stays on disk. | — |
 
 ### Accepted residual risk
 
