@@ -3,20 +3,30 @@ const pool = require('../config/database');
 const authMiddleware = require('../middleware/auth');
 const { heavyQueryLimit } = require('../middleware/rateLimit');
 const { AUTHOR_ID_PATTERN } = require('../services/libraryAuthors');
+const searchIndex = require('../services/searchIndex');
 
 const router = express.Router();
 
-// A comparison scans author_contribution_weight and holds a database worker
-// while it runs: signed-in users only, within the shared search budget.
+// A comparison can scan author_contribution_weight (when the search index is
+// not usable) and holds a database worker while it runs: signed-in users only,
+// within the shared search budget.
 router.use(authMiddleware, heavyQueryLimit);
 const numeric = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
-// The selected authors' publications. The ten author slots have no index, so
-// this is a full scan of author_contribution_weight. In SQLite CROSS JOIN
-// fixes the join order: that table is scanned once (not once per author),
-// each row is checked against the MATERIALIZED authors, and only the rows
-// that match are looked up in publication.
-const SELECTED_PUBLICATIONS_SQL = `
+// The selected authors' publications, in two interchangeable forms.
+//
+// From the search index (services/searchIndex.js): one lookup per author.
+const INDEXED_PUBLICATIONS_SQL = `
+  FROM selected_authors selected
+  CROSS JOIN idx.author_publication author_pub ON author_pub.author_id = selected.author_id
+  CROSS JOIN publication p ON p.pub_id = author_pub.pub_id`;
+
+// Without it: the ten author slots have no index in openalex.db, so this is a
+// full scan of author_contribution_weight. In SQLite CROSS JOIN fixes the join
+// order: that table is scanned once (not once per author), each row is checked
+// against the MATERIALIZED authors, and only the rows that match are looked up
+// in publication.
+const SCANNED_PUBLICATIONS_SQL = `
   FROM author_contribution_weight acw
   CROSS JOIN selected_authors selected
   CROSS JOIN publication p ON p.pub_id = acw.pub_id
@@ -39,7 +49,15 @@ router.get('/', async (req, res) => {
   }
 
   try {
-    const summaryResult = await pool.query(
+    // Both queries below need the selected authors' publications: from the
+    // search index when it is usable, from the full scan otherwise.
+    const params = [JSON.stringify(uniqueAuthorIds)];
+    const run = (sqlFor) => searchIndex.query(pool.query, {
+      indexed: [sqlFor(INDEXED_PUBLICATIONS_SQL), params],
+      scan: [sqlFor(SCANNED_PUBLICATIONS_SQL), params],
+    });
+
+    const summaryResult = await run((selectedPublications) =>
       `WITH selected_authors AS MATERIALIZED (
          SELECT value AS author_id, key + 1 AS position
          FROM json_each(?1)
@@ -47,7 +65,7 @@ router.get('/', async (req, res) => {
        author_publications AS MATERIALIZED (
          SELECT selected.author_id, selected.position, p.pub_id,
            COALESCE(p.total_citation, 0) AS total_citation
-         ${SELECTED_PUBLICATIONS_SQL}
+         ${selectedPublications}
        ),
        publication_totals AS (
          SELECT ap.author_id,
@@ -83,9 +101,7 @@ router.get('/', async (req, res) => {
        LEFT JOIN self_citation_totals self_totals ON self_totals.author_id = selected.author_id
        LEFT JOIN author_total_cites total_cites ON total_cites.author_id = selected.author_id
        LEFT JOIN author_nm_index nm ON nm.author_id = selected.author_id
-       ORDER BY selected.position`,
-      [JSON.stringify(uniqueAuthorIds)]
-    );
+       ORDER BY selected.position`);
 
     if (summaryResult.rows.length !== uniqueAuthorIds.length) {
       return res.status(404).json({ message: 'One or more selected authors were not found.' });
@@ -98,13 +114,13 @@ router.get('/', async (req, res) => {
     // total_citation comes along in selected_publications instead of through
     // a second join to publication. DESC NULLS FIRST is PostgreSQL's default
     // order, which SQLite reverses.
-    const trendResult = await pool.query(
+    const trendResult = await run((selectedPublications) =>
       `WITH selected_authors AS MATERIALIZED (
          SELECT value AS author_id FROM json_each(?1)
        ),
        selected_publications AS MATERIALIZED (
          SELECT selected.author_id, p.pub_id, p.year, p.total_citation
-         ${SELECTED_PUBLICATIONS_SQL}
+         ${selectedPublications}
        ),
        publication_years AS (
          SELECT author_id, year, COUNT(*) AS publications
@@ -162,9 +178,7 @@ router.get('/', async (req, res) => {
        LEFT JOIN citation_years USING (author_id, year)
        LEFT JOIN adjusted_years USING (author_id, year)
        LEFT JOIN self_citation_years USING (author_id, year)
-       ORDER BY keys.year`,
-      [JSON.stringify(uniqueAuthorIds)]
-    );
+       ORDER BY keys.year`);
 
     const trendsByAuthor = new Map(uniqueAuthorIds.map((id) => [id, []]));
     trendResult.rows.forEach((row) => trendsByAuthor.get(row.author_id)?.push({

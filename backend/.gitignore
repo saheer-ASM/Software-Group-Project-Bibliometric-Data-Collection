@@ -36,3 +36,6 @@ serviceAccountKey.json
 
 # checkers
 test_db.py
+
+# Search index built from openalex.db (services/searchIndex.js), ~1 GB
+data/

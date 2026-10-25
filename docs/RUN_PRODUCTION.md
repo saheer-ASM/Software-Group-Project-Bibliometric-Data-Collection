@@ -73,7 +73,9 @@ docker compose --env-file production/.env -f production/compose.yaml ps
 
 - Website: **http://localhost**
 - Health check: http://localhost/api/health should show
-  `{"status":"ok","dependencies":{"database":"connected","firebaseAdmin":"configured"}}`
+  `{"status":"ok","dependencies":{"database":"connected","firebaseAdmin":"configured"},"searchIndex":"ready"}`.
+  Right after the first start `searchIndex` says `building` for about 2 minutes (see Good to
+  know); the site already works then, only searches are slower.
 
 The first pages after a start can take up to about a minute, because Docker reads the large
 database file slowly at first. After that it gets faster.
@@ -148,10 +150,17 @@ function dc { docker compose --env-file production/.env -f production/compose.ya
 
 - **Keep the PC on**, with Docker running (and the tunnel window open, for the public link).
 - **Anyone with the link** can open the site while the tunnel runs.
-- The backend answers **one database query at a time**, so the site gets slower when several
-  people use it at once.
+- The backend runs **two database queries at a time** (more wait their turn), so the site
+  gets slower when many people search at once.
 - The database is mounted **read-only**: the website can never change the data. Its location
   is set in `production\compose.yaml` (the `volumes:` line of the backend).
+- **Search index.** To make author profiles, Compare and name suggestions fast, the backend
+  builds a separate index file from the database (about 2 minutes in Docker, about 850 MB, in
+  the Docker volume `scholarmetrics-prod_search-index`). The database itself is not changed.
+  The index is kept across restarts and rebuilt by itself after the pipeline updates the
+  database; until then the site uses the slower original queries, with the same results. The
+  backend log shows `[index] …` lines. To start it over, stop the site, run
+  `docker volume rm scholarmetrics-prod_search-index`, and start again.
 
 ## Without Docker (for development)
 

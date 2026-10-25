@@ -17,6 +17,8 @@
 # --- dependencies and build output (reinstalled/rebuilt inside the image) ---
 **/node_modules
 frontend/build
+# The local search index (~1 GB); the container builds its own.
+backend/data
 **/__pycache__
 **/*.pyc
 .venv

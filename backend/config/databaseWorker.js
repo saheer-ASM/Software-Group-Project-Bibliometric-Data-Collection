@@ -25,7 +25,35 @@ function connection() {
   opened.function('unicode_lower', { deterministic: true },
     (value) => (value === null ? null : String(value).toLowerCase()));
   db = opened;
+  syncIndex();
   return db;
+}
+
+// The search index (services/searchIndex.js), attached as schema `idx`. It is
+// opened read-only like the main database (ATTACH inherits the connection's
+// flags). `wantedIndex` is what the pool last announced; `attachedIndex` what
+// this connection has.
+let wantedIndex = null;
+let attachedIndex = null;
+
+function syncIndex() {
+  if (!db || wantedIndex === attachedIndex) return;
+  try {
+    if (attachedIndex) db.exec('DETACH DATABASE idx');
+    attachedIndex = null;
+    // Statements and cached results may refer to the previous file.
+    statements.clear();
+    cache.clear();
+    cachedRows = 0;
+    if (wantedIndex) {
+      db.prepare('ATTACH DATABASE ?1 AS idx').run(wantedIndex);
+      attachedIndex = wantedIndex;
+    }
+  } catch (error) {
+    // Queries on idx then fail, and services/searchIndex.js falls back to the
+    // original queries.
+    console.error(`[index] a database worker could not attach the search index: ${error.message}`);
+  }
 }
 
 // Prepared statements, keyed by their SQL. Route queries are assembled from a
@@ -82,7 +110,13 @@ function cachedAll(sql, params) {
   return rows;
 }
 
-parentPort.on('message', ({ id, sql, params, cache: useCache }) => {
+parentPort.on('message', ({ control, path: indexPath, id, sql, params, cache: useCache }) => {
+  // Not a query: the pool announcing a (new) search index. No reply.
+  if (control === 'attach') {
+    wantedIndex = indexPath;
+    syncIndex();
+    return;
+  }
   try {
     const rows = useCache ? cachedAll(sql, params) : prepare(sql).all(...params);
     parentPort.postMessage({ id, rows });
