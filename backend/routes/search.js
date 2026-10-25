@@ -4,6 +4,7 @@ const authMiddleware = require('../middleware/auth');
 const { heavyQueryLimit } = require('../middleware/rateLimit');
 const { parseAuthorQuery, lowerFunctionFor } = require('../services/authorQuery');
 const { AUTHOR_ID_PATTERN } = require('../services/libraryAuthors');
+const searchIndex = require('../services/searchIndex');
 
 const router = express.Router();
 
@@ -27,9 +28,11 @@ const DEFAULT_PUBLICATION_LIMIT = 20;
 const MAX_PUBLICATION_LIMIT = 50;
 
 // Matches an author against the ten contribution-weight author slots. Those
-// columns have no index, so this scans all of author_contribution_weight
-// (about 3M rows). It runs once per request, in fetchAuthorPublicationIds;
-// every other query reuses that list through AUTHOR_PUBLICATIONS_SQL.
+// columns have no index in openalex.db, so this scans all of
+// author_contribution_weight (about 3M rows); it is the fallback for when the
+// search index cannot be used. It runs once per request, in
+// fetchAuthorPublicationIds; every other query reuses that list through
+// AUTHOR_PUBLICATIONS_SQL.
 const AUTHOR_MATCH_SQL = `?1 IN (acw.author1id, acw.author2id, acw.author3id, acw.author4id,
   acw.author5id, acw.author6id, acw.author7id, acw.author8id, acw.author9id, acw.author10id)`;
 
@@ -91,17 +94,27 @@ async function tableColumns(client, table) {
 }
 
 // Every publication of the author, as the JSON array AUTHOR_PUBLICATIONS_SQL
-// reads. Cached until the database changes, so "Load More" and filter changes
-// for the same author do not repeat the full scan.
+// reads. With the search index this is one lookup; without it (still being
+// built, or openalex.db just changed) the full scan gives the same list.
+// Cached until the database changes, so "Load More" and filter changes for the
+// same author do not repeat it.
 async function fetchAuthorPublicationIds(client, authorId) {
-  const result = await client.query(
-    `SELECT p.pub_id
-     FROM author_contribution_weight acw
-     JOIN publication p ON p.pub_id = acw.pub_id
-     WHERE ${AUTHOR_MATCH_SQL}`,
-    [authorId],
-    { cache: true }
-  );
+  const result = await searchIndex.query(client.query, {
+    indexed: [
+      `SELECT p.pub_id
+       FROM idx.author_publication ap
+       JOIN publication p ON p.pub_id = ap.pub_id
+       WHERE ap.author_id = ?1`,
+      [authorId],
+    ],
+    scan: [
+      `SELECT p.pub_id
+       FROM author_contribution_weight acw
+       JOIN publication p ON p.pub_id = acw.pub_id
+       WHERE ${AUTHOR_MATCH_SQL}`,
+      [authorId],
+    ],
+  }, { cache: true });
   return JSON.stringify(result.rows.map((row) => row.pub_id));
 }
 

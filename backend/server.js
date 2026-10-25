@@ -14,6 +14,7 @@ const libraryRoutes = require('./routes/library');
 const rateLimit = require('./middleware/rateLimit');
 const errorHandler = require('./middleware/errorHandler');
 const createCors = require('./middleware/cors');
+const searchIndex = require('./services/searchIndex');
 
 const app = express();
 // Do not advertise the framework (X-Powered-By: Express). The other security
@@ -99,6 +100,8 @@ app.get('/api/health', async (_req, res) => {
   res.status(healthy ? 200 : 503).json({
     status: healthy ? 'ok' : 'degraded',
     dependencies,
+    // Speed only, so not part of `status`: searches work without it, slower.
+    searchIndex: searchIndex.status(),
   });
 });
 
@@ -120,4 +123,6 @@ app.listen(PORT, HOST, () => {
   checkDatabase().then((ok) => {
     if (ok) console.log('[db] connected to the database');
   });
+  // Builds (or reuses) the search index in the background.
+  searchIndex.start();
 });

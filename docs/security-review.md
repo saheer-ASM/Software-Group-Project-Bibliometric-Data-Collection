@@ -50,7 +50,7 @@ The request path is Cloudflare → cloudflared → edge nginx → backend. Expre
 
 ## 2. High: unauthenticated heavy queries block the event loop
 
-> **Status: Fixed** in `69d37d5` and `5bca3a6`. The routes need a session and a per-account limit, and SQLite queries run on worker threads, so a slow query no longer blocks the server: `/api/health` answered in 0.035 s during a slow query (9.9 s before). The scans themselves are still slow; see [Accepted residual risk](#accepted-residual-risk).
+> **Status: Fixed** in `69d37d5` and `5bca3a6`. The routes need a session and a per-account limit, and SQLite queries run on worker threads, so a slow query no longer blocks the server: `/api/health` answered in 0.035 s during a slow query (9.9 s before). The lookups themselves now use a separate search index; see [Accepted residual risk](#accepted-residual-risk).
 
 **Where:**
 - `backend/config/database.js:41,71-74`: `DatabaseSync` (`node:sqlite`) is **synchronous**.
@@ -278,7 +278,7 @@ Branch `security-fixes`, one commit per finding. Every fix has automated tests (
 
 ### Accepted residual risk
 
-- **2:** author lookups are still full scans of `author_contribution_weight`, taking seconds per uncached author. They no longer block the server, and at most `DB_WORKERS` run at once. An indexed `author_id → pub_id` table built by the pipeline would make them fast; that is a performance improvement, not a security need.
+- **2:** since the search-index commit, author lookups, Compare and name suggestions use a separate index file the backend builds from `openalex.db` (which stays read-only): an author's publications take milliseconds instead of 1–13 s. The full scans remain only as the fallback while the index is being built or right after the pipeline changed the database; they never block the server, and at most `DB_WORKERS` run at once. Two-letter name searches cannot use the trigram index and still scan the author table.
 - **4:** the session token is still kept in `localStorage`. The CSP from 7 limits what an injected script could do. An `HttpOnly` cookie would need CSRF protection and is not planned.
 - **14:** the 4 remaining runtime findings are all `@grpc/grpc-js` via `@firebase/firestore`. Both advisories concern gRPC servers, the browser bundle contains no gRPC code, and Firestore pins the vulnerable range even in firebase 13. The build-tool findings go away only with a move from Create React App to Vite.
 

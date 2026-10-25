@@ -34,6 +34,13 @@ COPY backend/ ./
 ENV PORT=5005
 ENV HOST=0.0.0.0
 
+# The search index (backend/services/searchIndex.js) is built from openalex.db
+# into this folder, which the unprivileged user must be able to write.
+# production/compose.yaml mounts a named volume here so the ~1 GB index
+# survives rebuilds; without it the index is simply rebuilt in the container.
+ENV SEARCH_INDEX_DIR=/index
+RUN mkdir -p /index && chown node:node /index
+
 EXPOSE 5005
 
 # Run as the image's unprivileged user rather than root.

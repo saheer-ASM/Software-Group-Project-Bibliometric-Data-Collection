@@ -109,6 +109,10 @@ services:
       # Desktop reads Windows drives more slowly than Node on the host does,
       # so the first queries after a start are slower than with `npm start`.
       - ../OpenAlex_Data_Collection/database:/data:ro
+      # The search index built from openalex.db (~850 MB). A named volume, so it
+      # survives rebuilds; the backend rebuilds it itself whenever openalex.db
+      # changes (backend/services/searchIndex.js).
+      - search-index:/index
     healthcheck:
       # /api/health is defined in server.js and returns 503 when the database
       # or Firebase Admin is unavailable, so nginx only starts once the
@@ -124,3 +128,6 @@ services:
 networks:
   appnet:
     driver: bridge
+
+volumes:
+  search-index:

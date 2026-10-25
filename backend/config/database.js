@@ -59,11 +59,14 @@ function createPool({ dbPath, workers = 2, maxQueue = 64, timeoutMs = 90_000 }) 
   const queue = [];
   let nextId = 1;
   let closed = false;
+  let indexFile = null; // the search index every worker has attached (attachIndex)
 
   function spawn() {
     const worker = new Worker(path.join(__dirname, 'databaseWorker.js'), { workerData: { dbPath } });
     worker.task = null;
     live.add(worker);
+    // Messages reach a worker in order, so this precedes its first query.
+    if (indexFile) worker.postMessage({ control: 'attach', path: indexFile });
 
     worker.on('message', ({ id, rows, error }) => {
       const { task } = worker;
@@ -146,13 +149,23 @@ function createPool({ dbPath, workers = 2, maxQueue = 64, timeoutMs = 90_000 }) 
     });
   }
 
+  /**
+   * Attaches a search index file (services/searchIndex.js), read-only, as
+   * schema `idx` on every worker -- running ones get it before their next
+   * query, new ones before their first. A later call replaces it.
+   */
+  function attachIndex(file) {
+    indexFile = file;
+    for (const worker of live) worker.postMessage({ control: 'attach', path: file });
+  }
+
   // Stops every worker (tests; the server simply exits).
   function close() {
     closed = true;
     return Promise.all([...live].map((worker) => worker.terminate()));
   }
 
-  return { query, close };
+  return { query, close, attachIndex };
 }
 
 const dbPath = resolveDatabasePath(process.env);
@@ -211,6 +224,7 @@ function describeDbError(error) {
 module.exports = {
   query,
   connect,
+  attachIndex: pool.attachIndex,
   isUnavailable,
   describeDbError,
   createPool,
