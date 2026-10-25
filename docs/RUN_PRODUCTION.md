@@ -27,17 +27,17 @@ cd D:\SoftwareProject
 | **Docker Desktop** | installed. Start it and wait for **Engine running** before any `docker` command |
 | **`production\.env`** | the settings, see the table below |
 | **The database** | `OpenAlex_Data_Collection\database\openalex.db`. Docker reads it where it is |
-| **Lock files** | `frontend\package-lock.json` and `backend\package-lock.json`. They are not in git (`.gitignore`), so each PC has its own; they must match `package.json` (see Problems) |
+| **Lock files** | `frontend\package-lock.json` and `backend\package-lock.json` are in git, so every PC builds exactly the same package versions; they must match `package.json` (see Problems) |
 | **cloudflared** | only for a public link: `winget install --id Cloudflare.cloudflared` |
 
 Settings in `production\.env`:
 
 | Setting | Meaning |
 |---|---|
-| `JWT_SECRET` | long random secret for login sessions |
-| `JWT_EXPIRES_IN` | how long a login lasts, e.g. `7d` |
+| `JWT_SECRET` | long random secret for login sessions: at least 32 characters (the backend refuses to start otherwise), and different from the one in `backend\.env` |
+| `JWT_EXPIRES_IN` | how long a login lasts, e.g. `1d` (logout and password reset end it earlier) |
 | `FIREBASE_SERVICE_ACCOUNT_BASE64` | the Firebase Admin key (server side only) |
-| `CORS_ALLOWED_ORIGINS` | addresses allowed to log in, comma-separated: `http://localhost` plus your public link |
+| `CORS_ALLOWED_ORIGINS` | usually **empty**. The site's own address is always allowed: `http://localhost` and every tunnel link. List only *other* websites that must call this API, comma-separated |
 | `REACT_APP_FIREBASE_API_KEY`, `…_AUTH_DOMAIN`, `…_PROJECT_ID`, `…_STORAGE_BUCKET`, `…_MESSAGING_SENDER_ID`, `…_APP_ID` | the Firebase **web** settings, built into the pages |
 
 The old `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` lines are not used any more.
@@ -87,26 +87,21 @@ database file slowly at first. After that it gets faster.
    ```
 
    After a few seconds it prints a link like `https://something-random.trycloudflare.com`.
-   **The link changes every time** you start the tunnel, so repeat steps 2–4 each time.
+   **The link changes every time** you start the tunnel, so repeat step 2 each time.
 
-2. Put the new link in `production\.env`:
+   Use exactly this command for the Docker site. Do not add `--http-host-header`: that
+   option is only for sharing the `npm start` development server, and with it the backend
+   would no longer recognise the link as its own address.
 
-   ```
-   CORS_ALLOWED_ORIGINS=https://something-random.trycloudflare.com,http://localhost
-   ```
+   Nothing has to change in `production\.env`: the backend allows its own address, whatever
+   the link is (`CORS_ALLOWED_ORIGINS` is only for other websites).
 
-   and apply it (this restarts only the backend):
-
-   ```powershell
-   docker compose --env-file production/.env -f production/compose.yaml up -d backend
-   ```
-
-3. In the [Firebase Console](https://console.firebase.google.com), open the project, then
+2. In the [Firebase Console](https://console.firebase.google.com), open the project, then
    **Authentication → Settings → Authorized domains → Add domain**, and enter
    `something-random.trycloudflare.com` (without `https://`). Without this, login does not
    work on the link.
 
-4. Open the link on another device (for example a phone on mobile data) to test it, then share
+3. Open the link on another device (for example a phone on mobile data) to test it, then share
    it.
 
 To stop sharing, press **Ctrl+C** in the tunnel window.
@@ -145,7 +140,7 @@ function dc { docker compose --env-file production/.env -f production/compose.ya
 | `port is already allocated` / port 80 in use | Another program uses port 80 (IIS, another web server). Stop it, then start again |
 | Health check shows `"database":"unavailable"` | Check that `OpenAlex_Data_Collection\database\openalex.db` exists, then look at the backend logs |
 | First page is very slow, or `504 Gateway Timeout` | Normal right after a start: wait a little and refresh |
-| Login fails on the trycloudflare link | The link must be in `CORS_ALLOWED_ORIGINS` (then `up -d backend`) **and** in Firebase's authorized domains |
+| Login fails on the trycloudflare link | Add the link's domain to Firebase's authorized domains (section 5, step 2). If the backend log shows `CORS: refused a request from …`, the tunnel was started with `--http-host-header` or points somewhere other than `http://localhost:80`: start it again with exactly `cloudflared tunnel --url http://localhost:80` |
 | `cloudflared is not recognized` | Open a new PowerShell window after installing it, or run `& "C:\Program Files (x86)\cloudflared\cloudflared.exe" tunnel --url http://localhost:80` |
 | Pages show errors while a Python script runs | Docker cannot see the script's file locks. Wait for the script to finish, or stop the site while scripts run |
 
