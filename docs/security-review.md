@@ -4,33 +4,29 @@
 - **Repository:** Software-Group-Project-Bibliometric-Data-Collection, branch `feature/author_extraction` (HEAD `a862653`)
 - **Scope:** `backend/`, `frontend/`, `production/`, plus the files they depend on: `firestore.rules`, `.dockerignore` and `.gitignore`
 - **Method:** Manual reading of all backend and production files and the security-relevant frontend files. Git history searched for leaked secrets. `npm audit --omit=dev` run in both packages. Nothing was executed against a running deployment.
+- **Remediation:** 2026-10-24 to 2026-10-25 on branch `security-fixes`, one commit per finding. Status, commits and the open items are listed under [Remediation status](#remediation-status-2026-10-25) at the end.
 
 ## Summary
 
-| # | Severity | Finding |
-|---|----------|---------|
-| 1 | ~~High~~ **Fixed** | Rate limiter keys every request on the nginx container IP, so all users share one 300 req/min bucket |
-| 2 | ~~High~~ **Mitigated** | Expensive unauthenticated endpoints run on synchronous SQLite and block the whole Node process |
+| # | Severity | Finding | Status |
+|---|----------|---------|--------|
+| 1 | High | Rate limiter keys every request on the nginx container IP, so all users share one 300 req/min bucket | **Fixed** |
+| 2 | High | Expensive unauthenticated endpoints run on synchronous SQLite and block the whole Node process | **Fixed** |
+| 3 | Medium | Unverified Firebase tokens can rebind a legacy profile's `firebaseUid` and edit profile fields | **Fixed** |
+| 4 | Medium | Sessions can't be revoked: 7-day JWTs in `localStorage`, and password reset/logout don't invalidate them | **Fixed** |
+| 5 | Medium | The dev and production `JWT_SECRET` are identical, and the code falls back to `'dev-secret'` | **Fixed** |
+| 6 | Medium | Legacy `/api/auth/login` password endpoint is still live, with no per-account brute-force protection | **Fixed** |
+| 7 | Medium | No security headers anywhere (CSP, frame-ancestors, nosniff, HSTS, Referrer-Policy) | **Fixed** |
+| 8 | Medium | Vulnerable runtime dependencies in the backend (body-parser DoS, node-forge via firebase-admin) | **Fixed** |
+| 9 | Low | Internal error messages are returned to clients (`error: err.message`) | **Fixed** |
+| 10 | Low | Dead or legacy code with dangerous capabilities (`createUser`, `ensureFirebaseAuthUser`, `GET /api/authors/:id`) | **Fixed** |
+| 11 | Low | Secrets stored in a OneDrive-synced folder, with an unused `.env.bak` and stale Postgres credentials | **Partly fixed**, owner actions open |
+| 12 | Low | nginx trusts client-supplied forwarding headers (`X-Forwarded-Proto`, `set_real_ip_from 0.0.0.0/0`) | **Fixed** |
+| 13 | Low | Unescaped `LIKE` wildcards in the publication title filter | **Fixed** |
+| 14 | Info | Frontend build-chain vulnerabilities (react-scripts 5, 2 critical / 28 high, mostly build-time) | **Mitigated**, residual accepted |
+| 15 | Medium | A Semantic Scholar API key is committed in a public repository (found during remediation) | **Untracked**, key rotation open |
 
-> **Remediation (2026-10-24, uncommitted, branch `feature/author_extraction`):**
-> - **#1:** `TRUST_PROXY` is supported in `server.js` and set to `uniquelocal` in `compose.yaml`. nginx sets `X-Forwarded-For`/`X-Real-IP` to the visitor's `CF-Connecting-IP`, replacing any client-sent value. A per-IP `limit_req` (10 r/s, burst 50) is added at the edge.
-> - **#2:** `/api/search`, `/api/search/publications`, `/api/compare` and `/api/authors` now require a session. A per-account `heavyQueryLimit` (60/min, configurable through `HEAVY_RATE_LIMIT_*`) covers them. `authorId` values are validated against `/^A\d{1,20}$/` before any query, and the frontend sends `authHeaders()` on these calls.
-> - **Still open for #2:** the underlying full scans and the synchronous driver. The lasting fix is an indexed `author_id → pub_id` table in the pipeline and/or moving queries to a worker thread.
-> - **Tests:** backend 56/56 and frontend 128/128 pass. `nginx -t` was not run because Docker was offline.
-| 3 | **Medium** | Unverified Firebase tokens can rebind a legacy profile's `firebaseUid` and edit profile fields |
-| 4 | **Medium** | Sessions can't be revoked: 7-day JWTs in `localStorage`, and password reset/logout don't invalidate them |
-| 5 | **Medium** | The dev and production `JWT_SECRET` are identical, and the code falls back to `'dev-secret'` |
-| 6 | **Medium** | Legacy `/api/auth/login` password endpoint is still live, with no per-account brute-force protection |
-| 7 | **Medium** | No security headers anywhere (CSP, frame-ancestors, nosniff, HSTS, Referrer-Policy) |
-| 8 | **Medium** | Vulnerable runtime dependencies in the backend (body-parser DoS, node-forge via firebase-admin) |
-| 9 | Low | Internal error messages are returned to clients (`error: err.message`) |
-| 10 | Low | Dead or legacy code with dangerous capabilities (`createUser`, `ensureFirebaseAuthUser`, `GET /api/authors/:id`) |
-| 11 | Low | Secrets stored in a OneDrive-synced folder, with an unused `.env.bak` and stale Postgres credentials |
-| 12 | Low | nginx trusts client-supplied forwarding headers (`X-Forwarded-Proto`, `set_real_ip_from 0.0.0.0/0`) |
-| 13 | Low | Unescaped `LIKE` wildcards in the publication title filter |
-| 14 | Info | Frontend build-chain vulnerabilities (react-scripts 5, 2 critical / 28 high, mostly build-time) |
-
-**Secrets in git: none found.** `backend/.env`, `backend/serviceAccountKey.json`, `frontend/.env` and `production/.env` are all git-ignored and were never committed. The `JWT_SECRET=` values in history are placeholders only (`your_super_secret_jwt_key_here`, `…long_random_secret`). The `private_key` match in commit `323e5fc` is code (`process.env.FIREBASE_PRIVATE_KEY`), not a key.
+**Secrets in git:** the review's original search covered the app's own files: `backend/.env`, `backend/serviceAccountKey.json`, `frontend/.env` and `production/.env` are git-ignored and were never committed, and the `JWT_SECRET=` values in history are placeholders. A later search of the whole repository found one real secret outside that scope: see finding 15.
 
 ---
 
@@ -202,6 +198,19 @@ None of these files are in git, but they are on disk:
 - Upgrade `firebase` and `axios` to the latest versions.
 - Never expose `npm start` (webpack-dev-server) on a network.
 
+## 15. Medium: Semantic Scholar API key committed in a public repository
+
+*Found on 2026-10-25 during remediation, outside the original scope.*
+
+**Where:** `data-collection-for-tunning/.env`, added in commit `d691572` (2026-02-10) and still tracked. It holds a real 40-character `SEMANTIC_SCHOLAR_API_KEY`, which `main.py` and `extradata.py` in that folder read. The folder's own `.gitignore` lists `.env`, but the file was committed anyway. The commit is on many branches, including ones pushed to GitHub, and **the GitHub repository is public**. A scan of all tracked files for other credential patterns (cloud keys, private keys, tokens, hard-coded passwords) found nothing else.
+
+**Impact:** anyone can read the key from the repository history and use the project's Semantic Scholar quota. Requests made with it are attributed to the project, so abuse could get the key blocked.
+
+**Fix:**
+- Stop tracking the file (`git rm --cached`); the copy on disk stays, and `.env.example` already documents the variable.
+- **Get a new key from Semantic Scholar and stop using the old one.** Removing the file from the latest commit does not remove it from history: the old key stays readable until it is replaced.
+- Optional: purge the file from history with `git filter-repo` and force-push every branch. Every teammate would then have to re-clone, so this is only worth it if the old key cannot be revoked.
+
 ---
 
 ## What is already done well
@@ -215,11 +224,39 @@ None of these files are in git, but they are on disk:
 - **No `dangerouslySetInnerHTML`/`innerHTML`/`eval`** in the frontend. External links use `rel="noopener noreferrer"`. The post-login redirect (`afterLoginPath`) only uses in-app router state, so it is not an open redirect.
 - **The public health endpoint** reports status without failure details.
 
-## Suggested order of work
+## Remediation status (2026-10-25)
 
-1. Findings 1 and 2: fix the client IP and rate limiting, and put auth and limits on `/api/search` and `/api/compare`. This closes the easy site-wide DoS.
-2. Finding 5: rotate the production `JWT_SECRET` and remove the fallback.
-3. Finding 3: stop `findProfile` from writing on unverified tokens.
-4. Findings 4 and 6: add session revocation and retire `/api/auth/login`.
-5. Findings 7 and 8: add security headers and upgrade the backend dependencies.
-6. Findings 9–13: clean-up.
+Branch `security-fixes`, one commit per finding. Every fix has automated tests (at the end: backend 94/94, frontend 129/129), and each was also run against the previous code to confirm the problem was real there and is gone now.
+
+| # | Commit | What changed | How it was checked |
+|---|--------|--------------|--------------------|
+| 1 | `69d37d5` | `TRUST_PROXY` support; nginx sets `X-Forwarded-For` from `CF-Connecting-IP`; per-IP `limit_req` at the edge. | Rate-limit tests. |
+| 2 | `69d37d5`, `5bca3a6` | The heavy routes require a session and a per-account limit, and `authorId` is validated. SQLite queries now run on a pool of worker threads, each with its own read-only connection, with a bounded queue (503 when full) and a wait timeout. The health check jumps the queue, and stats and each author's publication list are cached until the database changes. | Real database: `/api/health` answered in 0.035 s during a slow stats query (old code: 9.9 s). |
+| 3 | `935a821` | Unverified tokens never claim a profile by email and never write. Verified tokens may reclaim a profile whose Firebase account is gone, but get 409 for one that a live account holds. `/reset-password` follows the same rules. | Attack tests fail on the old code and pass on the new; the normal registration flows behave the same. |
+| 4 | `0e31ab8` | Every token carries the account's `tokenVersion`. Logout (`POST /api/auth/logout`, called by the frontend) and password reset raise it, ending every session of the account. The default lifetime is 1 day. | A copied token stops working after logout or reset; tokens issued before the change kept working until the first logout. |
+| 5 | `17998ba` | No `'dev-secret'` fallback: the server refuses to start without a `JWT_SECRET` of at least 32 characters, and tokens are pinned to HS256. The stray dotenv load of a root `env` file is removed. The production secret was rotated locally on 2026-10-25 and takes effect at the next backend rebuild. | The old code accepted a token forged with `'dev-secret'`; the new code refuses to start without a strong secret. |
+| 6 | `346c5a4` | `POST /api/auth/login` answers 410. | The old code issued a session for a correct legacy password. |
+| 7 | `3b7d69b` | The edge nginx adds CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy` and HSTS to every response, error pages included. The frontend is built with `INLINE_RUNTIME_CHUNK=false`, and Express no longer sends `X-Powered-By`. | `nginx -t`; headers checked on normal and error responses; headless Edge rendered Login and Register and started Google sign-in with 0 CSP violations. |
+| 8 | `a9693a9` | firebase-admin 12.7.0 → 14.5.0 (code moved to the modular API), express ≥ 4.22.3, bcryptjs dropped. `backend/package-lock.json` is committed. | `npm audit --omit=dev`: 9 → 0. Read-only calls against the real Firebase project; Docker image built with `npm ci`. |
+| 9 | `bc8cd6d` | Error details stay in the server log. A final JSON error handler replaces Express's stack-trace page. | The old code returned Firebase error text, and stack traces with file paths. |
+| 10 | `26c3245` | Removed `ensureFirebaseAuthUser`/`createUser`, `updatePassword`, `comparePassword`, `findOrCreateSocialUser`, `services/userStore.js`, `GET /api/authors/:id` and the legacy repository and metric code behind it. | On the real database the old route returned the SQLite error; the route is now gone. |
+| 11 | this commit | Production `JWT_SECRET` rotated (see 5). No `.env.bak` exists and the repository is outside OneDrive on the remediation PC. The rest is owner actions, listed below. | No secret file is tracked; Compose still accepts `production/.env`. |
+| 12 | `7a721e2` | `X-Forwarded-Proto` is believed only from Cloudflare, and only as `http`/`https`. `frontend.conf` trusts private ranges only. The stale `frontend/deploy/nginx.conf` is removed. | In containers the old map passed `https`, `javascript` and `evil` through; the new one does not. |
+| 13 | `e3fcf42` | `%`, `_` and `\` are escaped (`LIKE … ESCAPE '\'`). The filter is cut to 2,000 characters instead of the suggested 200, because picking a suggestion inserts a whole title and 25,982 real titles are longer than 200 characters. A repeated parameter gets 400. | Real author: `%` and `_` each matched 32 of 32 publications before, 0 after. |
+| 14 | `f868984` | Build and test tools moved to `devDependencies`; unused `axios` and `services/apiService.js` removed; firebase 12.19.0. `frontend/package-lock.json` is committed. | Runtime audit 55 → 4. The production frontend image builds with `npm ci` and contains no gRPC or axios code. |
+| 15 | this commit | `data-collection-for-tunning/.env` is no longer tracked; the file stays on disk. | — |
+
+### Accepted residual risk
+
+- **2:** author lookups are still full scans of `author_contribution_weight`, taking seconds per uncached author. They no longer block the server, and at most `DB_WORKERS` run at once. An indexed `author_id → pub_id` table built by the pipeline would make them fast; that is a performance improvement, not a security need.
+- **4:** the session token is still kept in `localStorage`. The CSP from 7 limits what an injected script could do. An `HttpOnly` cookie would need CSRF protection and is not planned.
+- **14:** the 4 remaining runtime findings are all `@grpc/grpc-js` via `@firebase/firestore`. Both advisories concern gRPC servers, the browser bundle contains no gRPC code, and Firestore pins the vulnerable range even in firebase 13. The build-tool findings go away only with a move from Create React App to Vite.
+
+### Open items (owner actions)
+
+1. **15:** get a new Semantic Scholar API key, stop using the old one, and put the new key in the local `data-collection-for-tunning/.env`.
+2. **11:** shut down the old AWS PostgreSQL database (or change its password), then delete the `DB_*` and `DATABASE_URL` lines from `backend/.env` and `production/.env`. Those files are the only copy of the credentials, so the lines were left in place.
+3. **11:** rotate the Firebase service-account key. Create a new key in the Firebase console (Project settings → Service accounts), put it in `backend/serviceAccountKey.json` and in `FIREBASE_SERVICE_ACCOUNT_BASE64` in `production/.env`, then delete the old key in the Google Cloud console (IAM → Service accounts → Keys).
+4. **11 (teammates):** keep the repository out of OneDrive-synced folders, or exclude it from sync, and delete any `.env.bak` copies.
+5. **Deploy:** rebuild production so the fixes and the rotated `JWT_SECRET` take effect: `docker compose --env-file production/.env -f production/compose.yaml up -d --build`, then `docker compose --env-file production/.env -f production/compose.yaml restart nginx`. Every user is logged out once.
+6. Optional: set `JWT_EXPIRES_IN=1d` in both `.env` files. They currently say `7d`; logout and password reset end sessions either way.
