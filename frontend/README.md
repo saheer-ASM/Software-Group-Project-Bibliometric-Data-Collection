@@ -25,6 +25,12 @@ paths go to `/dashboard` when signed in, otherwise to `/login`.
 The web server must answer every app route with `index.html`; otherwise
 refreshing `/dashboard` returns 404. `npm start` already does this in development.
 
+`npm start` is the development server (webpack-dev-server): use it on your own
+machine only and never expose it to a network. Deploy the `npm run build`
+output instead. Build and test tools (`react-scripts`, `@testing-library/*`) are
+`devDependencies`: they are needed to build, but nothing from them ships in the
+bundle.
+
 For Nginx, use the production setup in [production/nginx/](../production/nginx/):
 `frontend.conf` serves the build and falls back to `index.html` for app routes,
 and `default.conf` is the edge proxy that sends `/api/` to the backend and adds
