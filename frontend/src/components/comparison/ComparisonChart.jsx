@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { formatTooltipValue } from '../../services/formatNumber';
 
 const colors = ['#134074', '#c43d4d', '#16a085'];
 const metricOptions = {
@@ -34,7 +35,7 @@ export default function ComparisonChart({ authors }) {
       <div className="ac-section-heading"><div><h2>Research impact</h2><p>Side-by-side comparison across key metrics.</p></div></div>
       <div className="ac-chart-area"><ResponsiveContainer width="100%" height="100%">
         <BarChart data={barData} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="metric" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip /><Legend />
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="metric" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip formatter={formatTooltipValue} /><Legend />
           {authors.map((author, index) => <Bar key={author.authorId} dataKey={author.authorId} name={author.name} fill={colors[index]} radius={[4, 4, 0, 0]} />)}
         </BarChart>
       </ResponsiveContainer></div>
@@ -47,7 +48,7 @@ export default function ComparisonChart({ authors }) {
       </div>
       <div className="ac-chart-area"><ResponsiveContainer width="100%" height="100%">
         <LineChart data={trendData} margin={{ top: 10, right: 15, left: 0, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="year" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip /><Legend />
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="year" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip formatter={formatTooltipValue} /><Legend />
           {authors.map((author, index) => <Line key={author.authorId} type="monotone" dataKey={author.authorId} name={author.name} stroke={colors[index]} strokeWidth={2.5} connectNulls />)}
         </LineChart>
       </ResponsiveContainer></div>
