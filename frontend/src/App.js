@@ -17,6 +17,7 @@ import { onIdTokenChanged, signOut } from 'firebase/auth';
 import { auth, hasAdminClaim } from './firebase';
 import { API_BASE_URL, authHeaders } from './config/api';
 import { syncLibraryFromServer } from './services/researchLibrary';
+import { clearLastViewedAuthor, readLastViewedAuthor, saveLastViewedAuthor } from './services/lastViewedAuthor';
 
 // URL for each in-app page. The page components are unchanged; they still get
 // their navigation callbacks as props, which now change the URL.
@@ -68,8 +69,12 @@ function App() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [user, setUser] = useState(null); // { id, username, email, designation }
-  const [authorName, setAuthorName] = useState('');
-  const [hasSearchedAuthor, setHasSearchedAuthor] = useState(false);
+  // The author the Data Explorer last showed, restored after a refresh
+  // (services/lastViewedAuthor.js). The id pins the exact researcher.
+  const [authorName, setAuthorName] = useState(() => readLastViewedAuthor()?.name || '');
+  const [authorId, setAuthorId] = useState(() => readLastViewedAuthor()?.id || '');
+  const [authorOwner, setAuthorOwner] = useState(() => readLastViewedAuthor()?.userId || ''); // a user id
+  const [hasSearchedAuthor, setHasSearchedAuthor] = useState(() => Boolean(readLastViewedAuthor()));
   const [checkingSession, setCheckingSession] = useState(true);
   const [supportDialog, setSupportDialog] = useState(null); // 'feedback' | 'issue' | null
   const [isAdmin, setIsAdmin] = useState(false);
@@ -120,16 +125,41 @@ function App() {
     if (user?.id) syncLibraryFromServer(user.id).catch(() => {});
   }, [user?.id]);
 
+  const rememberAuthor = useCallback((name, id = '') => {
+    setAuthorName(name);
+    setAuthorId(id);
+    setAuthorOwner(String(user?.id || ''));
+    setHasSearchedAuthor(true);
+    saveLastViewedAuthor(user?.id, { name, id });
+  }, [user?.id]);
+
+  const forgetAuthor = useCallback(() => {
+    setAuthorName('');
+    setAuthorId('');
+    setAuthorOwner('');
+    setHasSearchedAuthor(false);
+    clearLastViewedAuthor();
+  }, []);
+
+  // An author remembered in this tab by another account is not theirs to
+  // reopen. Checked where it is used, so no click can come before it; the
+  // effect below then also removes it from the tab.
+  const ownsRememberedAuthor = !authorOwner || (user && authorOwner === String(user.id));
+  const rememberedName = ownsRememberedAuthor ? authorName : '';
+  const rememberedId = ownsRememberedAuthor ? authorId : '';
+  useEffect(() => {
+    if (user?.id && authorOwner && authorOwner !== String(user.id)) forgetAuthor();
+  }, [user?.id, authorOwner, forgetAuthor]);
+
   // /data-explorer?author=Name opens that author's profile (also after a refresh
   // or from a bookmarked link).
   const urlAuthor = location.pathname === PATHS.explorer ? (searchParams.get('author') || '').trim() : '';
   const urlAuthorId = urlAuthor ? (searchParams.get('authorId') || '').trim() : '';
   useEffect(() => {
-    if (urlAuthor && urlAuthor !== authorName) {
-      setAuthorName(urlAuthor);
-      setHasSearchedAuthor(true);
+    if (urlAuthor && (urlAuthor !== authorName || urlAuthorId !== authorId)) {
+      rememberAuthor(urlAuthor, urlAuthorId);
     }
-  }, [urlAuthor]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [urlAuthor, urlAuthorId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAuthNavigate = useCallback((path, state) => {
     navigate(path, state ? { state } : undefined);
@@ -154,8 +184,7 @@ function App() {
     // reuse it (e.g. to link sign-in methods).
     if (auth) signOut(auth).catch(() => {});
     setUser(null);
-    setAuthorName('');
-    setHasSearchedAuthor(false);
+    forgetAuthor();
     navigate(PATHS.login);
   };
 
@@ -168,30 +197,40 @@ function App() {
     navigate(path);
   };
 
-  // Accepts a name, or { id, name } from the library. The id pins the exact
-  // researcher: several authors share a name, and a name alone opens whichever
-  // one the database returns first.
+  // Accepts a name, or { id, name } (the library, a picked search suggestion).
+  // The id pins the exact researcher: several authors share a name, and a
+  // name alone opens whichever one the database returns first. With neither
+  // (the menu link), the author last viewed is reopened, by its id.
   const handleNavigateToExplorer = (searchedAuthor) => {
-    const fromLibrary = searchedAuthor && typeof searchedAuthor === 'object' && 'id' in searchedAuthor;
+    const withId = searchedAuthor && typeof searchedAuthor === 'object' && 'id' in searchedAuthor;
     const nextAuthor = typeof searchedAuthor === 'string'
       ? searchedAuthor.trim()
-      : (fromLibrary ? String(searchedAuthor.name || '').trim() : '');
-    const nextAuthorId = fromLibrary ? String(searchedAuthor.id || '').trim() : '';
-    if (nextAuthor) {
-      setAuthorName(nextAuthor);
-      setHasSearchedAuthor(true);
-    }
-    const author = nextAuthor || authorName;
+      : (withId ? String(searchedAuthor.name || '').trim() : '');
+    const nextAuthorId = withId ? String(searchedAuthor.id || '').trim() : '';
+    if (nextAuthor) rememberAuthor(nextAuthor, nextAuthorId);
+    const author = nextAuthor || rememberedName;
+    const id = nextAuthor ? nextAuthorId : rememberedId;
     const params = new URLSearchParams();
     if (author) params.set('author', author);
-    if (nextAuthor && nextAuthorId) params.set('authorId', nextAuthorId);
+    if (author && id) params.set('authorId', id);
     const query = params.toString();
     navigate(query ? `${PATHS.explorer}?${query}` : PATHS.explorer);
   };
 
+  // The Data Explorer reports every author it shows -- also ones searched or
+  // opened inside it -- so leaving and coming back, or refreshing, reopens
+  // that one. The address follows, so it can be bookmarked and reloaded too.
+  const handleAuthorViewed = useCallback(({ id, name }) => {
+    if (!id || !name) return;
+    rememberAuthor(name, id);
+    if (location.pathname === PATHS.explorer
+      && (searchParams.get('authorId') !== id || searchParams.get('author') !== name)) {
+      navigate(`${PATHS.explorer}?${new URLSearchParams({ author: name, authorId: id })}`, { replace: true });
+    }
+  }, [rememberAuthor, location.pathname, searchParams, navigate]);
+
   const handleResetSearch = () => {
-    setAuthorName('');
-    setHasSearchedAuthor(false);
+    forgetAuthor();
     if (location.pathname === PATHS.explorer && searchParams.get('author')) {
       navigate(PATHS.explorer, { replace: true });
     }
@@ -213,7 +252,7 @@ function App() {
     },
     openSupport: (kind) => setSupportDialog(kind),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [isAdmin, navigate, authorName]);
+  }), [isAdmin, navigate, rememberedName, rememberedId, rememberAuthor]);
 
   // Feedback/issue modal opened without a Firebase session: back to login.
   const handleSupportLoginRequired = () => {
@@ -291,8 +330,9 @@ function App() {
             path={PATHS.explorer}
             element={protectedPage(
               <DataExplorer
-                authorName={urlAuthor || authorName}
-                authorId={urlAuthorId}
+                authorName={urlAuthor || rememberedName}
+                authorId={urlAuthor ? urlAuthorId : rememberedId}
+                onAuthorViewed={handleAuthorViewed}
                 onBack={handleBackToDashboard}
                 onNavigateToSettings={handleNavigateToSettings}
                 onNavigateToAbout={handleNavigateToAbout}

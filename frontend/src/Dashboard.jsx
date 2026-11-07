@@ -191,7 +191,8 @@ const Dashboard = ({ username = "User", onLogout, onNavigateToExplorer, onNaviga
     setSuggestionsOpen(false);
     setAuthorSuggestions([]);
     setActiveSuggestion(-1);
-    onNavigateToExplorer(author.name);
+    // The id opens exactly this researcher, not just someone with the same name.
+    onNavigateToExplorer(author.id ? { id: author.id, name: author.name } : author.name);
   };
 
   const handleSearchKeyDown = (event) => {

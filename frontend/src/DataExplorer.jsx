@@ -69,6 +69,7 @@ const MetricCard = ({ title, value, tooltip }) => {
 const DataExplorer = ({
   authorName,
   authorId: requestedAuthorId = '',
+  onAuthorViewed,
   onBack,
   onNavigateToSettings,
   onNavigateToAbout,
@@ -134,6 +135,13 @@ const DataExplorer = ({
   React.useEffect(() => {
     if (data?.authorId) recordRecentAuthor(userId, { id: data.authorId, name: data.author });
   }, [data?.authorId, data?.author, userId]);
+
+  // Tells the app which author is on screen, however it got here (search,
+  // suggestion, co-author, back), so leaving and coming back -- or a refresh --
+  // reopens this one.
+  React.useEffect(() => {
+    if (data?.authorId && onAuthorViewed) onAuthorViewed({ id: data.authorId, name: data.author });
+  }, [data?.authorId, data?.author]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save / unsave this author. The button is disabled while a request is in
   // flight so a double click cannot race itself; a refusal (the 100-author
@@ -484,8 +492,13 @@ const DataExplorer = ({
   React.useEffect(() => {
     if (authorName) {
       setSearchQuery(authorName);
-      // An id (from the library) identifies the exact researcher; the name is
-      // then only the label shown while it loads.
+      // Already on screen: the app hands back the author this page just
+      // reported (onAuthorViewed), which needs no second load.
+      if (data && (requestedAuthorId ? data.authorId === requestedAuthorId : data.author === authorName)) {
+        return undefined;
+      }
+      // An id (library, suggestion, or the author last viewed) identifies the
+      // exact researcher; the name is then only the label shown while it loads.
       const timer = setTimeout(() => handleSearch(authorName, requestedAuthorId), 100);
       return () => clearTimeout(timer);
     }
