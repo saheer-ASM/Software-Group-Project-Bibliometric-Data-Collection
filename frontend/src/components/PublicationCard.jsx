@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatDecimal } from '../services/formatNumber';
 import '../DataExplorer.css';
 
 // Weights arrive either as a proportion (0.66) or a percentage (66).
@@ -119,12 +120,12 @@ export default function PublicationCard({
         <div className="de-pub-stat">
           <i className='bx bx-line-chart'></i>
           <span className="de-pub-stat-label">Adjusted citations</span>
-          <span className="de-pub-stat-value">{Number(pub.adjustedCitations).toFixed(3)}</span>
+          <span className="de-pub-stat-value">{formatDecimal(pub.adjustedCitations)}</span>
         </div>
         <div className="de-pub-stat">
           <i className='bx bx-analyse'></i>
           <span className="de-pub-stat-label">Average ISC</span>
-          <span className="de-pub-stat-value">{Number(pub.averageIsc).toFixed(3)}</span>
+          <span className="de-pub-stat-value">{formatDecimal(pub.averageIsc)}</span>
         </div>
         <div className="de-pub-stat">
           <i className='bx bx-pie-chart-alt-2'></i>

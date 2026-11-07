@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../config/api';
+import { formatDecimal } from './formatNumber';
 
 // The limits the server enforces (backend/services/libraryAuthors.js). Mirrored
 // here so a guest, whose library lives only in this browser, gets the same
@@ -414,7 +415,7 @@ export function downloadAuthorPdf(data) {
     commands.push(text(500, 803, 9, `Page ${pageIndex + 1} of ${pageCount}`, '0.82 0.88 0.92'));
     if (pageIndex === 0) {
       commands.push(text(42, 698, 20, data.author), text(42, 675, 10, `Research profile  |  ${data.authorId || 'ID unavailable'}`, '0.33 0.42 0.53'));
-      const metrics = [['PUBLICATIONS', data.totalPublications], ['CITATIONS', data.totalCitations], ['H-INDEX', data.hIndex], ['NM-INDEX', data.nmIndex], ['C-SCORE', Number(data.cScore || 0).toFixed(3)], ['ADJUSTED CITATIONS', Number(data.totalAdjustedCitations || 0).toFixed(3)]];
+      const metrics = [['PUBLICATIONS', data.totalPublications], ['CITATIONS', data.totalCitations], ['H-INDEX', data.hIndex], ['NM-INDEX', formatDecimal(data.nmIndex || 0)], ['C-SCORE', formatDecimal(data.cScore || 0)], ['ADJUSTED CITATIONS', formatDecimal(data.totalAdjustedCitations || 0)]];
       metrics.forEach(([label, value], index) => { const x = 42 + (index % 3) * 176; const y = 598 - Math.floor(index / 3) * 86; commands.push(rect(x, y, 160, 68, '0.92 0.95 0.97'), text(x + 14, y + 43, 8, label, '0.33 0.42 0.53'), text(x + 14, y + 17, 17, value)); });
       commands.push(text(42, 466, 13, 'Publication overview'), text(42, 448, 9, `${papers.length} publication${papers.length === 1 ? '' : 's'} included in this report`, '0.33 0.42 0.53'), line(42, 436, 570, 436));
     } else {

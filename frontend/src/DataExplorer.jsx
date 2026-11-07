@@ -7,6 +7,7 @@ import {
   fetchAuthorSuggestions, isSearchableAuthorQuery, normalizeAuthorQuery,
 } from './services/authorSearch';
 import { publicationYears } from './services/publicationFilters';
+import { formatDecimal, formatTooltipValue } from './services/formatNumber';
 import { downloadAuthorPdf, getLibrary, recordRecentAuthor, savePaperToCollection, toggleSavedAuthor, toggleSavedPaper, MAX_SAVED_PAPERS, SAVED_PAPER_LIMIT_MESSAGE } from './services/researchLibrary';
 import './DataExplorer.css';
 import AppNavbar from './AppNavbar';
@@ -69,6 +70,7 @@ const MetricCard = ({ title, value, tooltip }) => {
 const DataExplorer = ({
   authorName,
   authorId: requestedAuthorId = '',
+  onAuthorViewed,
   onBack,
   onNavigateToSettings,
   onNavigateToAbout,
@@ -134,6 +136,13 @@ const DataExplorer = ({
   React.useEffect(() => {
     if (data?.authorId) recordRecentAuthor(userId, { id: data.authorId, name: data.author });
   }, [data?.authorId, data?.author, userId]);
+
+  // Tells the app which author is on screen, however it got here (search,
+  // suggestion, co-author, back), so leaving and coming back -- or a refresh --
+  // reopens this one.
+  React.useEffect(() => {
+    if (data?.authorId && onAuthorViewed) onAuthorViewed({ id: data.authorId, name: data.author });
+  }, [data?.authorId, data?.author]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save / unsave this author. The button is disabled while a request is in
   // flight so a double click cannot race itself; a refusal (the 100-author
@@ -484,8 +493,13 @@ const DataExplorer = ({
   React.useEffect(() => {
     if (authorName) {
       setSearchQuery(authorName);
-      // An id (from the library) identifies the exact researcher; the name is
-      // then only the label shown while it loads.
+      // Already on screen: the app hands back the author this page just
+      // reported (onAuthorViewed), which needs no second load.
+      if (data && (requestedAuthorId ? data.authorId === requestedAuthorId : data.author === authorName)) {
+        return undefined;
+      }
+      // An id (library, suggestion, or the author last viewed) identifies the
+      // exact researcher; the name is then only the label shown while it loads.
       const timer = setTimeout(() => handleSearch(authorName, requestedAuthorId), 100);
       return () => clearTimeout(timer);
     }
@@ -524,8 +538,8 @@ const DataExplorer = ({
       ['Total Publications', exportData.totalPublications],
       ['Total Citations', exportData.totalCitations],
       ['H-Index', exportData.hIndex],
-      ['Adjusted Citations', exportData.totalAdjustedCitations],
-      ['Total Cites Score', exportData.cScore],
+      ['Adjusted Citations', formatDecimal(exportData.totalAdjustedCitations)],
+      ['Total Cites Score', formatDecimal(exportData.cScore)],
       [],
       ['Title', 'Fields', 'Authors', 'Contribution Weight', 'Self Citations', 'ISC', 'Year', 'Citations', 'Adjusted Citations']
     ];
@@ -535,13 +549,13 @@ const DataExplorer = ({
       csvContent.push([
         pub.title,
         pub.fields.join('; '),
-        pub.authors.map(author => `${author.name} (${author.weight})`).join('; '),
-        pub.authorContributionWeight,
+        pub.authors.map(author => `${author.name} (${formatDecimal(author.weight)})`).join('; '),
+        formatDecimal(pub.authorContributionWeight),
         pub.selfCitations,
-        pub.averageIsc,
+        formatDecimal(pub.averageIsc),
         pub.publishedYear,
         pub.totalCitations,
-        pub.adjustedCitations
+        formatDecimal(pub.adjustedCitations)
       ]);
     });
 
@@ -800,7 +814,7 @@ const DataExplorer = ({
               />
               <MetricCard
                 title="NM INDEX"
-                value={Number(displayData.nmIndex).toFixed(3)}
+                value={formatDecimal(displayData.nmIndex)}
                 tooltip="Overall research impact score calculated by combining multiple research performance indicators."
               />
               <MetricCard
@@ -810,17 +824,17 @@ const DataExplorer = ({
               />
               <MetricCard
                 title="C SCORE"
-                value={Number(displayData.cScore).toFixed(3)}
+                value={formatDecimal(displayData.cScore)}
                 tooltip="Adjusted research impact score based on citations, author contribution, field, and publication factors."
               />
               <MetricCard
                 title="ADJUSTED CITATIONS"
-                value={Number(displayData.totalAdjustedCitations).toFixed(3)}
+                value={formatDecimal(displayData.totalAdjustedCitations)}
                 tooltip="Citation count after reducing the influence of self-citations for a fairer impact measurement."
               />
               <MetricCard
                 title="CAREER COMPENSATION"
-                value={Number(displayData.careerCompensation).toFixed(3)}
+                value={formatDecimal(displayData.careerCompensation)}
                 tooltip="Factor used to account for research career length when calculating the author's impact score."
               />
             </div>
@@ -841,7 +855,7 @@ const DataExplorer = ({
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
+                <Tooltip formatter={formatTooltipValue} />
                 <Legend />
                 <Line
                   type="monotone"
