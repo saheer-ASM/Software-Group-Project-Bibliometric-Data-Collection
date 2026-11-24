@@ -17,6 +17,8 @@ def main(argv=None):
     parser.add_argument('--data-source', choices=('database', 'cohort', 'pilot', 'mock'), default='database',
                         help='mock uses TEST DATA ONLY and never opens PostgreSQL')
     parser.add_argument('--pilot-author-ids', help='pilot only: local CSV containing one author_id column')
+    parser.add_argument('--cohort-file', help='cohort only: CSV with author_id,author_name '
+                        '(default 995_authors.csv; use this for the 100,000-author cohort)')
     parser.add_argument('--rq07-bundle', help='cohort only: complete local graph and frozen-reference bundle')
     parser.add_argument('--exclude-missing-year-publications', action='store_true',
                         help='cohort only: drop papers without a valid year, listed in excluded_publications.csv. '
@@ -110,8 +112,11 @@ def main(argv=None):
     if args.data_source == 'cohort':
         if args.rq07_bundle:
             extra['rq07_bundle_path'] = args.rq07_bundle
+        if args.cohort_file:
+            extra['cohort_file'] = args.cohort_file
         destination = run_cohort(experiment_names=names, extra_inputs=extra,
-                                 exclude_missing_years=args.exclude_missing_year_publications)
+                                 exclude_missing_years=args.exclude_missing_year_publications,
+                                 cohort_file=args.cohort_file)
     elif args.data_source == 'pilot':
         if not args.pilot_author_ids:
             parser.error('--data-source pilot requires --pilot-author-ids')

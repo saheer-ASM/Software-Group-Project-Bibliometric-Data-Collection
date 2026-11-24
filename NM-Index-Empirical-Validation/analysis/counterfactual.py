@@ -10,6 +10,8 @@ from io import StringIO
 
 import pandas as pd
 
+from analysis.common import REFERENCE_AUTHOR_COUNT
+
 
 class MethodologyInputRequired(ValueError):
     """The lecturer specified a scenario but its exact graph data is unavailable."""
@@ -32,8 +34,9 @@ class FrozenBenchmarks:
         ids = tuple(map(str, author_ids))
         if not version or not str(version).strip() or not ids or len(set(ids)) != len(ids):
             raise ValueError('Frozen reference needs a version and unique original author IDs')
-        if not synthetic and len(ids) != 100000:
-            raise MethodologyInputRequired('Exactly the original 100000-author reference population required')
+        if not synthetic and len(ids) < REFERENCE_AUTHOR_COUNT:
+            raise MethodologyInputRequired(
+                f'Reference population needs at least {REFERENCE_AUTHOR_COUNT} authors')
         absent = set(BENCHMARK_TABLES)-set(tables)
         if absent:
             raise MethodologyInputRequired(f'Original benchmark tables missing: {sorted(absent)}')

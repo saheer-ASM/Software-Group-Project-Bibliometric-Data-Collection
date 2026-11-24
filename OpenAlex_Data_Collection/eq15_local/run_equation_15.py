@@ -6,7 +6,8 @@ Same rule, evaluated set-based in SQL (the cloud code loads every row into Pytho
     TCadj_eff(f, p, i) = CFcom * W_p^(f,i) * TCadj_cap
         CFcom = author.career_compensation, W and TCadj_cap come from
         citations_per_paper_details (Equation 12/13 stage)
-    status = 'READY' if the product exists, else 'MISSING_VALUE'
+    status = the Eq 13 status if that row is not READY (same paper set as Eq 13/14),
+             else 'READY' if the product exists, else 'MISSING_VALUE'
     (None if any of the three inputs is missing -- same as the cloud calculator)
 
 Needs: eq12_13_14_local and career_compensation_local to be run first.
@@ -33,6 +34,10 @@ SELECT
     a.career_compensation * d.author_field_weight * d.capped_adjusted_citation
         AS effective_citation,
     CASE
+        -- same paper set as Eq 13/14: rows whose ISC is incomplete (or that
+        -- are otherwise not READY) are excluded from Eq 15-23 too
+        WHEN d.calculation_status NOT IN ('READY', 'READY_PROVISIONAL_BENCHMARK')
+            THEN d.calculation_status
         WHEN a.career_compensation IS NOT NULL
          AND d.author_field_weight IS NOT NULL
          AND d.capped_adjusted_citation IS NOT NULL

@@ -19,15 +19,20 @@ RESULTS = ROOT / "results"
 SLOTS = range(1, 11)
 
 
-def read_cohort():
-    with COHORT.open(encoding="utf-8-sig", newline="") as handle:
+def read_cohort(path=None):
+    """Read a cohort CSV (author_id,author_name). The default 995_authors.csv
+    must have exactly 995 rows; any other file just needs unique, nonblank IDs."""
+    source = Path(path) if path else COHORT
+    with source.open(encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         if reader.fieldnames != ["author_id", "author_name"]:
             raise ValueError("Cohort must have author_id,author_name columns")
         rows = list(reader)
     ids = [row["author_id"].strip() for row in rows]
-    if len(rows) != 995 or len(set(ids)) != 995 or any(not value for value in ids):
-        raise ValueError("Cohort must contain exactly 995 unique, nonblank IDs")
+    if any(not value for value in ids) or len(set(ids)) != len(ids) or not ids:
+        raise ValueError("Cohort must contain unique, nonblank IDs")
+    if source == COHORT and len(ids) != 995:
+        raise ValueError("995_authors.csv must contain exactly 995 IDs")
     if any(not row["author_name"].strip() for row in rows):
         raise ValueError("Cohort contains a blank author name")
     return rows, ids

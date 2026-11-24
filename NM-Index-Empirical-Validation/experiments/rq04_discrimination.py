@@ -3,6 +3,7 @@
 import pandas as pd
 import numpy as np
 from scipy.stats import ttest_ind
+from analysis.common import REFERENCE_AUTHOR_COUNT
 from analysis.discrimination import roc_auc
 from analysis.rq01_diagnostics import percentile_ranks
 from .common import pending
@@ -32,7 +33,7 @@ def run(dataset, comparators, *, award_labels=None, award_events=None,
         raise ValueError('RQ4 inference needs an approved Welch/pooled-d decision reference')
     merged = dataset.merge(labels, on='author_id', validate='one_to_one')
     valid_reference = (reference_scores is not None and
-        (data_source_kind == 'SYNTHETIC_TEST_DATA' or len(reference_scores) == 100000)
+        (data_source_kind == 'SYNTHETIC_TEST_DATA' or len(reference_scores) >= REFERENCE_AUTHOR_COUNT)
         and not reference_scores.author_id.isna().any()
         and not reference_scores.author_id.duplicated().any()
         and set(merged.author_id.astype(str)) <= set(reference_scores.author_id.astype(str)))

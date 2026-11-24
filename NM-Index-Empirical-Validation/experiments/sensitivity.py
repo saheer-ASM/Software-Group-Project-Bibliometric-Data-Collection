@@ -17,8 +17,9 @@ def run(dataset, comparators, *, seed=2026, graph_inputs=None,
     rows = []
     for metric in ('h_index', 'c_score_raw'):
         if metric in comparators:
-            rows.append(sample_size(dataset, 'nm_index', metric,
-                                    (25000, 50000, 75000, 100000), seed=seed))
+            n = len(dataset)
+            sizes = tuple(sorted({max(1, round(n * f)) for f in (.25, .50, .75, 1.0)}))
+            rows.append(sample_size(dataset, 'nm_index', metric, sizes, seed=seed))
     results = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame([
         dict(status='METHODOLOGY_PENDING', issue='No supported h/C comparator available')])
     parameter_rows = []

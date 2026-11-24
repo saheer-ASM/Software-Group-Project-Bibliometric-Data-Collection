@@ -4,8 +4,13 @@ SQLite port of  career-compentation/career-compentation.py  (cloud PostgreSQL).
 Same formula, same constants, same rules:
 
     CF_com = C * (t + 1) ** (-lambda)            C = 1.25, lambda = 0.0601
-    t      = AS_OF_YEAR - first_publication_year  (0 if the year is unknown)
+    t      = AS_OF_YEAR - first_publication_year
     value  = round(CF_com, 4)
+
+    If no first publication year is known, the value is NULL: the author is
+    excluded (no Nm score) instead of getting the maximum boost. Run
+    fill_missing_years.py first so that years missing locally are fetched from
+    OpenAlex. This one value is used by Eq 11 and Eq 13-23.
 
     first_publication_year = the earliest publication.year among the papers the
     author appears on in author_contribution_weight (any of author1id..author10id).
@@ -46,7 +51,9 @@ AUTHOR_COLS = ", ".join(f"a.author{i}id" for i in range(1, 11))
 
 def career_factor(first_pub_year, as_of_year):
     """Eq 10 exactly as the cloud script computes it."""
-    t = (as_of_year - first_pub_year) if first_pub_year else 0
+    if not first_pub_year:
+        return None                       # unknown -> excluded
+    t = max(as_of_year - first_pub_year, 0)
     return round(C * ((t + 1) ** -LAMBDA), 4)
 
 
@@ -90,9 +97,12 @@ def main():
     # ---- 2. Eq 10 for every author
     values = {aid: career_factor(y or None, args.as_of_year)
               for aid, y in first_year.items()}
-    spread = Counter(values.values())
-    print(f"career_compensation: min {min(values.values())}, max {max(values.values())}, "
-          f"{len(spread)} distinct values")
+    known = [v for v in values.values() if v is not None]
+    spread = Counter(known)
+    print(f"career_compensation: min {min(known, default=None)}, "
+          f"max {max(known, default=None)}, {len(spread)} distinct values")
+    print(f"authors with NO known first year (excluded, value NULL): "
+          f"{len(values) - len(known):,}")
     for aid in list(values)[:5]:
         print(f"  {aid}: first year {first_year[aid] or None} -> {values[aid]}")
 

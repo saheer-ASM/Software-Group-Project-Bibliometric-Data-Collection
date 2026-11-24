@@ -36,7 +36,8 @@ FROM (
                ORDER BY effective_citation DESC
            ) AS rn
     FROM author_paper_field_effective_citation
-    WHERE effective_citation IS NOT NULL{cohort_filter}
+    WHERE effective_citation IS NOT NULL
+      AND calculation_status = 'READY'{cohort_filter}
 )
 GROUP BY author_id, field_name
 """

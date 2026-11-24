@@ -129,7 +129,26 @@ def _attach_information_schema(connection):
             for cid, name, kind, notnull in columns])
 
 
-def _sqlite_batch(queries, settings):
+FETCH_CHUNK = 100_000
+
+
+def _columns_from_cursor(cursor):
+    """Read a cursor into {column: [values]} in chunks. Far less memory than one
+    dict per row, which matters for the 100,000-author extracts."""
+    names = [d[0] for d in cursor.description]
+    columns = {name: [] for name in names}
+    lists = [columns[name] for name in names]
+    while True:
+        chunk = cursor.fetchmany(FETCH_CHUNK)
+        if not chunk:
+            break
+        for row in chunk:
+            for target, value in zip(lists, row):
+                target.append(value)
+    return columns
+
+
+def _sqlite_batch(queries, settings, columnar=False):
     """Read SQLite extracts in one transaction on a mode=ro, query_only connection."""
     connection = None
     try:
@@ -139,13 +158,17 @@ def _sqlite_batch(queries, settings):
         connection.execute('PRAGMA query_only = ON')
         if connection.execute('PRAGMA query_only').fetchone()[0] != 1:
             raise DatabaseAccessError('READ_ONLY_NOT_ENFORCED')
-        connection.row_factory = sqlite3.Row
+        if not columnar:
+            connection.row_factory = sqlite3.Row
         connection.execute('BEGIN')
         output = {}
         for name, item in queries.items():
             query, params = item if isinstance(item, tuple) else (item, None)
-            rows = connection.execute(*_sqlite_statement(query, params)).fetchall()
-            output[name] = [dict(row) for row in rows]
+            cursor = connection.execute(*_sqlite_statement(query, params))
+            if columnar:
+                output[name] = _columns_from_cursor(cursor)
+            else:
+                output[name] = [dict(row) for row in cursor.fetchall()]
         return output
     except sqlite3.Error as error:
         raise DatabaseAccessError(getattr(error, 'sqlite_errorname', None)) from None
@@ -194,8 +217,10 @@ def execute_select(query, params=None, *, config=None):
                 connection.close()
 
 
-def execute_select_batch(queries, *, config=None):
-    """Read fixed extracts from one repeatable-read, read-only PostgreSQL snapshot."""
+def execute_select_batch(queries, *, config=None, columnar=False):
+    """Read fixed extracts from one repeatable-read, read-only PostgreSQL snapshot.
+
+    columnar=True returns {name: {column: [values]}} instead of lists of dicts."""
     if not isinstance(queries, dict) or not queries:
         raise ValueError('A nonempty mapping of SELECT queries is required.')
     for item in queries.values():
@@ -203,7 +228,7 @@ def execute_select_batch(queries, *, config=None):
         validate_select(query)
     settings = config if config is not None else load_config()
     if isinstance(settings, SQLiteConfig):
-        return _sqlite_batch(queries, settings)
+        return _sqlite_batch(queries, settings, columnar=columnar)
     if not isinstance(settings, DatabaseConfig):
         raise TypeError('config must be a DatabaseConfig instance.')
     connection = None
@@ -227,7 +252,10 @@ def execute_select_batch(queries, *, config=None):
                     cursor.execute(query, params)
                 else:
                     cursor.execute(item)
-                output[name] = [dict(row) for row in cursor.fetchall()]
+                if columnar:
+                    output[name] = _columns_from_cursor(cursor)
+                else:
+                    output[name] = [dict(row) for row in cursor.fetchall()]
         return output
     except psycopg2.Error as error:
         raise DatabaseAccessError(error.pgcode) from None

@@ -341,7 +341,8 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
                     rq07_graph_author_count=len((extra_inputs or {}).get('graph_inputs') or {}),
                     rq07_graph_input_sha256={author:graph.source_sha256 for author, graph in
                         ((extra_inputs or {}).get('graph_inputs') or {}).items() if graph.source_sha256},
-                    cohort_sha256=(hashlib.sha256((PROJECT_ROOT/'995_authors.csv').read_bytes()).hexdigest()
+                    cohort_sha256=(hashlib.sha256(Path((extra_inputs or {}).get('cohort_file')
+                        or PROJECT_ROOT/'995_authors.csv').read_bytes()).hexdigest()
                         if source_kind == 'SELECT_ONLY_POSTGRESQL_COHORT' else None),
                     source=source_kind,
                     database_isolation=_database_isolation(source_kind),
@@ -570,7 +571,8 @@ def run_database(*, experiment_names=(), allow_incomplete=False, extra_inputs=No
     load_config()
     verify_schema()
     extracts = load_all()
-    if len(extracts.authors) < 100000:
+    from analysis.common import REFERENCE_AUTHOR_COUNT
+    if len(extracts.authors) < REFERENCE_AUTHOR_COUNT:
         raise ValueError('DATA_REQUIRED: design calls for 100000 verified author profiles; no metrics calculated')
     return run_from_extracts(extracts, experiment_names=experiment_names,
                              allow_incomplete=allow_incomplete, extra_inputs=extra_inputs,
@@ -586,8 +588,8 @@ def run_pilot(*, author_ids, experiment_names=(), extra_inputs=None):
            and not evidence[key].strip()) for key in required):
         raise ValueError('DATA_REQUIRED: pilot design, cohort readiness, citation source, and portfolio evidence are required before connecting')
     ids = tuple(author_ids)
-    if not ids or len(ids) > 6000 or len(set(ids)) != len(ids):
-        raise ValueError('Pilot author IDs must be a unique nonempty list of at most 6000')
+    if not ids or len(set(ids)) != len(ids):
+        raise ValueError('Pilot author IDs must be a unique nonempty list')
     load_config()
     from .repository import load_selected_author_ids
     extracts = load_selected_author_ids(ids)
@@ -596,11 +598,13 @@ def run_pilot(*, author_ids, experiment_names=(), extra_inputs=None):
                              _source_token=_DATABASE_SOURCE_TOKEN)
 
 
-def run_cohort(*, experiment_names=(), extra_inputs=None, exclude_missing_years=False):
-    """Use the immutable 995-ID cohort against a later populated read-only DB."""
+def run_cohort(*, experiment_names=(), extra_inputs=None, exclude_missing_years=False,
+               cohort_file=None):
+    """Run a fixed cohort CSV (default 995_authors.csv; the 100k cohort via
+    cohort_file) against a populated read-only DB."""
     from .phase6_readiness import read_cohort
     from .repository import load_selected_author_ids
-    _, ids = read_cohort()
+    _, ids = read_cohort(cohort_file)
     evidence = extra_inputs or {}
     if not evidence.get('database_ready_reference') or not evidence.get('citation_source_reference'):
         raise ValueError('DATA_REQUIRED: populated database and citation-source evidence needed before connection')
@@ -612,7 +616,8 @@ def run_cohort(*, experiment_names=(), extra_inputs=None, exclude_missing_years=
     if 'rq07' in names and (graphs, frozen, parameters) != (None, None, None):
         if graphs is None or frozen is None or parameters is None or set(graphs) != set(ids):
             raise ValueError('DATA_REQUIRED: complete per-author RQ7 graphs and frozen original reference required')
-        if frozen.original_author_count != 100000:
+        from analysis.common import REFERENCE_AUTHOR_COUNT
+        if frozen.original_author_count < REFERENCE_AUTHOR_COUNT:
             raise ValueError('DATA_REQUIRED: real RQ7 requires the original 100000-author reference')
     load_config()
     extracts = load_selected_author_ids(ids)

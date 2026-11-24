@@ -222,13 +222,17 @@ class InfluentialSelfCitationCalculator:
             ),
         )
 
-        # Raw fractional citation:
+        # Raw citation of q to p, shared over p's fields:
         #
-        # TC_raw(p, i, q, f) = W_p^(f,i)
-        raw_citation = (
-            target_author_overall_weight
-            * field_weight
-        )
+        # TC_raw(p, i, q, f) = V_p^f
+        #
+        # One citing paper is one citation (paper's worked example:
+        # TC_raw = 1 for a single-field paper). It is split over the
+        # cited paper's fields so that Eq 9 (sum over f) gives at most
+        # 1 per citing paper. The author weight W_p^(f,i) is NOT applied
+        # here: Eq 11, 13, 14 and 15 apply it, and applying it here too
+        # counted it twice (W^2).
+        raw_citation = field_weight
 
         # Equation 8:
         #

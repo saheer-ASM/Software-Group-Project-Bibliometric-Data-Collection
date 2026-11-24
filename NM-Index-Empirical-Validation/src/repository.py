@@ -110,14 +110,18 @@ def _queries(visible):
     return queries
 
 
+def _columnar_batch(queries):
+    return execute_select_batch(queries, columnar=True)
+
+
 def load_all(*, query=execute_select):
     queries = _queries(verify_schema())
-    records = (execute_select_batch(queries) if query is execute_select else
+    records = (_columnar_batch(queries) if query is execute_select else
                {name: query(sql) for name, sql in queries.items()})
     return _assemble(records)
 
 
-def load_selected_author_ids(author_ids, *, batch=execute_select_batch):
+def load_selected_author_ids(author_ids, *, batch=_columnar_batch):
     """Extract only the requested cohort and its linked papers in one read-only snapshot.
 
     Non-cohort author slots are masked in the returned in-memory authorship frame;
@@ -126,18 +130,20 @@ def load_selected_author_ids(author_ids, *, batch=execute_select_batch):
     coauthor-sensitive baseline calculation.
     """
     ids = tuple(author_ids)
-    if not ids or len(ids) > 6000 or len(set(ids)) != len(ids) or any(
+    if not ids or len(set(ids)) != len(ids) or any(
             not isinstance(value, str) or not value.strip() or value.startswith('TEST_')
             for value in ids):
-        raise ValueError('Pilot requires 1–6000 unique, nonempty, real stable author IDs')
+        raise ValueError('Cohort requires unique, nonempty, real stable author IDs')
     base = _queries(verify_schema())
-    placeholders = ', '.join(['%s'] * len(ids))
-    selected = f'author_id IN ({placeholders})'
-    linked = ' OR '.join(f'author{i}id IN ({placeholders})' for i in range(1, 11))
+    # Each list binds as ONE value (PostgreSQL array; SQLite json_each), so the
+    # cohort size is not limited by the database's bind-parameter limit.
+    selected = 'author_id = ANY(%s)'
+    linked = ' OR '.join(f'author{i}id = ANY(%s)' for i in range(1, 11))
     paper_select = f'SELECT pub_id FROM public.author_contribution_weight WHERE {linked}'
     paper_where = f'pub_id IN ({paper_select})'
-    author_params = ids
-    paper_params = ids * 10
+    id_list = list(ids)
+    author_params = (id_list,)
+    paper_params = (id_list,) * 10
     queries = {
         'authors': (base['authors'].replace(' ORDER BY author_id', f' WHERE {selected} ORDER BY author_id'), author_params),
         'publications': (base['publications'].replace(' ORDER BY pub_id', f' WHERE {paper_where} ORDER BY pub_id'), paper_params),

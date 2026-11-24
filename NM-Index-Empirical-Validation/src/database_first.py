@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import pandas as pd
 import numpy as np
 
+from analysis.common import REFERENCE_AUTHOR_COUNT
 from analysis.counterfactual import FrozenBenchmarks
 from analysis.rq07_engine import AuthorGraphInput
 from nm_index.counterfactual_calculator import NMParameters, _reference_lookup
@@ -104,8 +105,8 @@ def _reference_valid(frame, ids, *, synthetic=False):
         return False, 'reference scores lack required columns'
     if frame.author_id.isna().any() or frame.author_id.astype(str).duplicated().any():
         return False, 'reference scores have null or duplicate author IDs'
-    if not synthetic and len(frame) != 100000:
-        return False, 'approved original reference requires exactly 100000 authors'
+    if not synthetic and len(frame) < REFERENCE_AUTHOR_COUNT:
+        return False, f'reference needs at least {REFERENCE_AUTHOR_COUNT} authors'
     if not set(ids) <= set(frame.author_id.astype(str)):
         return False, 'selected authors are absent from the original reference'
     versions = frame.reference_version.dropna().astype(str).str.strip().unique()
@@ -133,7 +134,7 @@ def _rq07_valid(bundle, ids, *, synthetic=False):
         return False, 'RQ7 graphs do not cover every selected author'
     if not isinstance(frozen, FrozenBenchmarks) or not isinstance(parameters, NMParameters):
         return False, 'RQ7 frozen benchmarks or NM parameters are unverified types'
-    if not synthetic and frozen.original_author_count != 100000:
+    if not synthetic and frozen.original_author_count < REFERENCE_AUTHOR_COUNT:
         return False, 'RQ7 requires the original 100000-author reference'
     try:
         _reference_lookup(frozen)

@@ -195,7 +195,9 @@ class MockPipelineTests(unittest.TestCase):
             self.assertEqual(set(queries), set(records))
             for sql, params in queries.values():
                 validate_select(sql)
-                self.assertEqual(set(params), {'A1'})
+                # each placeholder binds the whole ID list as one value
+                self.assertEqual(sql.count('= ANY(%s)'), len(params))
+                self.assertTrue(all(list(p) == ['A1'] for p in params))
             return records
         with patch('src.repository.verify_schema') as schema:
             extracts = load_selected_author_ids(['A1'], batch=batch)

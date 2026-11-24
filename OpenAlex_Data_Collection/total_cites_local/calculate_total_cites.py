@@ -153,10 +153,10 @@ PREPARE_STEPS = [
     """
     CREATE TEMP TABLE tmp_eq11_processed_pairs AS
     SELECT
-        isc.cited_pub_id,
-        COUNT(DISTINCT isc.citing_pub_id) AS processed_pair_count
-    FROM influential_self_citations AS isc
-    GROUP BY isc.cited_pub_id
+        apac.cited_pub_id,
+        MAX(apac.citing_paper_count) AS processed_pair_count
+    FROM author_paper_adjusted_citations AS apac
+    GROUP BY apac.cited_pub_id
     """,
     "CREATE INDEX temp.idx_tmp_eq11_pp ON tmp_eq11_processed_pairs(cited_pub_id)",
 ]
@@ -348,13 +348,10 @@ calculated AS (
         MAX(:as_of_year - ap.first_publication_year, 0) AS career_time_years,
         :career_boost AS career_boost_c,
         :career_decay AS career_decay_lambda,
-        (
-            :career_boost
-            * POWER(
-                MAX(:as_of_year - ap.first_publication_year, 0) + 1,
-                -(:career_decay)
-            )
-        ) AS career_factor,
+        -- Eq 10: the ONE career factor used by every equation
+        -- (career_compensation_local); NULL = first year unknown -> excluded
+        (SELECT a.career_compensation FROM author AS a
+         WHERE a.author_id = ap.author_id) AS career_factor,
         ap.publication_count,
         COALESCE(ds.included_publication_count, 0)
             AS included_publication_count,
@@ -408,7 +405,7 @@ SELECT
     provisional_field_row_count,
     normalized_contribution_sum,
     CASE
-        WHEN included_field_row_count = 0 THEN NULL
+        WHEN included_field_row_count = 0 OR career_factor IS NULL THEN NULL
         ELSE career_factor * normalized_contribution_sum
     END AS total_cites_score,
     calculation_complete,

@@ -99,16 +99,18 @@ STEPS = [
     ),
     -- Number of citation pairs actually completed by the ISC calculation.
     processed_pairs AS (
-        SELECT isc.cited_pub_id,
-               COUNT(DISTINCT isc.citing_pub_id) AS processed_pair_count
-        FROM influential_self_citations AS isc
-        GROUP BY isc.cited_pub_id
+        SELECT apac.cited_pub_id,
+               MAX(apac.citing_paper_count) AS processed_pair_count
+        FROM author_paper_adjusted_citations AS apac
+        GROUP BY apac.cited_pub_id
     ),
-    -- Equation 9: one adjusted total per paper and target author; sum them to get
-    -- one paper-level adjusted total.
+    -- Equation 9: one adjusted total per paper and target author. TC_adj of a
+    -- paper is about its citation count (TC_raw = V_p^f), so the paper-level value
+    -- is the AVERAGE over its target authors (summing would multiply it by the
+    -- number of target authors).
     paper_adjusted_totals AS (
         SELECT apac.cited_pub_id,
-               SUM(apac.total_adjusted_citation) AS paper_adjusted_citations
+               AVG(apac.total_adjusted_citation) AS paper_adjusted_citations
         FROM author_paper_adjusted_citations AS apac
         GROUP BY apac.cited_pub_id
     )

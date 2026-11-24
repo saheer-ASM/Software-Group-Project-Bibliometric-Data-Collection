@@ -6,7 +6,8 @@ evaluated set-based in SQLite (window functions) instead. Rules, unchanged:
 
   source rows : author_paper_field_effective_citation with calculation_status = 'READY'
                 and a non-NULL capped_adjusted_citation (Equation 15 output)
-  fixed cap   : capped_adjusted_citation is clipped at OUTLIER_CITATION_CAP = 150
+  outliers    : only the Eq 12 cap (99th percentile per field), as in the paper.
+                (The old extra fixed cap of 150 is removed.)
   fields      : field_classification unpivoted, field_weight = weight / 100
   join        : (paper, field)  -- inner join
   clean       : author_field_weight > 0, career_factor > 0, field_weight > 0
@@ -35,7 +36,6 @@ from datetime import datetime
 
 from .db_connection import get_connection
 
-OUTLIER_CITATION_CAP = 150
 
 
 def _fields() -> str:
@@ -79,7 +79,7 @@ STEPS = [
             f.field_weight,
             e.career_factor * e.author_field_weight AS contribution,
             e.career_factor * e.author_field_weight
-                * MIN(e.capped_adjusted_citation, {float(OUTLIER_CITATION_CAP)}) AS tc_eff
+                * e.capped_adjusted_citation AS tc_eff
         FROM author_paper_field_effective_citation AS e
         JOIN tmp_hm_fields AS f
           ON f.paper_id = e.pub_id AND f.field_id = e.field_name

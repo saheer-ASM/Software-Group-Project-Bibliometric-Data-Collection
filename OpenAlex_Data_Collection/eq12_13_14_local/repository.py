@@ -76,6 +76,7 @@ def compute_field_adjusted_citation_averages(connection) -> list:
             END AS data_coverage_ratio
         FROM {EQ11}
         WHERE adjusted_citation IS NOT NULL
+          AND calculation_status IN {INCLUDED_SQL}   -- same paper set as Eq 11-15
         GROUP BY field_name
         """
     ).fetchall()
@@ -103,7 +104,8 @@ def compute_field_percentile_caps(connection, percentile_k: Decimal) -> list:
     values: dict[str, array] = {}
     cursor = connection.execute(
         f"SELECT field_name, adjusted_citation FROM {EQ11} "
-        f"WHERE adjusted_citation IS NOT NULL")
+        f"WHERE adjusted_citation IS NOT NULL "
+        f"AND calculation_status IN {INCLUDED_SQL}")   # same paper set as Eq 11-15
     while True:
         chunk = cursor.fetchmany(500_000)
         if not chunk:

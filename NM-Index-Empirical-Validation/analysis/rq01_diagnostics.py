@@ -1,6 +1,7 @@
 """Lecturer-approved RQ1 diagnostics on one frozen reference cohort."""
 
 import numpy as np
+from analysis.common import REFERENCE_AUTHOR_COUNT
 import pandas as pd
 from scipy.stats import skew
 
@@ -31,9 +32,9 @@ def analyse(reference, baselines, *, synthetic=False, selected_ids=()):
     if (reference.evidence_reference.isna().any() or
             reference.evidence_reference.astype(str).str.strip().eq('').any()):
         raise ValueError('RQ1 reference rows require provenance evidence_reference')
-    if not synthetic and len(reference) != 100000:
+    if not synthetic and len(reference) < REFERENCE_AUTHOR_COUNT:
         return {'status': pd.DataFrame([dict(status='DATA_REQUIRED',
-            issue='Lecturer requires exactly the approved 100000-author reference sample',
+            issue=f'Reference needs at least {REFERENCE_AUTHOR_COUNT} authors',
             reference_rows=len(reference), reference_version=versions[0])])}
     frame = reference.copy().reset_index(drop=True)
     absent_ids = set(selected_ids)-set(frame.author_id)

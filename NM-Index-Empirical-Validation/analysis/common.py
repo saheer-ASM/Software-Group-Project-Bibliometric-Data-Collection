@@ -25,3 +25,9 @@ def safe_numeric(frame, columns):
     if any(column not in frame for column in columns):
         return None
     return frame[list(columns)].apply(pd.to_numeric, errors='coerce').replace([np.inf, -np.inf], np.nan)
+
+
+# Minimum size of the frozen reference population (the paper: 100,000
+# author profiles). "At least", because de-duplication and exclusions
+# rarely leave exactly 100,000.
+REFERENCE_AUTHOR_COUNT = 100_000

@@ -9,13 +9,20 @@ normalize_fields below are copied verbatim from the cloud run_isc.py.
 For every citation pair  q (citing) -> p (cited)  and every field f of p and every
 target author a of p:
     Eq 7  ISC(a,p,q,f) = (self + eps*core) / (self + |J|*core + non_overlap)
-    Eq 8  TC_adj       = (1 - ISC) * TC_raw        TC_raw = W_p(a) * V_p(f)
-Eq 9 = sum of TC_adj over every q and f  ->  author_paper_adjusted_citations.
+    Eq 8  TC_adj       = (1 - ISC) * TC_raw        TC_raw = V_p(f)
+Eq 9 = sum of TC_adj over EVERY q and f  ->  author_paper_adjusted_citations.
 
-Same selection rules as the cloud script:
-    * the citing paper must have a row in author_contribution_weight
-    * at most 200 randomly chosen citing papers per cited paper
-    * pairs whose papers lack author weights / field classification are skipped
+TC_raw is the field share V_p(f) of one citation (the paper's example: TC_raw = 1
+for a one-field paper). The author weight W_p(a) is applied once, in Eq 11-15.
+
+Every citing paper is used (no cap, no sampling), as in Eq 9:
+    * q shares no author with p -> I and J are empty, so ISC = 0 exactly and
+      TC_adj = TC_raw. Eq 7 is only run for citing papers that share authors,
+      which keeps the run fast. Only those get influential_self_citations rows.
+    * q's authors unknown (no row in author_contribution_weight; run
+      collect_co_authors.py on the citing papers first) -> no self-citation can
+      be shown, so ISC = 0. These pairs are counted in the summary.
+    * a cited paper without author weights or fields is skipped and reported.
 
 Tables created (same columns as the cloud ones; TEXT[] columns are stored as JSON):
     influential_self_citations      (Eq 7 + 8, one row per q, p, author, field)
@@ -40,7 +47,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import random
 import sys
 import time
 from decimal import Decimal
@@ -60,10 +66,7 @@ ZERO = Decimal("0")
 ONE = Decimal("1")
 HUNDRED = Decimal("100")
 
-MAX_CITING_PER_CITED = 200     # cloud default; override with --max-citing (0 = no cap)
-CITED_BATCH = 100              # cited papers per transaction (capped runs)
-CITED_BATCH_NO_CAP = 5         # cited papers per transaction when every citing paper is used
-FLUSH_ROWS = 200_000           # write rows to the database in chunks of this size
+CITED_BATCH = 100              # cited papers per transaction
 SQL_IN_CHUNK = 500
 SLOTS = range(1, 11)
 
@@ -274,6 +277,12 @@ INSERT_ISC = (
     "adjusted_citation) VALUES (" + ",".join("?" * 20) + ")")
 
 
+INSERT_APAC = (
+    "INSERT INTO author_paper_adjusted_citations (cited_pub_id, target_author_id, "
+    "citing_paper_count, field_row_count, total_raw_citation, total_adjusted_citation) "
+    "VALUES (?,?,?,?,?,?)")
+
+
 def candidate_cited_papers(conn, targets):
     """Cited papers to process, sorted: those that have citing papers AND whose
     authors include a target author (or every cited paper for --targets all)."""
@@ -312,11 +321,6 @@ def main():
                         help="recompute cited papers that already have rows")
     parser.add_argument("--epsilon-zero", type=Decimal, default=Decimal("0.90"))
     parser.add_argument("--weight-tolerance", type=Decimal, default=Decimal("0.02"))
-    parser.add_argument("--max-citing", type=int, default=MAX_CITING_PER_CITED,
-                        help="at most N randomly chosen citing papers per cited paper "
-                             "(cloud default 200). 0 = use ALL citing papers, as in Eq 9 of the paper")
-    parser.add_argument("--seed", type=int, default=42,
-                        help="seed for the random choice of the 200 citing papers")
     args = parser.parse_args()
 
     if args.limit is not None and args.limit <= 0:
@@ -344,9 +348,9 @@ def main():
         cited_papers = [p for p in cited_papers if p in wanted]
 
     already = set()
-    if "influential_self_citations" in exists and not args.redo:
+    if "author_paper_adjusted_citations" in exists and not args.redo:
         already = {r[0] for r in conn.execute(
-            "SELECT DISTINCT cited_pub_id FROM influential_self_citations")}
+            "SELECT DISTINCT cited_pub_id FROM author_paper_adjusted_citations")}
     total_candidates = len(cited_papers)
     todo = [p for p in cited_papers if p not in already]
     if args.limit:
@@ -355,125 +359,138 @@ def main():
           f"{total_candidates - len([p for p in cited_papers if p not in already]):,} "
           f"already done, {len(todo):,} to process in this run\n", flush=True)
 
-    rng = random.Random(args.seed)
-    batch_size = CITED_BATCH if args.max_citing else CITED_BATCH_NO_CAP
-    processed_pairs = skipped_pairs = rows_saved = 0
+    batch_size = CITED_BATCH
+    processed_pairs = skipped_papers = rows_saved = 0
+    overlap_pairs = unknown_author_pairs = 0
     skip_reasons = {}
     started = time.time()
 
     for start in range(0, len(todo), batch_size):
         batch = todo[start:start + batch_size]
         marks = ",".join("?" * len(batch))
-        if not args.dry_run:
-            # rows of these cited papers are rebuilt from scratch (rows are flushed in chunks)
-            conn.execute(f"DELETE FROM influential_self_citations "
-                         f"WHERE cited_pub_id IN ({marks})", batch)
 
-        # citing papers per cited paper (distinct, not self-citing, has a weight row)
+        # Eq 9 sums over ALL papers q that cite p (no cap, no sampling).
         pairs_by_cited = {}
         for cited, citing in conn.execute(
                 f"SELECT DISTINCT pub_id, cites_pub_id FROM citation WHERE pub_id IN ({marks})",
                 batch):
             if citing is not None and cited != citing:
                 pairs_by_cited.setdefault(cited, []).append(citing)
-        all_citing = {q for qs in pairs_by_cited.values() for q in qs}
-        valid_citing = has_weight_row(conn, all_citing)
         for cited in pairs_by_cited:
-            qs = sorted(q for q in pairs_by_cited[cited] if q in valid_citing)
-            if args.max_citing and len(qs) > args.max_citing:
-                qs = sorted(rng.sample(qs, args.max_citing))
-            pairs_by_cited[cited] = qs
+            pairs_by_cited[cited].sort()
 
-        weights = fetch_author_weights(conn, set(batch) | {q for qs in pairs_by_cited.values() for q in qs})
+        weights = fetch_author_weights(
+            conn, set(batch) | {q for qs in pairs_by_cited.values() for q in qs})
         fields = fetch_fields(conn, batch)
 
-        out_rows = []
+        out_rows = []      # Eq 7/8 detail rows (only citing papers that share authors)
+        apac_rows = []     # Eq 9 rows
         for cited in batch:
-            cited_w = weights.get(cited)
-            cited_f = fields.get(cited)
-            for citing in pairs_by_cited.get(cited, []):
-                try:
-                    cited_author_weights = cited_w
-                    citing_author_weights = weights.get(citing)
-                    for w in (cited_author_weights, citing_author_weights):
-                        if isinstance(w, Exception):
-                            raise w
-                    if not cited_author_weights:
-                        raise RuntimeError(f"No author weights for cited paper {cited}.")
-                    if not citing_author_weights:
-                        raise RuntimeError(f"No author weights for citing paper {citing}.")
-                    if not cited_f:
-                        raise RuntimeError(f"No field classification for cited paper {cited}.")
+            citing_list = pairs_by_cited.get(cited, [])
+            try:
+                cited_w = weights.get(cited)
+                if isinstance(cited_w, Exception):
+                    raise cited_w
+                if not cited_w:
+                    raise RuntimeError(f"No author weights for cited paper {cited}.")
+                if not fields.get(cited):
+                    raise RuntimeError(f"No field classification for cited paper {cited}.")
+                cited_author_weights = normalize_author_weights(
+                    cited_w, pub_id=cited, tolerance=args.weight_tolerance)
+                cited_fields = normalize_fields(
+                    fields[cited], pub_id=cited, tolerance=args.weight_tolerance)
+            except Exception as error:
+                skipped_papers += 1
+                reason = str(error).split(" for ")[0][:60]
+                skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+                if skipped_papers <= 5:
+                    print(f"SKIPPED cited paper {cited}: {error}")
+                continue
 
-                    cited_author_weights = normalize_author_weights(
-                        cited_author_weights, pub_id=cited, tolerance=args.weight_tolerance)
-                    citing_author_weights = normalize_author_weights(
-                        citing_author_weights, pub_id=citing, tolerance=args.weight_tolerance)
-                    cited_fields = normalize_fields(
-                        cited_f, pub_id=cited, tolerance=args.weight_tolerance)
-                    cited_author_ids = [i.author_id for i in cited_author_weights]
+            cited_author_ids = [i.author_id for i in cited_author_weights]
+            cited_id_set = set(cited_author_ids)
+            targets = [t for t in cited_author_weights
+                       if target_ids is None or t.author_id in target_ids]
+            if not targets:
+                continue
+            field_total = sum((f.field_weight for f in cited_fields), ZERO)  # = 1
+            raw_sum = {t.author_id: ZERO for t in targets}
+            adj_sum = {t.author_id: ZERO for t in targets}
 
-                    pair_rows = []
-                    for field in cited_fields:
-                        for target in cited_author_weights:
-                            if target_ids is not None and target.author_id not in target_ids:
-                                continue
-                            result = calculate_isc(
-                                cited_pub_id=cited, citing_pub_id=citing,
-                                cited_author_ids=cited_author_ids,
-                                citing_author_weights=citing_author_weights,
-                                target_author_id=target.author_id,
-                                target_author_overall_weight=target.weight,
-                                field_name=field.field_name,
-                                field_weight=field.field_weight,
-                                epsilon_zero=args.epsilon_zero,
-                                weight_tolerance=args.weight_tolerance)
-                            pair_rows.append(result)
-                            if args.dry_run and processed_pairs < 8:
-                                print(f"q={citing} -> p={cited} | author={target.author_id} | "
-                                      f"field={field.field_name} | ISC={result.isc_value:.6f} | "
-                                      f"raw={result.raw_citation:.6f} | "
-                                      f"adjusted={result.adjusted_citation:.6f}")
-                    out_rows.extend(isc_row(r) for r in pair_rows)
-                    processed_pairs += 1
-                    if not args.dry_run and len(out_rows) >= FLUSH_ROWS:
-                        conn.executemany(INSERT_ISC, out_rows)
-                        rows_saved += len(out_rows)     # (dry run: all rows; real run: the last chunk)
-                        out_rows = []
-                except Exception as error:
-                    skipped_pairs += 1
-                    reason = str(error).split(" for ")[0][:60]
-                    skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
-                    if skipped_pairs <= 5:
-                        print(f"SKIPPED q={citing} -> p={cited}: {error}")
+            for citing in citing_list:
+                processed_pairs += 1
+                citing_w = weights.get(citing)
+                citing_author_weights = None
+                if citing_w and not isinstance(citing_w, Exception):
+                    try:
+                        citing_author_weights = normalize_author_weights(
+                            citing_w, pub_id=citing, tolerance=args.weight_tolerance)
+                    except Exception:
+                        citing_author_weights = None
+                if citing_author_weights is None:
+                    unknown_author_pairs += 1
+                shares = (citing_author_weights is not None and any(
+                    w.author_id in cited_id_set for w in citing_author_weights))
+
+                if not shares:
+                    # No shared author (or authors unknown): I and J are empty,
+                    # so ISC = 0 exactly and TC_adj = TC_raw = V_p^f for every f.
+                    for t in targets:
+                        raw_sum[t.author_id] += field_total
+                        adj_sum[t.author_id] += field_total
+                    continue
+
+                overlap_pairs += 1
+                for field in cited_fields:
+                    for t in targets:
+                        result = calculate_isc(
+                            cited_pub_id=cited, citing_pub_id=citing,
+                            cited_author_ids=cited_author_ids,
+                            citing_author_weights=citing_author_weights,
+                            target_author_id=t.author_id,
+                            target_author_overall_weight=t.weight,
+                            field_name=field.field_name,
+                            field_weight=field.field_weight,
+                            epsilon_zero=args.epsilon_zero,
+                            weight_tolerance=args.weight_tolerance)
+                        raw_sum[t.author_id] += result.raw_citation
+                        adj_sum[t.author_id] += result.adjusted_citation
+                        out_rows.append(isc_row(result))
+                        if args.dry_run and overlap_pairs <= 8:
+                            print(f"q={citing} -> p={cited} | author={t.author_id} | "
+                                  f"field={field.field_name} | ISC={result.isc_value:.6f} | "
+                                  f"raw={result.raw_citation:.6f} | "
+                                  f"adjusted={result.adjusted_citation:.6f}")
+
+            for t in targets:
+                apac_rows.append((cited, t.author_id, len(citing_list),
+                                  len(citing_list) * len(cited_fields),
+                                  float(raw_sum[t.author_id]), float(adj_sum[t.author_id])))
 
         if not args.dry_run:
             with conn:
-                conn.executemany(INSERT_ISC, out_rows)
-                # Eq 9 for this batch of cited papers
+                conn.execute(f"DELETE FROM influential_self_citations "
+                             f"WHERE cited_pub_id IN ({marks})", batch)
                 conn.execute(f"DELETE FROM author_paper_adjusted_citations "
                              f"WHERE cited_pub_id IN ({marks})", batch)
-                conn.execute(
-                    "INSERT INTO author_paper_adjusted_citations (cited_pub_id, "
-                    "target_author_id, citing_paper_count, field_row_count, "
-                    "total_raw_citation, total_adjusted_citation) "
-                    "SELECT cited_pub_id, target_author_id, COUNT(DISTINCT citing_pub_id), "
-                    "COUNT(*), SUM(raw_citation), SUM(adjusted_citation) "
-                    f"FROM influential_self_citations WHERE cited_pub_id IN ({marks}) "
-                    "GROUP BY cited_pub_id, target_author_id", batch)
+                conn.executemany(INSERT_ISC, out_rows)
+                conn.executemany(INSERT_APAC, apac_rows)
         rows_saved += len(out_rows)
 
         done_cited = len(already) + min(start + batch_size, len(todo))
         elapsed = time.time() - started
         print(f"  cited papers: {done_cited:,} / {total_candidates:,} "
               f"({done_cited / max(total_candidates, 1) * 100:.2f}%) | "
-              f"pairs {processed_pairs:,} (skipped {skipped_pairs:,}) | rows {rows_saved:,} "
-              f"| {elapsed / 60:.1f} min" + ("  [dry run]" if args.dry_run else ""),
+              f"pairs {processed_pairs:,} (shared authors {overlap_pairs:,}, "
+              f"authors unknown {unknown_author_pairs:,}) | "
+              f"{elapsed / 60:.1f} min" + ("  [dry run]" if args.dry_run else ""),
               flush=True)
 
     print("\n--- summary ---")
-    print(f"citation pairs calculated: {processed_pairs:,}")
-    print(f"citation pairs skipped:    {skipped_pairs:,}  {skip_reasons or ''}")
+    print(f"citation pairs counted:          {processed_pairs:,}")
+    print(f"  with shared authors (Eq 7 run): {overlap_pairs:,}")
+    print(f"  citing authors unknown (ISC=0): {unknown_author_pairs:,}")
+    print(f"cited papers skipped:            {skipped_papers:,}  {skip_reasons or ''}")
     print(f"Eq 7/8 rows {'(would be) ' if args.dry_run else ''}written: {rows_saved:,}")
     if args.dry_run:
         print("[dry run] nothing written to the database")
