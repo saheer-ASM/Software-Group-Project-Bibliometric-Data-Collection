@@ -86,12 +86,15 @@ class MockPipelineTests(unittest.TestCase):
                 self.assertEqual(meta['data_classification'], LABEL)
                 self.assertEqual(meta['experiment_status']['rq03'], 'METHODOLOGY_PENDING')
                 # Three approved scenarios recalculate; Table 9's combined row stays pending.
-                self.assertEqual(meta['experiment_status']['rq07'], 'METHODOLOGY_PENDING')
+                # combined needs halves for gift papers, which the fixture lacks
+                self.assertEqual(meta['experiment_status']['rq07'], 'INPUT_DATA_REQUIRED')
                 gaming = pd.read_csv(output/'gaming_resistance.csv')
                 self.assertEqual(len(gaming), 48)
                 self.assertTrue(gaming.loc[gaming.scenario.ne('combined'), 'status'].eq('OK').all())
+                # combined is composed (gift -> salami -> self); the fixture has no
+                # halves for gift-paper citations, so it is input-gated here
                 self.assertTrue(gaming.loc[gaming.scenario.eq('combined'), 'status']
-                                .eq('METHODOLOGY_PENDING').all())
+                                .eq('INPUT_DATA_REQUIRED').all())
                 self.assertEqual(gaming.author_id.nunique(), 12)
                 self.assertEqual(gaming.benchmark_sha256.nunique(), 1)
                 self.assertTrue((output/'output_manifest.csv').is_file())

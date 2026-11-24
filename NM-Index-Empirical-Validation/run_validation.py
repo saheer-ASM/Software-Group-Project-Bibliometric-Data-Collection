@@ -28,12 +28,16 @@ def main(argv=None):
                         help='pilot only: documented approval of selected cohort and reduced sample scope')
     parser.add_argument('--input', action='append', default=[], metavar='KIND=CSV',
                         help='local research CSV, e.g. award_labels=inputs/award_labels.csv; repeatable')
-    parser.add_argument('--icc-model', choices=['ICC(A,1) two-way random absolute agreement'])
+    parser.add_argument('--icc-model', choices=['ICC(A,1) two-way random absolute agreement'],
+                        default='ICC(A,1) two-way random absolute agreement')
     parser.add_argument('--score-year', type=int)
     parser.add_argument('--first-year', type=int)
-    parser.add_argument('--rank-change-denominator', choices=['paired_cohort_size'])
-    parser.add_argument('--pca-preprocessing', choices=['complete_case_z_standardization'])
-    parser.add_argument('--pca-decision-reference')
+    parser.add_argument('--rank-change-denominator', choices=['paired_cohort_size'],
+                        default='paired_cohort_size')
+    parser.add_argument('--pca-preprocessing', choices=['complete_case_z_standardization'],
+                        default='complete_case_z_standardization')
+    parser.add_argument('--pca-decision-reference', default='Author decision 2026-11-24: z-standardised complete cases, '
+                        'eigenvalue > 1 retained, varimax rotation')
     parser.add_argument('--representative-author')
     parser.add_argument('--trajectory-normalization', choices=['within_author_max'])
     parser.add_argument('--trajectory-decision-reference')

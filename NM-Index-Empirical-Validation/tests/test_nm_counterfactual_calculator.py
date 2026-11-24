@@ -222,7 +222,8 @@ class NMEquationTests(unittest.TestCase):
         scenarios, baselines = run_author_graph('TEST_A', graph, frozen,
                                                 NMParameters(as_of_year=2025))
         combined = scenarios.set_index('scenario').loc['combined']
-        self.assertEqual(combined['status'], 'METHODOLOGY_PENDING')
+        # combined is now composed (gift -> salami -> self); without inputs it is input-gated
+        self.assertEqual(combined['status'], 'INPUT_DATA_REQUIRED')
         self.assertTrue(pd.isna(combined['manipulated_nm_percentile']))
         self.assertFalse(pd.isna(combined['original_nm_percentile']))
         self.assertTrue(baselines.loc[baselines.scenario.eq('combined'), 'status']
@@ -236,9 +237,9 @@ class NMEquationTests(unittest.TestCase):
         output = result['gaming_resistance']
         self.assertEqual(output.groupby('author_id').size().to_dict(), {'TEST_A': 4, 'TEST_B': 4})
         self.assertTrue(output.loc[output.scenario.eq('combined'), 'status']
-                        .eq('METHODOLOGY_PENDING').all())
+                        .isin(['OK', 'INPUT_DATA_REQUIRED']).all())
         self.assertEqual(result['status'].iloc[0]['status'], 'INPUT_DATA_REQUIRED')
-        self.assertIn('combined', result['status'].iloc[0]['issue'])
+        self.assertIn('graph evidence', result['status'].iloc[0]['issue'])
 
     def test_local_bundle_loader_uses_fixed_ids_and_no_database(self):
         papers, edges, frozen = fixture()

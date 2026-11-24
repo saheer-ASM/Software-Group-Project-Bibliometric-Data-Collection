@@ -211,9 +211,8 @@ def calculate_nm(author_id, papers, edges, frozen, *, career_start_year, paramet
         citing = grouped.get(paper.pub_id, edges.iloc[0:0])
         if len(citing) != paper.total_citation:
             raise MethodologyInputRequired(f'Citation edges do not equal raw count for {paper.pub_id}')
-        age = parameters.as_of_year-paper.year
-        if age <= 0:
-            raise MethodologyInputRequired('Equation 14 publication age is zero; as-of convention required')
+        # same as the production pipeline (Eq 14): y = MAX(1, as_of - year)
+        age = max(1, parameters.as_of_year-paper.year)
         for field, field_weight in paper.field_weights.items():
             if field_weight == 0:
                 continue

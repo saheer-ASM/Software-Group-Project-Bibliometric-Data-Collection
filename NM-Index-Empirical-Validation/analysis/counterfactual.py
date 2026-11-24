@@ -21,6 +21,11 @@ BENCHMARK_TABLES = ('field_year_means', 'field_caps', 'z_means',
                     'z_standard_deviations', 'percentile_reference')
 
 
+
+def round_half_up(value):
+    """Nearest whole number, halves rounded up, at least 1."""
+    return max(1, int(value + 0.5))
+
 @dataclass(frozen=True)
 class FrozenBenchmarks:
     version: str
@@ -85,9 +90,8 @@ def add_self_citation_relationships(papers, edges, additions, *, target_author,
         raise MethodologyInputRequired('New citing papers need all original paper metadata')
     if 'citation_id' in edges and 'citation_id' not in additions:
         raise MethodologyInputRequired('New citation edges need unique citation_id values')
-    expected = original_self_citation_count * .5
-    if expected != int(expected):
-        raise MethodologyInputRequired('Exact +50% count is fractional; rounding decision required')
+    # Author decision 2026-11-24: round half up, at least 1
+    expected = round_half_up(original_self_citation_count * .5)
     if len(additions) != expected:
         raise MethodologyInputRequired('Supplied citing relationships do not equal +50%')
     if ('citation_id' in edges and (additions.citation_id.isna().any()
@@ -150,19 +154,21 @@ def split_salami_papers(papers, edges, split_assignments, *, target_pub_ids):
     new_edges = edges.loc[~edges.cited_pub_id.isin(selected)].copy(deep=True)
     for row in papers.loc[papers.pub_id.isin(selected)].itertuples(index=False):
         old_edges = affected.loc[affected.cited_pub_id.eq(row.pub_id)].copy()
-        if len(old_edges) != row.total_citation or len(old_edges) % 2:
-            raise MethodologyInputRequired('Half-citation split needs complete even-count edge evidence')
+        if len(old_edges) != row.total_citation:
+            raise MethodologyInputRequired('Half-citation split needs complete edge evidence')
         assigned = old_edges.citation_id.map(assignment.half)
-        if len(old_edges) and assigned.value_counts().to_dict() != {
-                1: len(old_edges)//2, 2: len(old_edges)//2}:
-            raise MethodologyInputRequired('Citation halves must contain equal edge counts')
+        # odd counts: half 1 gets the extra citation (ceil / floor), decision 2026-11-24
+        n = len(old_edges)
+        if n and assigned.value_counts().reindex([1, 2], fill_value=0).to_dict() != {
+                1: n - n//2, 2: n//2}:
+            raise MethodologyInputRequired('Citation halves must be ceil/floor of the edge count')
         for half in (1, 2):
             new_id = f'{row.pub_id}__SPLIT_{half}'
             if new_id in set(papers.pub_id):
                 raise ValueError('Split paper ID collision')
             copy = papers.loc[papers.pub_id.eq(row.pub_id)].copy(deep=True)
             copy['pub_id'] = new_id
-            copy['total_citation'] = row.total_citation/2
+            copy['total_citation'] = int(assigned.eq(half).sum())
             new_papers = pd.concat([new_papers, copy], ignore_index=True)
             links = old_edges.loc[assigned.eq(half)].copy()
             links['cited_pub_id'] = new_id
@@ -183,9 +189,7 @@ def add_gift_authorship(papers, assignments, *, target_author, target_portfolio_
         raise MethodologyInputRequired('Gift scenario needs full paper metadata')
     if not {'pub_id', 'position'} <= set(assignments):
         raise MethodologyInputRequired('Gift papers and middle positions must be supplied')
-    count = .3*len(set(target_portfolio_ids))
-    if count != int(count):
-        raise MethodologyInputRequired('30% of portfolio is fractional; rounding decision required')
+    count = round_half_up(.3*len(set(target_portfolio_ids)))   # decision 2026-11-24
     if len(assignments) != count or assignments.pub_id.duplicated().any():
         raise MethodologyInputRequired('Exactly 30% distinct additional papers required')
     original = papers.copy(deep=True)

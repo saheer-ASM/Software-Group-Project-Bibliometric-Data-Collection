@@ -48,6 +48,8 @@ def run(dataset, comparators, *, paper_inputs=None, frozen_benchmarks=None,
                     benchmark_sha256=frozen_benchmarks.sha256)
                     for scenario in GRAPH_SCENARIOS)
                 combined, combined_baselines = combined_rows(author, frozen_benchmarks)
+                combined.update(status='INPUT_DATA_REQUIRED',
+                                exclusion_reason='Complete original graph absent for selected author')
                 rows.append(combined)
                 index_rows.extend(combined_baselines)
                 continue
@@ -56,20 +58,16 @@ def run(dataset, comparators, *, paper_inputs=None, frozen_benchmarks=None,
             rows.extend(scenario_frame.to_dict('records'))
             index_rows.extend(baseline_frame.to_dict('records'))
         frame = pd.DataFrame(rows)
-        # Status of the three approved scenarios; the combined row is pending by definition.
-        approved = frame.loc[frame.scenario.ne(COMBINED_SCENARIO)] if len(frame) else frame
-        states = set(approved.status) if len(approved) else set()
+        # All four scenarios, incl. combined (gift -> salami -> self, decision 2026-11-24).
+        states = set(frame.status) if len(frame) else set()
         if states == {'OK'}:
-            status = 'METHODOLOGY_PENDING'
-            issue = 'Three approved scenarios recalculated; combined manipulation not approved'
+            status, issue = 'OK', 'All four gaming scenarios recalculated'
         elif 'INPUT_DATA_REQUIRED' in states:
             status = 'INPUT_DATA_REQUIRED'
-            issue = ('At least one selected author/scenario lacks complete graph evidence; '
-                     'combined manipulation not approved')
+            issue = 'At least one selected author/scenario lacks complete graph evidence'
         else:
             status = 'NOT_APPLICABLE'
-            issue = ('At least one scenario has a zero or invalid original percentile; '
-                     'combined manipulation not approved')
+            issue = 'At least one scenario has a zero or invalid original percentile'
         return {'gaming_resistance': frame,
                 'gaming_index_inflation': pd.DataFrame(index_rows),
                 'status': pd.DataFrame([dict(status=status, issue=issue)])}

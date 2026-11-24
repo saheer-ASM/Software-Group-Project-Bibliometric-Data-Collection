@@ -166,7 +166,42 @@ def run_author_graph(author_id, graph, frozen, parameters):
                 nm_inflation_percent=float('nan'), benchmark_version=frozen.version,
                 benchmark_sha256=frozen.sha256, status='INPUT_DATA_REQUIRED',
                 exclusion_reason=str(error)))
-    combined, combined_baselines = combined_rows(author_id, frozen, original)
-    scenario_rows.append(combined)
-    baseline_rows.extend(combined_baselines)
+    # Combined (author decision 2026-11-24): gift -> salami -> self-citation,
+    # each applied to the result of the previous one.
+    try:
+        if (graph.gift_assignments is None or graph.salami_assignments is None
+                or graph.self_additions is None or graph.original_self_citation_count is None
+                or graph.relevant_core_authors is None):
+            raise MethodologyInputRequired('All three scenario inputs are required for the combined row')
+        papers_c = add_gift_authorship(original_papers, graph.gift_assignments,
+                                       target_author=author_id, target_portfolio_ids=target_ids)
+        targets_c = [r.pub_id for r in papers_c.itertuples(index=False) if author_id in r.authors]
+        papers_c, edges_c = split_salami_papers(papers_c, original_edges, graph.salami_assignments,
+                                                target_pub_ids=targets_c)
+        additions = graph.self_additions.copy(deep=True)
+        split_ids = set(papers_c.pub_id)
+        additions['cited_pub_id'] = [q if q in split_ids else f'{q}__SPLIT_1'
+                                     for q in additions.cited_pub_id]
+        papers_c, edges_c = add_self_citation_relationships(
+            papers_c, edges_c, additions, target_author=author_id,
+            relevant_core_authors=graph.relevant_core_authors,
+            original_self_citation_count=graph.original_self_citation_count)
+        changed = calculate_nm(author_id, papers_c, edges_c, frozen,
+                               career_start_year=graph.career_start_year, parameters=parameters,
+                               counterfactual=True)
+        inflation = percentile_inflation(original['nm_percentile'], changed['nm_percentile'])
+        scenario_rows.append(dict(author_id=author_id, scenario=COMBINED_SCENARIO,
+            original_nm_index=original['nm_index'], manipulated_nm_index=changed['nm_index'],
+            original_nm_percentile=original['nm_percentile'],
+            manipulated_nm_percentile=changed['nm_percentile'],
+            nm_inflation_percent=inflation['inflation_percent'],
+            benchmark_version=frozen.version, benchmark_sha256=frozen.sha256,
+            status=inflation['status'], exclusion_reason=inflation['reason']))
+        baseline_rows.extend(_baseline_rows(author_id, COMBINED_SCENARIO, original_papers,
+                                            papers_c, frozen))
+    except MethodologyInputRequired as error:
+        combined, combined_baselines = combined_rows(author_id, frozen, original)
+        combined.update(status='INPUT_DATA_REQUIRED', exclusion_reason=str(error))
+        scenario_rows.append(combined)
+        baseline_rows.extend(combined_baselines)
     return pd.DataFrame(scenario_rows), pd.DataFrame(baseline_rows)
