@@ -39,7 +39,7 @@ DOMAIN_BANDS = ('Main domain ≥90%', '90%≥ Main domain >80%',
     '80%≥ Main domain >70%', '70%≥ Main domain >60%',
     '60%≥ Main domain >50%', '50%≥ Main domain >40%',
     '40%≥ Main domain >30%', '30%≥ Main domain >0%')
-CAREER_BANDS = ('t≤5', '5<t≤10', '15<t≤20', '20<t≤25',
+CAREER_BANDS = ('t≤5', '5<t≤10', '10<t≤15', '15<t≤20', '20<t≤25',
     '25<t≤30', '30<t≤35', '35<t≤40', '40<t≤45', '45<t≤50')
 
 
@@ -70,13 +70,7 @@ def _domain_band(value):
 def _career_band(value):
     if pd.isna(value) or value < 0:
         return None
-    for upper, label in zip((5, 10), CAREER_BANDS[:2]):
-        if value <= upper:
-            return label
-    # The source table has no 10<t<=15 category; keep that gap unclassified.
-    if value <= 15:
-        return None
-    for upper, label in zip((20, 25, 30, 35, 40, 45, 50), CAREER_BANDS[2:]):
+    for upper, label in zip((5, 10, 15, 20, 25, 30, 35, 40, 45, 50), CAREER_BANDS):
         if value <= upper:
             return label
     return None
@@ -109,7 +103,7 @@ def run(dataset, comparators, *, scenario_data=None, predictors=None, covariates
             dict(component='domain', authors=int(late.main_domain_band.isna().sum()),
                  reason='Main-domain percentage missing, zero, or outside (0,100]'),
             dict(component='career', authors=int(career.career_stage.isna().sum()),
-                 reason='Career years missing/outside table or in unspecified 10<t<=15 gap'),
+                 reason='Career years missing or outside the table'),
             dict(component='self_citation',
                  authors=int((~recent.isc_scenario.isin(ISC_SCENARIOS)).sum()),
                  reason='Observed label absent from six lecturer categories'),

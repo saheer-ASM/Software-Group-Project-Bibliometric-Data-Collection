@@ -12,6 +12,8 @@ Definitions chosen by the author (decision 2026-11-24):
   C   Ioannidis et al. (2016): six indicators NC, H, Hm, NCS (single-author
       papers), NCSF (single+first), NCSFL (single+first+last); each
       log(1+x) / max over the cohort of log(1+x); C = sum of the six.
+  Fi  Fiorillo (2024): Fi = h^2 / total citations * 100 (all citations,
+      self-citations included); values above 32 flag self-distorted profiles.
   C-SC Ioannidis et al. (2019): the same, with every self-citation (citing paper
       sharing ANY author with the cited paper) removed first.
 
@@ -101,7 +103,8 @@ def compute(papers: pd.DataFrame, *, as_of_year: int, self_citations: pd.DataFra
     if table.empty:
         return out
     table.index.name = 'author_id'
-    for name in ('hm_index', 'hf_index', 'm_index', 'ar_index'):
+    table['fi_score'] = np.where(table.nc > 0, table.h_index.astype(float) ** 2 / table.nc * 100, np.nan)
+    for name in ('hm_index', 'hf_index', 'm_index', 'ar_index', 'fi_score'):
         out[name] = table[name].astype('Float64').rename(name)
     out['c_score_raw'] = _composite(table).astype('Float64').rename('c_score_raw')
 
