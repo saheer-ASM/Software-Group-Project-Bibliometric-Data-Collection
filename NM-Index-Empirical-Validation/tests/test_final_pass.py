@@ -23,8 +23,8 @@ class FinalPassTests(unittest.TestCase):
         self.assertEqual(_domain_band(80), DOMAIN_BANDS[2])
         self.assertEqual(_domain_band(0), None)
         self.assertEqual(_career_band(10), CAREER_BANDS[1])
-        self.assertIsNone(_career_band(12))
-        self.assertEqual(_career_band(15.1), CAREER_BANDS[2])
+        self.assertEqual(_career_band(12), '10<t≤15')   # paper table now has this bin
+        self.assertEqual(_career_band(15.1), CAREER_BANDS[3])
         self.assertIsNone(_career_band(51))
 
     def test_rq5_tables_keep_all_explicit_rows(self):
@@ -38,7 +38,7 @@ class FinalPassTests(unittest.TestCase):
         self.assertEqual(len(out['self_citation_analysis']), 6)
         self.assertEqual(len(out['author_ordering_analysis']), 6)
         self.assertEqual(len(out['domain_sensitivity']), 8)
-        self.assertEqual(len(out['career_stage_analysis']), 9)
+        self.assertEqual(len(out['career_stage_analysis']), 10)
         self.assertEqual(out['career_stage_analysis'].iloc[0]['n'], 1)
         self.assertEqual(out['career_stage_analysis'].iloc[1]['status'], 'INPUT_DATA_REQUIRED')
 

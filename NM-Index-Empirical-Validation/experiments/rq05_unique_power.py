@@ -112,8 +112,19 @@ def run(dataset, comparators, *, scenario_data=None, predictors=None, covariates
                  reason='Observed label absent from six lecturer categories'),
         ]),
     }
-    outputs['unique_power_regression'] = (fit(recent, 'nm_index', predictors, covariates)
-        if predictors else pd.DataFrame([dict(status='METHODOLOGY_PENDING',
-                            issue='Prespecified regression predictors/covariates required')]))
-    outputs['status'] = pending('RQ5 observed category labels and regression predictors/covariates require supplied evidence and decisions')['status']
+    # Default model (author decision 2026-11-24): within each subgroup, Nm-index on
+    # the baselines, with career years and main-domain share as covariates; the
+    # unexplained R^2 is Nm's unique information.
+    if not predictors:
+        predictors = tuple(c for c in comparators if c in merged)
+        covariates = tuple(covariates) or ('career_years', 'main_domain_percentage')
+    fits = []
+    for name, frame in (('self_citation', recent), ('ordering', mid),
+                        ('domain', late), ('career', career)):
+        result = fit(frame, 'nm_index', predictors, covariates)
+        fits.append(result.assign(subgroup=name))
+    outputs['unique_power_regression'] = pd.concat(fits, ignore_index=True)
+    ran = outputs['unique_power_regression'].get('status', pd.Series()).eq('OK').any()
+    outputs['status'] = pending('Regression fitted with default predictors/covariates' if ran
+                                else 'Regression could not be fitted', 'OK' if ran else 'INSUFFICIENT_DATA')['status']
     return outputs

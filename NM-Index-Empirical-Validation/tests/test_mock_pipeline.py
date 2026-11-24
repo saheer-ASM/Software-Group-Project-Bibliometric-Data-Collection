@@ -99,7 +99,8 @@ class MockPipelineTests(unittest.TestCase):
                 self.assertEqual(gaming.benchmark_sha256.nunique(), 1)
                 self.assertTrue((output/'output_manifest.csv').is_file())
                 self.assertEqual(meta['frozen_benchmark']['original_author_count'], 12)
-                self.assertEqual(meta['experiment_status']['rq09'], 'METHODOLOGY_PENDING')
+                # V9 now uses all consecutive years and the cohort-size rank denominator
+                self.assertEqual(meta['experiment_status']['rq09'], 'OK_WITH_EXPLICIT_CONVENTION')
                 self.assertTrue(meta['figures'])
                 self.assertTrue(all((PROJECT_ROOT/relative).is_file() for relative in meta['figures']))
                 eligibility = pd.read_csv(output/'experiment_eligibility.csv')

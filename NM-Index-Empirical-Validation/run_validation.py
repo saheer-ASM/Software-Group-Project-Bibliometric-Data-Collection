@@ -33,7 +33,7 @@ def main(argv=None):
     parser.add_argument('--icc-model', choices=['ICC(A,1) two-way random absolute agreement'],
                         default='ICC(A,1) two-way random absolute agreement')
     parser.add_argument('--score-year', type=int, default=2019)
-    parser.add_argument('--first-year', type=int)
+    parser.add_argument('--first-year', type=int, help='V9: one year pair only (default: all consecutive years)')
     parser.add_argument('--rank-change-denominator', choices=['paired_cohort_size'],
                         default='paired_cohort_size')
     parser.add_argument('--pca-preprocessing', choices=['complete_case_z_standardization'],
@@ -110,7 +110,7 @@ def main(argv=None):
         from pathlib import Path as _P
         given = {item.split('=', 1)[0] for item in args.input}
         for kind in ('award_labels', 'subgroup_labels', 'scenario_data', 'future_outcomes',
-                     'historical_scores'):
+                     'historical_scores', 'annual_scores', 'reference_scores'):
             path = _P(args.inputs_dir) / f'{kind}.csv'
             if path.is_file() and kind not in given:
                 args.input.append(f'{kind}={path}')

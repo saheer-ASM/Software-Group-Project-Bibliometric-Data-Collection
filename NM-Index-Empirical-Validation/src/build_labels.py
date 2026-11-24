@@ -33,6 +33,7 @@ import pandas as pd
 
 AS_OF_DEFAULT = 2026
 SLOTS = range(1, 11)
+N_AUTHORS = ' + '.join(f'(author{i}id IS NOT NULL)' for i in range(1, 11))
 
 CONTINENT = {}
 for _cont, _codes in {
@@ -76,9 +77,10 @@ def authorship(conn, ids):
     parts = []
     for i in SLOTS:
         parts.append(f"SELECT author{i}id AS a, pub_id, {i} AS position, "
-                     f"author{i}id_weight AS w, author_ordering_norm AS norm "
+                     f"author{i}id_weight AS w, author_ordering_norm AS norm, {N_AUTHORS} AS n_authors "
                      f"FROM author_contribution_weight WHERE author{i}id IS NOT NULL")
-    sql = (f"SELECT t.a AS author_id, t.pub_id, t.position, t.w, t.norm, p.year "
+    sql = (f"SELECT t.a AS author_id, t.pub_id, t.position, t.w, t.norm, t.n_authors, "
+           f"p.year, p.total_citation "
            f"FROM ({' UNION ALL '.join(parts)}) t JOIN publication p ON p.pub_id = t.pub_id "
            f"WHERE t.{cond}")
     frame = q(conn, sql, params)
@@ -254,6 +256,32 @@ def scenario_data(conn, ids, links, as_of_year):
     return pd.DataFrame(rows)
 
 
+# ------------------------------------------------------------------ V1 / V4 reference
+def career_stage(years):
+    if pd.isna(years):
+        return None
+    return 'Early' if years <= 5 else 'Mid-Early' if years <= 15 else 'Mid-Late' if years <= 30 else 'Senior'
+
+
+def reference_scores(conn, ids, links, as_of_year, version):
+    """Frozen reference table: nm_index, c_score_raw, middle_author_share, career_stage."""
+    from metrics import standard
+    papers = links[['author_id', 'pub_id', 'position', 'n_authors', 'year', 'total_citation']]
+    c_score = standard.compute(papers, as_of_year=as_of_year).get('c_score_raw', pd.Series(dtype=float))
+    cond, params = in_ids('author_id', ids)
+    nm = q(conn, f"SELECT author_id, nm_index FROM author_nm_index WHERE {cond}", params)
+    middle = (links.assign(mid=(links.position > 1) & (links.position < links.n_authors))
+              .groupby('author_id').mid.mean())
+    first = pd.to_numeric(links.year, errors='coerce').groupby(links.author_id).min()
+    frame = nm.assign(
+        c_score_raw=nm.author_id.map(c_score),
+        middle_author_share=nm.author_id.map(middle),
+        career_stage=nm.author_id.map(lambda a: career_stage(as_of_year - first.get(a, np.nan))),
+        reference_version=version,
+        evidence_reference=f'openalex.db as of {as_of_year}; metrics.standard')
+    return frame.dropna(subset=['nm_index', 'c_score_raw', 'middle_author_share', 'career_stage'])
+
+
 # ------------------------------------------------------------------ RQ8
 def h_of(values):
     v = sorted(values, reverse=True)
@@ -303,6 +331,7 @@ def main():
     parser.add_argument('--score-year', type=int, default=2019)
     parser.add_argument('--historical-db', help='snapshot DB after running the pipeline at --score-year')
     parser.add_argument('--no-wikidata', action='store_true')
+    parser.add_argument('--reference-version', default='openalex-100k-v1')
     args = parser.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -316,6 +345,8 @@ def main():
     scenario_data(conn, ids, links, args.as_of_year).to_csv(out / 'scenario_data.csv', index=False)
     future_outcomes(conn, ids, links, args.score_year,
                     award_years(args.laureates)).to_csv(out / 'future_outcomes.csv', index=False)
+    reference_scores(conn, ids, links, args.as_of_year,
+                     args.reference_version).to_csv(out / 'reference_scores.csv', index=False)
     if args.historical_db:
         historical_scores(args.historical_db, ids, args.score_year).to_csv(
             out / 'historical_scores.csv', index=False)
