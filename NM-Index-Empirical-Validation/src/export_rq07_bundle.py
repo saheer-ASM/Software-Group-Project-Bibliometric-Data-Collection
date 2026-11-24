@@ -31,8 +31,15 @@ import math
 import sqlite3
 from pathlib import Path
 
+import sys
+
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'OpenAlex_Data_Collection'
+                       / 'author_contribution_local'))
+from explicit_contribution import (CREDIT_ROLES, EQUAL_ROLE_WEIGHT, aci_shares,  # noqa: E402
+                                   core_positions, credit_shares, normalise_role)
 
 SLOTS = [f'author{i}id' for i in range(1, 11)]
 COMPONENT_SOURCES = {
@@ -76,6 +83,15 @@ def paper_rows(conn, pub_ids):
     fld = in_list(conn, "SELECT pub_id, field1_name, field1_weight, field2_name, field2_weight, "
                         "field3_name, field3_weight FROM field_classification", 'pub_id', pub_ids)
     frame = pub.merge(acw, on='pub_id', how='inner').merge(fld, on='pub_id', how='inner')
+    stmts = {}
+    has_stmt = conn.execute("SELECT 1 FROM sqlite_master WHERE name = "
+                            "'author_contribution_statement'").fetchone()
+    if has_stmt:
+        st = in_list(conn, "SELECT pub_id, position, aci_share, credit_roles, equal_contrib "
+                           "FROM author_contribution_statement", 'pub_id', pub_ids)
+        for r in st.itertuples(index=False):
+            stmts.setdefault(r.pub_id, {})[int(r.position)] = dict(
+                aci_share=r.aci_share, credit_roles=r.credit_roles, equal_contrib=r.equal_contrib)
     out = []
     for r in frame.itertuples(index=False):
         authors = [a for a in (getattr(r, s) for s in SLOTS) if a]
@@ -88,19 +104,37 @@ def paper_rows(conn, pub_ids):
         total = sum(weights.values())
         if not authors or total <= 0 or pd.isna(r.year):
             continue
-        out.append(dict(pub_id=r.pub_id, authors=authors, year=int(r.year),
-                        field_weights={k: v / total for k, v in weights.items()},
-                        contribution_mode='uniform' if r.author_ordering_norm == 'alphabetical' else 'relative',
-                        total_citation=int(r.total_citation or 0)))
+        row = dict(pub_id=r.pub_id, authors=authors, year=int(r.year),
+                   field_weights={k: v / total for k, v in weights.items()},
+                   contribution_mode='uniform' if r.author_ordering_norm == 'alphabetical' else 'relative',
+                   total_citation=int(r.total_citation or 0))
+        # same model choice as the production weights (Eq 2, 4-6)
+        st = stmts.get(r.pub_id, {})
+        n = len(authors)
+        aci = aci_shares(st, n)
+        credit = None if aci else credit_shares(st, n)
+        if r.author_ordering_norm == 'explicit_aci' and aci:
+            row.update(contribution_mode='aci', aci_shares=dict(zip(authors, aci)))
+        elif r.author_ordering_norm == 'explicit_credit' and credit:
+            roles = {a: sorted({normalise_role(x) for x in json.loads(st[i + 1]['credit_roles'])} - {None})
+                     for i, a in enumerate(authors)}
+            row.update(contribution_mode='credit', credit_roles=roles,
+                       credit_role_weights={role: EQUAL_ROLE_WEIGHT for role in CREDIT_ROLES})
+        elif row['contribution_mode'] == 'relative':
+            first, last = core_positions(st, n)
+            row.update(first_positions=first or [], last_positions=last or [])
+        out.append(row)
     return pd.DataFrame(out)
 
 
 def write_papers(path, frame, extra_cols=()):
     frame = frame.copy()
-    for col in ('authors', 'field_weights'):
-        frame[col] = frame[col].map(json.dumps)
+    optional = [c for c in ('first_positions', 'last_positions', 'aci_shares',
+                            'credit_roles', 'credit_role_weights') if c in frame]
+    for col in ('authors', 'field_weights', *optional):
+        frame[col] = frame[col].map(lambda v: json.dumps(v) if isinstance(v, (list, dict)) else None)
     cols = ['pub_id', 'authors', 'year', 'field_weights', 'contribution_mode',
-            'total_citation', *extra_cols]
+            'total_citation', *optional, *extra_cols]
     frame.reindex(columns=cols).to_csv(path, index=False)
 
 
@@ -185,7 +219,12 @@ def author_graph(conn, author, out_root, as_of_year, latest_year=None):
     folder.mkdir(parents=True, exist_ok=True)
     write_papers(folder / 'papers.csv', papers)
     edges[['citation_id', 'cited_pub_id', 'citing_pub_id']].to_csv(folder / 'citation_edges.csv', index=False)
-    write_papers(folder / 'self_additions.csv', pd.DataFrame(additions), ('citation_id', 'cited_pub_id'))
+    additions = pd.DataFrame(additions)
+    for col in ('first_positions', 'last_positions', 'aci_shares', 'credit_roles',
+                'credit_role_weights'):
+        if col in papers and col not in additions:
+            additions[col] = [[] if col.endswith('positions') else None] * len(additions)
+    write_papers(folder / 'self_additions.csv', additions, ('citation_id', 'cited_pub_id'))
     salami.to_csv(folder / 'salami_assignments.csv', index=False)
     pd.DataFrame(gift_rows, columns=['pub_id', 'position']).to_csv(folder / 'gift_assignments.csv', index=False)
     (folder / 'self_metadata.json').write_text(json.dumps(dict(

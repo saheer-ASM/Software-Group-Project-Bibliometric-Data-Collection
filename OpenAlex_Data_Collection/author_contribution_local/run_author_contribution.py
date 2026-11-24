@@ -44,6 +44,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "database"))
 
 from db import DB_PATH, get_conn                          # noqa: E402
 from author_contribution_calculator import AuthorContributionCalculator  # noqa: E402
+from explicit_contribution import (aci_shares, core_positions, credit_shares,  # noqa: E402
+                                   fetch_statements)
 
 DEFAULT_BATCH = 2000
 SQL_IN_CHUNK = 500       # ids per "IN (...)" query
@@ -135,7 +137,7 @@ def main():
     processed = no_authors = no_fields = 0
     seen = 0
     last_rowid = 0
-    norms = {"alphabetical": 0, "relative": 0}
+    norms = {"alphabetical": 0, "relative": 0, "explicit_aci": 0, "explicit_credit": 0}
 
     while True:
         want = args.batch_size if not args.limit else min(args.batch_size,
@@ -151,6 +153,7 @@ def main():
         all_ids = {a for r in rows for a in r[2:] if a is not None}
         names = fetch_names(conn, all_ids)
         fields_by_pub = fetch_fields(conn, [r[1] for r in rows])
+        statements = fetch_statements(conn, [r[1] for r in rows])
 
         updates = []
         for row in rows:
@@ -170,19 +173,33 @@ def main():
             # which breaks Lemma 5/6 of the paper). Here the weights are taken BY POSITION
             # from the unchanged calculator methods, so every author id keeps its own share.
             # The ordering norm is detected exactly as before (from the names that exist).
-            author_names = [names[a] for a in author_ids if names.get(a)]
-            ordering = calculator.detect_ordering_norm(author_names, pub_id)
             n_authors = len(author_ids)
             by_position = [0.0] * n_authors
-            for field, field_weight in fields.items():
-                if ordering == "alphabetical":
-                    per_position = calculator.calculate_alphabetical_weights(
-                        pub_id, field, field_weight, n_authors)
-                else:
-                    per_position = calculator.calculate_relative_weights(
-                        pub_id, field, field_weight, n_authors)
-                for position, value in per_position.items():
-                    by_position[position - 1] += value
+            stmt = statements.get(pub_id, {})
+            # Eq 6: explicit contribution (gamma) first: ACI (delta), then CRediT (phi)
+            explicit = aci_shares(stmt, n_authors)
+            ordering = "explicit_aci" if explicit else None
+            if explicit is None:
+                explicit = credit_shares(stmt, n_authors)
+                ordering = "explicit_credit" if explicit else None
+            if explicit is not None:
+                for field_weight in fields.values():                 # Eq 4 / Eq 5
+                    for k, share in enumerate(explicit):
+                        by_position[k] += field_weight * share
+            else:
+                author_names = [names[a] for a in author_ids if names.get(a)]
+                ordering = calculator.detect_ordering_norm(author_names, pub_id)
+                core_first, core_last = core_positions(stmt, n_authors)   # Eq 2
+                for field, field_weight in fields.items():
+                    if ordering == "alphabetical":
+                        per_position = calculator.calculate_alphabetical_weights(
+                            pub_id, field, field_weight, n_authors)
+                    else:
+                        per_position = calculator.calculate_relative_weights(
+                            pub_id, field, field_weight, n_authors,
+                            core_first_indices=core_first, core_last_indices=core_last)
+                    for position, value in per_position.items():
+                        by_position[position - 1] += value
 
             result = {"ordering_norm": ordering}
             weights = by_position + [None] * (10 - n_authors)
@@ -206,7 +223,8 @@ def main():
     overall = done_before + (0 if args.dry_run else processed)
     print("\n--- summary ---")
     print(f"publications calculated this run: {processed:,} "
-          f"(alphabetical {norms['alphabetical']:,}, relative {norms['relative']:,})")
+          f"(alphabetical {norms['alphabetical']:,}, relative {norms['relative']:,}, "
+          f"ACI {norms['explicit_aci']:,}, CRediT {norms['explicit_credit']:,})")
     print(f"skipped, no authors:              {no_authors:,}")
     print(f"skipped, no field classification: {no_fields:,}")
     print(f"Overall: {overall:,} done / {total:,} total "
