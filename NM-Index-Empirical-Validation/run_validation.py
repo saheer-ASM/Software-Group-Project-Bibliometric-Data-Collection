@@ -26,11 +26,13 @@ def main(argv=None):
                              'use only with lecturer approval')
     parser.add_argument('--pilot-design-reference',
                         help='pilot only: documented approval of selected cohort and reduced sample scope')
+    parser.add_argument('--inputs-dir', help='folder with <kind>.csv label files (from src.build_labels); '
+                        'each known file is added as --input <kind>=<file>')
     parser.add_argument('--input', action='append', default=[], metavar='KIND=CSV',
                         help='local research CSV, e.g. award_labels=inputs/award_labels.csv; repeatable')
     parser.add_argument('--icc-model', choices=['ICC(A,1) two-way random absolute agreement'],
                         default='ICC(A,1) two-way random absolute agreement')
-    parser.add_argument('--score-year', type=int)
+    parser.add_argument('--score-year', type=int, default=2019)
     parser.add_argument('--first-year', type=int)
     parser.add_argument('--rank-change-denominator', choices=['paired_cohort_size'],
                         default='paired_cohort_size')
@@ -44,16 +46,17 @@ def main(argv=None):
     parser.add_argument('--gaming-fractional-policy', choices=['preserve_fractional_counts'])
     parser.add_argument('--gaming-decision-reference')
     parser.add_argument('--group-column')
-    parser.add_argument('--fairness-cohen-d', choices=['pooled_sample_sd'])
-    parser.add_argument('--fairness-variance-ddof', type=int, choices=[0, 1])
-    parser.add_argument('--fairness-decision-reference')
+    parser.add_argument('--fairness-cohen-d', choices=['pooled_sample_sd'], default='pooled_sample_sd')
+    parser.add_argument('--fairness-variance-ddof', type=int, choices=[0, 1], default=1)
+    parser.add_argument('--fairness-decision-reference', default='Author decision 2026-11-24: pooled-SD d, ddof 1')
     parser.add_argument('--database-ready-reference',
                         help='documented approval of complete cohort/data population; required before DB connection')
     parser.add_argument('--citation-source-reference',
                         help='documented approval of raw citation source; required before DB connection')
     parser.add_argument('--award-inference-convention', choices=['welch_two_sided_pooled_d'],
+                        default='welch_two_sided_pooled_d',
                         help='RQ4 only: explicitly approved independent-group test and effect convention')
-    parser.add_argument('--award-inference-reference',
+    parser.add_argument('--award-inference-reference', default='Author decision 2026-11-24: Welch two-sided, pooled d',
                         help='RQ4 only: lecturer/research-team approval reference for inference convention')
     parser.add_argument('--predictors', help='comma-separated prespecified RQ5 predictors')
     parser.add_argument('--covariates', help='comma-separated prespecified RQ5 covariates')
@@ -103,6 +106,14 @@ def main(argv=None):
             parser.error('Fairness convention requires all three --fairness-* options')
         from analysis.fairness import FairnessConvention
         extra['fairness_convention'] = FairnessConvention(*choices)
+    if args.inputs_dir:
+        from pathlib import Path as _P
+        given = {item.split('=', 1)[0] for item in args.input}
+        for kind in ('award_labels', 'subgroup_labels', 'scenario_data', 'future_outcomes',
+                     'historical_scores'):
+            path = _P(args.inputs_dir) / f'{kind}.csv'
+            if path.is_file() and kind not in given:
+                args.input.append(f'{kind}={path}')
     for item in args.input:
         if '=' not in item:
             parser.error('--input must be KIND=CSV')
