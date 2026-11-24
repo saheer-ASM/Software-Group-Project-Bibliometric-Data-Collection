@@ -75,7 +75,7 @@ class MockPipelineTests(unittest.TestCase):
                 self.assertEqual(dataset.author_id.nunique(), 12)
                 self.assertTrue(dataset.eligible_for_validation.all())
                 self.assertTrue(dataset.data_classification.eq(LABEL).all())
-                self.assertTrue(dataset.c_score_raw.isna().all())
+                self.assertTrue(dataset.c_score_raw.notna().all())   # standard Ioannidis C-score
                 self.assertTrue(dataset.hf_index.notna().all())
                 self.assertEqual(dataset.data_provenance.unique().tolist(), ['SYNTHETIC_TEST_DATA'])
                 self.assertTrue((output/'correlation_stats.csv').is_file())

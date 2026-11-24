@@ -102,7 +102,8 @@ class FinalPassTests(unittest.TestCase):
                 source_kind='SUPPLIED_DATAFRAMES')
             without = run_from_extracts(extracts, extra_inputs={
                 'portfolio_verification': verified}, **kwargs)
-            self.assertTrue(pd.isna(pd.read_csv(without/'validation_dataset.csv').iloc[0].hf_index))
+            # without verified counts, hf now falls back to the stored author slots
+            self.assertTrue(pd.notna(pd.read_csv(without/'validation_dataset.csv').iloc[0].hf_index))
             with_counts = run_from_extracts(extracts, extra_inputs={
                 'portfolio_verification': verified, 'coauthor_counts': counts}, **kwargs)
             self.assertEqual(pd.read_csv(with_counts/'validation_dataset.csv').iloc[0].hf_index, 4)

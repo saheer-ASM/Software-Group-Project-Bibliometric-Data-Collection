@@ -245,6 +245,18 @@ def run_from_extracts(extracts: Extracts, *, experiment_names=(), settings=None,
                 .merge(supplied[['pub_id', 'coauthor_count']], on='pub_id',
                        how='left', validate='many_to_one'))
             metrics['hf_index'] = hf_index.calculate(papers, verified_authorship=True)
+    # Standard comparison indices (metrics/standard.py)
+    from metrics import standard
+    auth = extracts.authorship.copy()
+    if 'n_authors' not in auth:
+        auth['n_authors'] = auth[[c for c in (f'author{i}id' for i in range(1, 11)) if c in auth]].notna().sum(axis=1)
+    std_papers = (links.drop_duplicates(['author_id', 'pub_id'])[['author_id', 'pub_id', 'position']]
+        .merge(extracts.publications[['pub_id', 'year', 'total_citation']], on='pub_id', how='left')
+        .merge(auth[['pub_id', 'n_authors']].drop_duplicates('pub_id'), on='pub_id', how='left'))
+    std = standard.compute(std_papers, as_of_year=int((extra_inputs or {}).get('as_of_year', 2026)),
+                           self_citations=getattr(extracts, 'self_citations', None))
+    for name, values in std.items():
+        metrics.setdefault(name, values)
     if metric_strategies:
         metrics.update(_apply_metric_strategies(extracts, links, metrics, metric_strategies))
     rules = EligibilityRules(min_publications=settings.min_publications,

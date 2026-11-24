@@ -80,6 +80,8 @@ class Extracts:
     fields: pd.DataFrame
     nm: pd.DataFrame
     components: pd.DataFrame | None = None
+    # (pub_id, author_id, self_cites, any_overlap_cites) from the ISC table
+    self_citations: pd.DataFrame | None = None
 
 
 def verify_schema(schema_rows=None):
@@ -134,7 +136,8 @@ def load_selected_author_ids(author_ids, *, batch=_columnar_batch):
             not isinstance(value, str) or not value.strip() or value.startswith('TEST_')
             for value in ids):
         raise ValueError('Cohort requires unique, nonempty, real stable author IDs')
-    base = _queries(verify_schema())
+    visible = verify_schema()
+    base = _queries(visible)
     # Each list binds as ONE value (PostgreSQL array; SQLite json_each), so the
     # cohort size is not limited by the database's bind-parameter limit.
     selected = 'author_id = ANY(%s)'
@@ -156,8 +159,14 @@ def load_selected_author_ids(author_ids, *, batch=_columnar_batch):
                  'component_hm', 'component_g'):
         queries[name] = (base[name].replace(' ORDER BY author_id',
                                                f' WHERE {selected} ORDER BY author_id'), author_params)
+    if ('influential_self_citations', 'self_influence_sum') in visible:
+        queries['sc_any'] = ('SELECT cited_pub_id AS pub_id, target_author_id AS author_id, count(DISTINCT citing_pub_id) AS any_overlap_cites FROM public.influential_self_citations WHERE target_author_id = ANY(%s) GROUP BY cited_pub_id, target_author_id', (list(ids),))
+        queries['sc_own'] = ('SELECT cited_pub_id AS pub_id, target_author_id AS author_id, count(DISTINCT citing_pub_id) AS self_cites FROM public.influential_self_citations WHERE target_author_id = ANY(%s) AND self_influence_sum > 0 GROUP BY cited_pub_id, target_author_id', (list(ids),))
     records = batch(queries)
     extracts = _assemble(records)
+    # true author count per paper (all slots), before other authors are masked
+    slots = [c for c in (f'author{i}id' for i in range(1, 11)) if c in extracts.authorship]
+    extracts.authorship['n_authors'] = extracts.authorship[slots].notna().sum(axis=1)
     if set(extracts.authors.author_id.astype(str)) != set(ids):
         raise ValueError('DATA_REQUIRED: at least one selected author ID is absent from the database')
     for position in range(1, 11):
@@ -169,6 +178,8 @@ def load_selected_author_ids(author_ids, *, batch=_columnar_batch):
 
 
 def _assemble(records):
+    records = dict(records)
+    sc_any, sc_own = records.pop('sc_any', None), records.pop('sc_own', None)
     frames = {name: pd.DataFrame(rows) for name, rows in records.items()}
     for name, frame in frames.items():
         if frame.empty:
@@ -201,4 +212,12 @@ def _assemble(records):
         components = components.merge(source[['author_id', original, *flags]].rename(columns={original: renamed}),
                                       on='author_id', how='left', validate='one_to_one')
     frames['components'] = components
+    if sc_any is not None:
+        any_frame = pd.DataFrame(sc_any, columns=None)
+        own = pd.DataFrame(sc_own)
+        if any_frame.empty:
+            any_frame = pd.DataFrame(columns=['pub_id', 'author_id', 'any_overlap_cites'])
+        if own.empty:
+            own = pd.DataFrame(columns=['pub_id', 'author_id', 'self_cites'])
+        frames['self_citations'] = any_frame.merge(own, on=['pub_id', 'author_id'], how='left')
     return Extracts(**frames)
