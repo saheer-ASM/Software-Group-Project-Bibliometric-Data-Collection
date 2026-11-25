@@ -81,7 +81,7 @@ class NMEquationTests(unittest.TestCase):
     def test_original_graph_recalculates_six_components_and_freezes_reference(self):
         papers, edges, frozen = fixture()
         before = papers.copy(deep=True), edges.copy(deep=True)
-        parameters = NMParameters(as_of_year=2025)
+        parameters = NMParameters(as_of_year=2025, epsilon_0=.90, career_boost=1.25, career_decay=.0601)  # hand calc below uses these
         original = calculate_nm('TEST_A', papers, edges, frozen,
                                 career_start_year=2020, parameters=parameters)
         self.assertEqual(set(original['raw_components']), {'t','s','u','hf','hm','g'})

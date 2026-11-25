@@ -3,7 +3,7 @@
 SQLite port of  career-compentation/career-compentation.py  (cloud PostgreSQL).
 Same formula, same constants, same rules:
 
-    CF_com = C * (t + 1) ** (-lambda)            C = 1.25, lambda = 0.0601
+    CF_com = C * (t + 1) ** (-lambda)            C = 2.0, lambda = 0.15 (sensitivity analysis 2026-11-25)
     t      = AS_OF_YEAR - first_publication_year
     value  = round(CF_com, 4)
 
@@ -41,8 +41,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "database"))
 
 from db import DB_PATH, get_conn                          # noqa: E402
 
-C = 1.25                 # career boost at t = 0
-LAMBDA = 0.0601          # decay rate
+C = 2.0                  # career boost at t = 0 (sweep winner)
+LAMBDA = 0.15            # decay rate (sweep winner)
 DEFAULT_AS_OF_YEAR = 2026   # the cloud script hard-codes 2026
 WRITE_BATCH = 50_000
 

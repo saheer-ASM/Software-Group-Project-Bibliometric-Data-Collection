@@ -19,8 +19,8 @@ from typing import Sequence
 from .db_connection import get_connection
 
 
-DEFAULT_CAREER_BOOST = Decimal("1.25")
-DEFAULT_CAREER_DECAY = Decimal("0.0601")
+DEFAULT_CAREER_BOOST = Decimal("2.0")
+DEFAULT_CAREER_DECAY = Decimal("0.15")
 DEFAULT_DECIMAL_WEIGHT_TOLERANCE = Decimal("0.02")
 DEFAULT_PERCENT_WEIGHT_TOLERANCE = Decimal("2")
 

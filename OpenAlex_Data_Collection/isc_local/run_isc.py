@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS influential_self_citations (
     core_influence_sum           REAL NOT NULL DEFAULT 0,
     non_overlap_influence_sum    REAL NOT NULL DEFAULT 0,
     core_author_count            INTEGER NOT NULL DEFAULT 0,
-    epsilon_zero                 REAL NOT NULL DEFAULT 0.90,
+    epsilon_zero                 REAL NOT NULL DEFAULT 1.0,
     epsilon_value                REAL NOT NULL DEFAULT 0,
     isc_numerator                REAL NOT NULL,
     isc_denominator              REAL NOT NULL,
@@ -319,7 +319,7 @@ def main():
                         help="which authors of a cited paper are target authors")
     parser.add_argument("--redo", action="store_true",
                         help="recompute cited papers that already have rows")
-    parser.add_argument("--epsilon-zero", type=Decimal, default=Decimal("0.90"))
+    parser.add_argument("--epsilon-zero", type=Decimal, default=Decimal("1.0"))   # sweep winner
     parser.add_argument("--weight-tolerance", type=Decimal, default=Decimal("0.02"))
     args = parser.parse_args()
 

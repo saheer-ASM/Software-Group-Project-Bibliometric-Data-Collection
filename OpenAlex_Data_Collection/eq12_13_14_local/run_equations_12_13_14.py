@@ -19,7 +19,7 @@ from . import repository
 from .db_connection import get_connection
 from .db_setup import create_equation_12_13_14_tables
 
-DEFAULT_PERCENTILE_K = Decimal("99")
+DEFAULT_PERCENTILE_K = Decimal("99.9")   # sweep winner
 
 
 def parse_arguments():

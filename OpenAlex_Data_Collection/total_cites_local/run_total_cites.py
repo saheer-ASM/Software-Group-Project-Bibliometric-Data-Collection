@@ -54,14 +54,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--career-boost",
         type=decimal_argument,
-        default=Decimal("1.25"),
-        help="Equation 10 parameter C. Default: 1.25.",
+        default=Decimal("2.0"),
+        help="Equation 10 parameter C. Default: 2.0.",
     )
     parser.add_argument(
         "--career-decay",
         type=decimal_argument,
-        default=Decimal("0.0601"),
-        help="Equation 10 parameter lambda. Default: 0.0601.",
+        default=Decimal("0.15"),
+        help="Equation 10 parameter lambda. Default: 0.15.",
     )
 
     parser.add_argument(

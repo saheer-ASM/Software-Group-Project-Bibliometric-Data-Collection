@@ -28,8 +28,8 @@ class ParameterSensitivityTests(unittest.TestCase):
             inputs['frozen_benchmarks'], career_start_year=graph.career_start_year,
             parameters=inputs['nm_parameters'])
         base_rows = rows.loc[((rows.grid == 'career') &
-            (rows.career_boost == 1.25) & (rows.career_decay == .0601)) |
-            ((rows.grid == 'isc') & (rows.epsilon_0 == .90))]
+            (rows.career_boost == 2.0) & (rows.career_decay == .15)) |
+            ((rows.grid == 'isc') & (rows.epsilon_0 == 1.0))]
         self.assertEqual(len(base_rows), 2)
         self.assertTrue((base_rows.nm_index == baseline['nm_index']).all())
         pd.testing.assert_frame_equal(graph.papers, original_papers)

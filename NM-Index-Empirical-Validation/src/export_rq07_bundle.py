@@ -310,8 +310,8 @@ def main():
     done = [a for a in cohort if a in set(complete)
             and author_graph(conn, a, out_root, args.as_of_year, latest_year)]
     (out_root / 'metadata.json').write_text(json.dumps(dict(
-        version=args.version, as_of_year=args.as_of_year, epsilon_0=0.90,
-        career_boost=1.25, career_decay=0.0601, component_weights=[1 / 6] * 6), indent=2),
+        version=args.version, as_of_year=args.as_of_year, epsilon_0=1.0,
+        career_boost=2.0, career_decay=0.15, component_weights=[1 / 6] * 6), indent=2),
         encoding='utf-8')
     pd.DataFrame(dict(author_id=done)).to_csv(out_root / 'exported_authors.csv', index=False)
     print(f'reference authors: {len(complete):,}; graphs written: {len(done):,} -> {out_root}')

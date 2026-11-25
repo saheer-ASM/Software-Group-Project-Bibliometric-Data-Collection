@@ -45,7 +45,7 @@ class InfluentialSelfCitationCalculator:
         ),
         field_name: str,
         field_weight: Decimal | float | int | str,
-        epsilon_zero: Decimal | float | int | str = Decimal("0.90"),
+        epsilon_zero: Decimal | float | int | str = Decimal("1.0"),
         weight_tolerance: Decimal | float | int | str = Decimal("0.02"),
     ) -> ISCResult:
         """
@@ -449,7 +449,7 @@ def calculate_isc(
     ),
     field_name: str,
     field_weight: Decimal | float | int | str,
-    epsilon_zero: Decimal | float | int | str = Decimal("0.90"),
+    epsilon_zero: Decimal | float | int | str = Decimal("1.0"),
     weight_tolerance: Decimal | float | int | str = Decimal("0.02"),
 ) -> ISCResult:
     """

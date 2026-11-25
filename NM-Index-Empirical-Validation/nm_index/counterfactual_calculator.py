@@ -23,10 +23,16 @@ COMPONENTS = ('t', 's', 'u', 'hf', 'hm', 'g')
 @dataclass(frozen=True)
 class NMParameters:
     as_of_year: int
-    epsilon_0: float = .90
-    career_boost: float = 1.25
-    career_decay: float = .0601
+    epsilon_0: float = 1.0          # sensitivity-sweep winners (2026-11-25)
+    career_boost: float = 2.0
+    career_decay: float = .15
     weights: tuple[float, ...] = (1/6,) * 6
+    # Ablation switches (all True = the full model)
+    use_isc: bool = True              # Eq 7-9: influential self-citation discount
+    use_contribution: bool = True     # Eq 1-6: author weights (False = full credit 1 per paper)
+    use_field_norm: bool = True       # Eq 11-14: field/year benchmarks (False = divide by 1)
+    use_cap: bool = True              # Eq 12: percentile cap
+    use_multifield: bool = True       # Eq 6/17: split a paper over its fields (False = main field only)
 
     def __post_init__(self):
         if (not isinstance(self.as_of_year, int) or not 1900 <= self.as_of_year <= 3000
@@ -197,6 +203,9 @@ def calculate_nm(author_id, papers, edges, frozen, *, career_start_year, paramet
             raise MethodologyInputRequired('Valid publication year and citation total required')
     if not set(edges.cited_pub_id) <= set(by_id) or not set(edges.citing_pub_id) <= set(by_id):
         raise MethodologyInputRequired('Every cited and citing paper must have complete metadata')
+    if not parameters.use_multifield:
+        by_id = {pid: row._replace(field_weights={max(row.field_weights, key=row.field_weights.get): 1.0})
+                 for pid, row in by_id.items()}
     portfolio = [row for row in by_id.values() if author_id in row.authors]
     if (not portfolio or not isinstance(career_start_year, int)
             or (not counterfactual and career_start_year > min(row.year for row in portfolio))
@@ -233,15 +242,21 @@ def calculate_nm(author_id, papers, edges, frozen, *, career_start_year, paramet
                 if denominator <= 0:
                     raise MethodologyInputRequired('ISC denominator is zero')
                 isc = (self_weight+parameters.epsilon_0*len(core)*core_weight)/denominator  # Equation 7
+                if not parameters.use_isc:
+                    isc = 0.
                 if not 0 <= isc <= 1+1e-9:
                     raise MethodologyInputRequired('ISC is outside [0,1]')
                 adjusted += 1-min(1., isc)  # Equations 8--9; one unit per edge
             mean_year = float(year_ref.at[(field, paper.year), 'mean_adjusted_citations'])
             mean_field = float(year_ref.at[(field, paper.year), 'field_mean_adjusted_citations'])
             cap = float(field_ref.at[field, 'cap'])
+            if not parameters.use_field_norm:
+                mean_year = mean_field = 1.
+            if not parameters.use_cap:
+                cap = float('inf')
             if min(mean_year, mean_field) <= 0 or cap < 0:
                 raise MethodologyInputRequired('Invalid original mean or cap')
-            weight = field_weight*shares[paper.pub_id][author_id]
+            weight = field_weight*(shares[paper.pub_id][author_id] if parameters.use_contribution else 1.)
             capped = min(adjusted, cap)  # Equation 12
             field_rows.append(dict(field=field, field_weight=field_weight, weight=weight,
                                    adjusted=adjusted, capped=capped, mean_year=mean_year,
@@ -273,7 +288,8 @@ def calculate_nm(author_id, papers, edges, frozen, *, career_start_year, paramet
                     cumulative_cites += value  # Equation 21
                     if cumulative_cites >= k*k:
                         field_score = k
-            denominator = float(field_ref.at[field, f'{metric}_reference'])
+            denominator = (float(field_ref.at[field, f'{metric}_reference'])
+                           if parameters.use_field_norm else 1.)
             if denominator <= 0:
                 raise MethodologyInputRequired(f'Original {metric} field reference must be positive')
             weighted += sum(r['field_weight'] for r in rows)*field_score/denominator
